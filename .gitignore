@@ -1,0 +1,6 @@
+tags
+*.o
+*.obj
+autoconf
+autoconf.h
+test
