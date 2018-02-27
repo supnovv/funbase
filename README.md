@@ -1,4 +1,4 @@
-# funbase
+# lnlylib
 
-A fun base for native development.
+A series of code libraries to speed up application development.
 
