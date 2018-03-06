@@ -3,7 +3,7 @@
 #include "plat/autoconf.h"
 #include "plat/prefix.h"
 
-#undef L_MAX_RWIO
+#undef L_MAX_IOSZ
 #undef L_MAX_UBYTE
 #undef L_MAX_SBYTE
 #undef L_MIN_SBYTE
@@ -17,7 +17,7 @@
 #undef L_MAX_LONG
 #undef L_MIN_LONG
 
-#define L_MAX_RWIO   (0x7fff0000) /* 2147418112 */
+#define L_MAX_IOSZ   (0x7fff0000) /* 2147418112 */
 #define L_MAX_UBYTE  ((l_byte)0xff) /* 255 */
 #define L_MAX_SBYTE  ((l_sbyte)0x7f) /* 127 */
 #define L_MIN_SBYTE  ((l_sbyte)-127-1) /* 128 0x80 */
