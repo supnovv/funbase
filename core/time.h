@@ -77,5 +77,11 @@ l_date_timezone(const l_date* d) {
   return (l_byte)((d->rest >> 21) & 0x1f);
 }
 
+L_EXTERN l_time l_system_time();
+L_EXTERN l_time l_mono_time();
+L_EXTERN l_date l_system_date();
+L_EXTERN l_date l_date_fromsecs(l_long utcsecs);
+L_EXTERN l_date l_date_fromtime(l_time utctime);
+
 #endif /* L_CORE_TIME_H */
 

@@ -1,4 +1,4 @@
-#include "core/string.h"
+#include "core/base.h"
 {
   /* sizeof array test */
   char s[] = "abc";
