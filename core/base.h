@@ -31,6 +31,11 @@
 #define L_MIN_LONG   ((l_long)-9223372036854775807-1) /* 9223372036854775808 0x8000000000000000 */
 #define L_MAX_IOSZ   (0x7fff0000) /* 2147418112 */
 
+#undef L_SUCCESS
+#undef L_ERROR
+#define L_SUCCESS (0)
+#define L_ERROR (-1)
+
 #undef L_MKSTR
 #undef L_X_MKSTR
 #undef L_FILE_LINE

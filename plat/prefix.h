@@ -63,7 +63,7 @@ TARGET_IPHONE_SIMULATOR 0        0        1 */
 
 #undef L_INLINE
 #undef L_EXTERN
-#undef L_THREADLOCAL
+#undef L_THREAD_LOCAL
 
 #define L_INLINE static
 
