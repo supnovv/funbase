@@ -15,5 +15,9 @@ typedef union {
   int index;
 } l_funcindex;
 
+typedef struct {
+  int n;
+} l_luatypenum;
+
 #endif /* L_CORE_LUA_STATE_H */
 
