@@ -121,7 +121,7 @@ luna_isnoneornil(l_luatypenum t) {
 }
 
 L_EXTERN l_luatypenum
-luna_nilval() {
+luna_nilvalue() {
   return (l_luatypenum){LUA_TNIL};
 }
 
@@ -457,4 +457,32 @@ luna_getcpath(lua_State* L) {
   return luna_getfield(L, package, "cpath");
 }
 
+static int
+l_cfuncforlua_searchandload(lua_State* L) {
+  int name_index = lua_gettop(L);
+  l_tableindex package = luna_gettable(L, "package");
+  l_stackindex lua_path = luna_getfield(L, package, "path");
+  l_funcindex search_func = luna_getfieldfunction(L, package, "searchpath");
+  lua_pushvalue(L, name_index);
+  lua_pushvalue(L, lua_path);
+  luna_call(L, search_func, 1); /* only get 1 result */
+  if (lua_isnil(L, lua_gettop(L))) return 1; /* return nil on the top */
+  luna_loadfilefromtop(L);
+  return 1;
+}
 
+L_EXTERN l_funcindex
+luna_searchandload(lua_State* L, const void* name) {
+  luaL_requiref(L, (const char*)name, l_cfuncforlua_searchandload, false);
+  return (l_funcindex){lua_gettop(L)};
+}
+
+L_EXTERN l_funcindex
+luna_loadfile(lua_State* L, const void* luafile) {
+
+}
+
+L_EXTERN l_funcindex
+luna_loadstring(lua_State* L, l_strn luacode) {
+
+}
