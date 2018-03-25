@@ -19,7 +19,7 @@ uses, and that are consequently included in its closure.
 */
 
 L_EXTERN void /* the env table is on the top [-1, +0, -] */
-lunar_setFuncEnv(lua_State* L, l_funcindex f) {
+luna_setfuncenv(lua_State* L, l_funcindex f) {
   if (lua_setupvalue(L, f.index, 1 /* the _ENV */)) return;
   l_loge_s("lua_setupvalue _ENV");
   lua_pop(L, 1);
@@ -42,86 +42,86 @@ Pushes onto the stack the global value, returns the type of the value.
 */
 
 L_EXTERN void /* [-1, +1, e] */
-lunar_setField(lua_State* L, l_tableindex t, const void* fieldname, l_stackindex s) {
+luna_setfield(lua_State* L, l_tableindex t, const void* fieldname, l_stackindex s) {
   lua_pushvalue(L, s.index);
   lua_setfield(L, t.index, (const char*)fieldname); /* will pop the top or raise error */
 }
 
 L_EXTERN void /* [-1, +1, e] */
-lunar_setFieldString(lua_State* L, l_tableindex t, const void* fieldname, l_strn strval) {
+luna_setfieldstring(lua_State* L, l_tableindex t, const void* fieldname, l_strn strval) {
   lua_pushlstring(L, (const char*)strval.start, (size_t)strval.len);
   lua_setfield(L, t.index, (const char*)fieldname); /* will pop the top or raise error */
 }
 
 L_EXTERN void /* [-1, +1, e] */
-lunar_setFieldInteger(lua_State* L, l_tableindex t, const void* fieldname, l_long intval) {
+luna_setfieldinteger(lua_State* L, l_tableindex t, const void* fieldname, l_long intval) {
   lua_pushinteger(L, (lua_Integer)intval);
   lua_setfield(L, t.index, (const char*)fieldname); /* will pop the top or raise error */
 }
 
 L_EXTERN void /* [-1, +1, e] */
-lunar_setGlobal(lua_State* L, const void* globalname, l_stackindex s) {
+luna_setglobal(lua_State* L, const void* globalname, l_stackindex s) {
   lua_pushvalue(L, s.index);
   lua_setglobal(L, (const char*)globalname);
 }
 
 L_EXTERN void /* [-1, +1, e] */
-lunar_setGlobalString(lua_State* L, const void* globalname, l_strn strval) {
+luna_setglobalstring(lua_State* L, const void* globalname, l_strn strval) {
   lua_pushlstring(L, (const char*)strval.start, (size_t)strval.len);
   lua_setglobal(L, (const char*)globalname);
 }
 
 L_EXTERN void /* [-1, +1, e] */
-lunar_setGlobalInteger(lua_State* L, const void* globalname, l_long intval) {
+luna_setglobalinteger(lua_State* L, const void* globalname, l_long intval) {
   lua_pushinteger(L, (lua_Integer)intval);
   lua_setglobal(L, (const char*)globalname);
 }
 
 L_EXTERN l_stackindex /* [-0, +1, e] */
-lunar_getGlobal(lua_State* L, const void* globalname) {
+luna_getglobal(lua_State* L, const void* globalname) {
   lua_getglobal(L, (const char*)globalname);
   return (l_stackindex){lua_gettop(L)};
 }
 
 L_EXTERN l_stackindex /* [-0, +1, e] */
-lunar_getGlobal2(lua_State* L, const void* globalname, l_luatypenum* t) {
+luna_getglobal2(lua_State* L, const void* globalname, l_luatypenum* t) {
   int type = lua_getglobal(L, (const char*)globalname);
   if (t) t.n = type;
   return (l_stackindex){lua_gettop(L)};
 }
 
 L_EXTERN l_tableindex /* [-0, +1, e] */
-lunar_getTable(lua_State* L, const void* globalname) {
+luna_gettable(lua_State* L, const void* globalname) {
   lua_getglobal(L, (const char*)globalname);
   return (l_tableindex){lua_gettop(L)};
 }
 
 L_EXTERN l_tableindex /* [-0, +1, e] */
-lunar_getTable2(lua_State* L, l_tableindex t, const void* fieldname) {
+luna_gettable2(lua_State* L, l_tableindex t, const void* fieldname) {
   lua_getfield(L, t.index, (const char*)fieldname);
   return (l_tableindex){lua_gettop(L)};
 }
 
 L_EXTERN l_stackindex /* [-0, +1, e] */
-lunar_getField(lua_State* L, l_tableindex t, const void* fieldname) {
+luna_getfield(lua_State* L, l_tableindex t, const void* fieldname) {
   lua_getfield(L, t.index, (const char*)fieldname);
   return (l_stackindex){lua_gettop(L)};
 }
 
 L_EXTERN l_stackindex /* [-0, +1, e] */
-lunar_getField2(lua_State* L, l_tableindex t, const void* fieldname, l_luatypenum* t) {
+luna_getfield2(lua_State* L, l_tableindex t, const void* fieldname, l_luatypenum* t) {
   int type = lua_getfield(L, t.index, (const char*)fieldname);
   if (t) t.n = type;
   return (l_stackindex){lua_gettop(L)};
 }
 
 L_EXTERN int
-lunar_isNoneOrNil(l_luatypenum t) {
+luna_isnoneornil(l_luatypenum t) {
   return (t.n == LUA_TNIL || t.n == LUA_TNONE);
 }
 
 L_EXTERN l_luatypenum
-lunar_nilval() {
+luna_nilval() {
   return (l_luatypenum){LUA_TNIL};
 }
 
@@ -142,20 +142,20 @@ Returns 1 if the value at the given index is a table, and o otherwise.
 */
 
 L_EXTERN l_tableindex /* push table on top and return the index */
-lunar_newTable(lua_State* L) {
+luna_newtable(lua_State* L) {
   lua_newtable(L);
   return (l_tableindex){lua_gettop(L)};
 }
 
 L_EXTERN l_tableindex /* push table on top and return the index */
-lunar_newTable2(lua_State* L, int nseq, int nrest) {
+luna_newtable2(lua_State* L, int nseq, int nrest) {
   lua_createtable(L, nseq, nrest);
   return (l_tableindex){lua_gettop(L)};
 }
 
 
 L_EXTERN lua_State*
-lunar_newState() {
+luna_newstate() {
   lua_State* L;
   
   if (!(L = luaL_newstate())) {
@@ -168,7 +168,7 @@ lunar_newState() {
 }
 
 L_EXTERN void
-lunar_freeState(lua_State* L) {
+luna_freestate(lua_State* L) {
   if (!L) return;
   l_luaextra_free(L);
   lua_close(L);
@@ -190,7 +190,7 @@ If index is 0, then all stack elements are removed.
 */
 
 L_EXTERN void /* remove stack elements to s, and s is also removed */
-lunar_popStackTo(lua_State* L, l_stackindex s) {
+luna_popstackto(lua_State* L, l_stackindex s) {
   int n = lua_gettop(L) - s.index + 1;
   if (n <= 0) return;
   lua_pop(L, n);
@@ -277,14 +277,14 @@ removed from the stack.
 */
 
 L_EXTERN l_long /* if top is an integer return it, otherwise return 0 */
-lunar_getInteger(lua_State* L) {
+luna_getinteger(lua_State* L) {
   int topindex = lua_gettop(L);
   if (!lua_isinteger(L, topindex)) return 0;
   return (l_long)lua_tointeger(L, topindex, 0);
 }
 
 L_EXTERN l_strn /* if top is an string return it, otherwise return "" */
-lunar_getString(lua_State* L) {
+luna_getstring(lua_State* L) {
   const char* s = 0;
   size_t len = 0;
   int topindex = lua_gettop(L);
@@ -295,7 +295,7 @@ lunar_getString(lua_State* L) {
 }
 
 L_EXTERN l_stackindex
-lunar_newString(lua_State* L, l_strn s1, l_strn s2, l_strn s3) {
+luna_newstring(lua_State* L, l_strn s1, l_strn s2, l_strn s3) {
   luaL_Buffer B;
   luaL_buffinit(L, &B);
   if (s1.len > 0) luaL_addlstring(&B, (const char*)s1.start, (size_t)s1.len);
@@ -306,7 +306,7 @@ lunar_newString(lua_State* L, l_strn s1, l_strn s2, l_strn s3) {
 }
 
 L_EXTERN l_stackindex
-lunar_newString4(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4) {
+luna_newstring4(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4) {
   luaL_Buffer B;
   luaL_buffinit(L, &B);
   if (s1.len > 0) luaL_addlstring(&B, (const char*)s1.start, (size_t)s1.len);
@@ -318,7 +318,7 @@ lunar_newString4(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4) {
 }
 
 L_EXTERN l_stackindex
-lunar_newString5(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5) {
+luna_newstring5(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5) {
   luaL_Buffer B;
   luaL_buffinit(L, &B);
   if (s1.len > 0) luaL_addlstring(&B, (const char*)s1.start, (size_t)s1.len);
@@ -331,7 +331,7 @@ lunar_newString5(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_str
 }
 
 L_EXTERN l_stackindex
-lunar_newString6(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6) {
+luna_newstring6(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6) {
   luaL_Buffer B;
   luaL_buffinit(L, &B);
   if (s1.len > 0) luaL_addlstring(&B, (const char*)s1.start, (size_t)s1.len);
@@ -345,7 +345,7 @@ lunar_newString6(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_str
 }
 
 L_EXTERN l_stackindex
-lunar_newString7(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6, l_strn s7) {
+luna_newstring7(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6, l_strn s7) {
   luaL_Buffer B;
   luaL_buffinit(L, &B);
   if (s1.len > 0) luaL_addlstring(&B, (const char*)s1.start, (size_t)s1.len);
@@ -360,7 +360,7 @@ lunar_newString7(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_str
 }
 
 L_EXTERN l_stackindex
-lunar_newString8(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6, l_strn s7, l_strn s8) {
+luna_newstring8(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6, l_strn s7, l_strn s8) {
   luaL_Buffer B;
   luaL_buffinit(L, &B);
   if (s1.len > 0) luaL_addlstring(&B, (const char*)s1.start, (size_t)s1.len);
@@ -376,7 +376,7 @@ lunar_newString8(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_str
 }
 
 L_EXTERN l_stackindex
-lunar_newString9(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6, l_strn s7, l_strn s8, l_strn s9) {
+luna_newstring9(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6, l_strn s7, l_strn s8, l_strn s9) {
   luaL_Buffer B;
   luaL_buffinit(L, &B);
   if (s1.len > 0) luaL_addlstring(&B, (const char*)s1.start, (size_t)s1.len);
@@ -396,46 +396,65 @@ lunar_newString9(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_str
 #define L_DEFAULT_C_PATH_GLOBAL_NAME "lnlylib_default_c_path"
 
 L_EXTERN void
-lunar_setPath(lua_State* L, l_strn path) {
+luna_setpath(lua_State* L, l_strn path) {
   l_luatypenum type;
   l_tableindex package;
   l_stackindex default_path, default_c_path;
-  l_stackindex path_string;
+  l_stacsindex path_string;
 
-  package = lunar_getTable(L, "package");
+  package = luna_gettable(L, "package");
 
-  default_path = lunar_getGlobal(L, L_DEFAULT_PATH_GLOBAL_NAME, &type);
-  if (lunar_isNoneOrNil(type)) {
-    default_path = lunar_getField(L, package, "path");
-    lunar_setGlobal(L, L_DEFAULT_PATH_GLOBAL_NAME, default_path);
+  default_path = luna_getglobal(L, L_DEFAULT_PATH_GLOBAL_NAME, &type);
+  if (luna_isnoneornil(type)) {
+    default_path = luna_getfield(L, package, "path");
+    luna_setglobal(L, L_DEFAULT_PATH_GLOBAL_NAME, default_path);
   }
 
-  default_c_path = lunar_getGlobal(L, L_DEFAULT_C_PATH_GLOBAL_NAME, &type);
-  if (lunar_isNoneOrNil(type)) {
-    default_c_path = lunar_getField(L, package, "cpath");
-    lunar_setGlobal(L, L_DEFAULT_C_PATH_GLOBAL_NAME, default_c_path);
+  default_c_path = luna_getglobal(L, L_DEFAULT_C_PATH_GLOBAL_NAME, &type);
+  if (luna_isnoneornil(type)) {
+    default_c_path = luna_getfield(L, package, "cpath");
+    luna_setglobal(L, L_DEFAULT_C_PATH_GLOBAL_NAME, default_c_path);
   }
 
-  path_string = lunar_newString4(L, lunar_getString(L, default_path), l_strn_literal(";"), path, l_strn_literal("?.lua"));
-  lunar_setField(L, package, "path", path_string);
+  path_string = luna_newstring4(L, luna_getstring(L, default_path), l_strn_literal(";"), path, l_strn_literal("?.lua"));
+  luna_setfield(L, package, "path", path_string);
 
-  path_string = lunar_newString6(L, lunar_getString(L, default_c_path), l_strn_literal(";"),
+  path_string = luna_newstring6(L, luna_getstring(L, default_c_path), l_strn_literal(";"),
       path, l_strn_literal("/c/?.so;"), path, l_strn_literal("/c/?.dll");
-  lunar_setField(L, package, "cpath", path_string);
+  luna_setfield(L, package, "cpath", path_string);
 
-  lunar_popStackTo(L, package.stackindex);
+  luna_popstackto(L, package.stackindex);
+}
+
+L_EXTERN void
+luna_addpath(lua_State* L, l_strn path) {
+  l_tableindex package;
+  l_stackindex old_path, new_path_string;
+
+  package = luna_gettable(L, "package");
+
+  old_path = luna_getfield(L, package, "path");
+  new_path_string = luna_newstring4(L, luna_getstring(L, old_path), l_strn_literal(";"), path, l_strn_literal("?.lua"));
+  luna_setfield(L, package, "path", new_path_string);
+
+  old_path = luna_getfield(L, package, "cpath");
+  new_path_string = luna_newstring6(L, luna_getstring(L, old_path), l_strn_literal(";"),
+      path, l_strn_literal("/c/?.so;"), path, l_strn_literal("/c/?.dll");
+  luna_setfield(L, package, "cpath", new_path_string);
+
+  luna_popstackTo(L, package.stackindex);
 }
 
 L_EXTERN l_stackindex /* [-0, +2, -] */
-lunar_getPath(lua_State* L) {
-  l_tableindex package = lunar_getTable(L, "package");
-  return lunar_getField(L, package, "path");
+luna_getpath(lua_State* L) {
+  l_tableindex package = luna_gettable(L, "package");
+  return luna_getfield(L, package, "path");
 }
 
 L_EXTERN l_stackindex /* [-0, +2, -] */
-lunar_getCPath(lua_State* L) {
-  l_tableindex package = lunar_getTable(L, "package");
-  return lunar_getField(L, package, "cpath");
+luna_getcpath(lua_State* L) {
+  l_tableindex package = luna_gettable(L, "package");
+  return luna_getfield(L, package, "cpath");
 }
 
 
