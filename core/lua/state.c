@@ -457,6 +457,52 @@ luna_getcpath(lua_State* L) {
   return luna_getfield(L, package, "cpath");
 }
 
+/** luaL_requiref(L, const char* modulename, lua_CFunction openfunc, int setglobal) [-0, +1, e]
+If modulename is not already present in package.loaded, calls openfunc with string
+as an argument and sets the call result in package.loaded[modulename], as if that
+function has been called through require.
+If setglobal is true, also stores the module info global modulename.
+Leaves a copy of the module on the stack.
+---
+## require(modulename)
+1. Loads the given module. It first check package.loaded[modulename], if it is not already loaded then
+2. Try to find a loader based on package.searchers sequence, the default configuration for searchers is below.
+3. If package.preload[modulename] has a value, call this value as a loader; otherwise,
+4. require searches for a Lua loader using the path stored in package.path; if it fails,
+5. It searches for a C loader using the path stored in package.cpath; if it also fails,
+6. It tries an all-in-one loader, see package.searchers.
+7. Once a loader is found, require calls it with two arguments, the modulename and an extra value depeneded.
+8. If the loader returns non-nil value, require assigns the returned value to package.loaded[modulename].
+9. If the loader does not return a non-nil value and no value assigned to package.loaded[modulename], then true is assigned to it.
+0. In any case, require returns the final value of package.loaded[modulename].
+1. If there is any error loading or running the module, or if it cannot find any loader for the module, an error raised.
+---
+## package.searchers
+A sequence that stroed the searcher functions, when looking for a module, they are called by require in ascending order.
+The search function is called with the modulename, and return a loader function plus an extra value that will be passed to that loader.
+Or it returns a string explaining why it did not find the module or nil if it has nothing to say.
+Lua initializes the packages.searchers with 4 searcher functions.
+1. The first one looks for a loader in the package.preloaded table
+2. The second one looks for a Lua loader using the path stored in package.path, how the path is searched is described by package.searchpath
+3. The third one looks for a C loader using the path stored in package.cpath, how the path is searched is described by package.searchpath
+4. The fourth search tries an all-in-one loader. It searches the C path for a library for the root name of the given module.
+Special for searching C loader, when the C library is found, the searcher will find a function named luaopen_xxx in the library as the loader.
+For instance, if the module name is a.b.c-v2.1 and the library a/b/c.so for example is found, the searcher will try to find luaopen_a_b_c in a/b/c.so
+And for all-in-one loader, when to find module a.b.c, it will try to find the library a.so for example, and then look for a loader function luaopen_a_b_c.
+With this facility, a package can pack several C submodules into one single library, with each submodule keeping its original open function.
+All searchers except the first one (preload) return as the extra value the file name where the module was found, as returned by package.searchpath.
+---
+## package.searchpath(name, path[, sep[, rep]])
+Searches for the given name in the given path.
+A path is a string containing a sequence of templates separated by semicolons.
+For each template, the function replaces each ? mark (if any) in the template with a copy of name wherein all sep (a dot, by default)
+were replaced by rep (the system's directory separator, by default), and then tries to open the resulting file name.
+For instance, if the path stirng is "./?.lua;/usr/local/?/init.lua", and the search name is "a.b.c",
+searchpath will try to pen the files "./a/b/c.lua", "/usr/local/a/b/c/init.lua" in order.
+It returns the resulting name of the first file that it can open in read mode (after closing the file),
+or nil plus an error message if none succeeds, this error message lists all file names it tried to open.
+*/
+
 static int
 l_cfuncforlua_searchandload(lua_State* L) {
   int name_index = lua_gettop(L);
