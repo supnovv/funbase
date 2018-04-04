@@ -1,13 +1,4 @@
 
-typedef struct {
-  void* impl;
-} l_stdfile;
-
-typedef struct {
-  void* impl;
-} l_filedesc;
-
-
 /** access, faccessat - check user's permission for a file
 #include <fcntl.h>
 #include <unistd.h>
@@ -40,6 +31,10 @@ instead return information about the link itself.
 On success, zero is returned; on error, -1 is returned and errno is set.
 */
 
+typedef struct {
+  int fd;
+} l_lnxfiledesc;
+
 L_EXTERN int
 l_file_isexist(const void* name) {
   return (name && faccessat(AT_FDCWD, (const char*)name, F_OK, AT_SYMLINK_NOFOLLOW) == 0);
@@ -50,6 +45,26 @@ l_file_isexistat(l_filedesc* dirfd, const void* name) {
   l_lnxfiledesc* pdir = (l_lnxfiledesc*)dirfd);
   if (pdir->fd == -1 || !name) return false;
   return (faccessat(pdir->fd, (const char*)name, F_OK, AT_SYMLINK_NOFOLLOW) == 0);
+}
+
+L_EXTERN int
+l_file_getattr(l_fileaddr* fa, const void* name) {
+  struct stat st;
+  if (lstat((const char*)name, &st) != 0) return false;
+  fa->size = (l_long)st.st_size;
+  fa->ctime = (l_long)st.st_ctime;
+  fa->atime = (l_long)st.st_atime;
+  fa->mtime = (l_long)st.st_mtime;
+  fa->isfile = (l_byte)(S_ISREG(st.st_mode) != 0);
+  fa->isdir = (l_byte)(S_ISDIR(st.st_mode) != 0);
+  fa->islink = (l_byte)(S_ISLNK(st.st_mode) != 0);
+  return true;
+}
+
+L_EXTERN int
+l_file_folderexist(const void* foldername) {
+  struct stat st;
+  return (lstat((const char*)name, &st) == 0 && S_ISDIR(st.st_mode));
 }
 
 L_EXTERN int
@@ -110,6 +125,10 @@ In cases where multiple threads must read from the same stream, using readdir(3)
 external sychronization is still preferable to the use of readdir_r().
 */
 
+typedef struct {
+  DIR* stream;
+} l_lnxdirstream;
+
 L_EXTERN int
 l_dirstream_opendir(l_dirstream* self, const void* name) {
   l_lnxdirstream* d = (l_lnxdirstream*)self;
@@ -132,8 +151,12 @@ l_dirstream_close(l_dirstream* self) {
 L_EXTERN const l_byte*
 l_dirstream_read(l_dirstream* self) {
   l_lnxdirstream* d = (l_lnxdirstream*)self;
-  struct dirent* entry = readdir(d->stream);
-  if (entry == 0) return 0;
+  struct dirent* entry = 0;
+  errno = 0;
+  if ((entry = readdir(d->stream)) == 0) {
+    if (errno != 0) l_loge_1("readdir %s", lserror(errno));
+    return 0;
+  }
   return l_strz(entry->d_name);
 }
 
@@ -142,9 +165,23 @@ l_dirstream_read2(l_dirstream* self, int* isdir) {
   l_lnxdirstream* d = (l_lnxdirstream*)self;
   struct dirent* entry = 0;
   if (isdir) *isdir = 0;
-  entry = readdir(d->stream);
-  if (entry == 0) return 0;
-  if (isdir) *isdir = (entry->d_type == DT_DIR);
+  errno = 0;
+  if ((entry = readdir(d->stream)) == 0) {
+    if (errno != 0) l_loge_1("readdir %s", lserror(errno));
+    return 0;
+  }
+  if (isdir) {
+#if 0
+    *isdir = (entry->d_type == DT_DIR);
+#else
+    struct stat st;
+    if (lstat(entry->d_name, &st) != 0) {
+      l_loge_1("lstat %s", lserror(errno));
+      return 0;
+    }
+    isdir = S_ISDIR(st.st_mode);
+#endif
+  }
   return l_strz(entry->d_name);
 }
 
