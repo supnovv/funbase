@@ -1,0 +1,145 @@
+/* @preserve HTML5 Shiv 3.7.3 | @afarkas @jdalton @jon_neal @rem | MIT/GPL2 Licensed */
+/*! normalize.css v5.0.0 | MIT License | github.com/necolas/normalize.css */
+
+body {
+  background: rgb(53,60,61);
+  font-size: 13px;
+  line-height: 2.0; /* "DejaVu Sans Mono" */
+  font-family: /*Georgia,"Palatino","Times New Roman",Times,serif;*/ "Helvetica Neue",Helvetica,Arial,sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+body * {
+  margin: 0;
+  padding: 0;
+}
+
+article,aside,footer,header,nav,section,main,figcaption,figure,details,menu {
+  display: block;
+}
+
+code,kbd,samp {
+  font-size: 12px;
+  font-family: Consolas,"Liberation Mono",Menlo,Courier,monospace;
+}
+
+b,strong {
+  font-weight: bolder;
+}
+
+dfn {
+  font-style: italic;
+}
+
+mark {
+  background-color: #ff0;
+  color: #000;
+}
+
+.ttsep {
+  font-size: 75%;
+  color: #ccc;
+}
+
+small {
+  font-size: 70%;
+  color: #ccc;
+}
+
+img {
+  border-style: none;
+}
+
+button,input {
+  overflow: visible;
+}
+
+button,select {
+  text-transform: none;
+}
+
+/* Remove the default vertical scrollbar in IE */
+textarea {
+  overflow: auto;
+}
+
+h2 {
+  color: #fff;
+}
+
+#root-container {
+  border-right: 1px solid rgb(76,81,83);
+  background: rgb(46,52,54);
+  width: 980px;
+  overflow: hidden;
+}
+
+#page-header {
+  background: #999;
+  float: left;
+  display: inline;
+  width: 960px;
+  padding: 0 10px;
+}
+
+#page-nav {
+  background: #ccc;
+  float: left;
+  display: inline;
+  width: 200px;
+  padding: 0 10px;
+}
+
+#page-main {
+  color: rgb(211,215,207);
+  float: right;
+  display: inline;
+  width: 720px;
+  padding: 0 10px;
+}
+
+#page-footer {
+  float: left;
+  display: inline;
+  width: 960px;
+  padding: 0 10px;
+}
+
+#page-console {
+  border-right: 1px solid rgb(76,81,83);
+  background: rgb(46,52,54);
+  font-size: 12px;
+  font-family: Consolas,"Liberation Mono",Menlo,Courier,monospace;
+  width: 960px;
+  padding: 0 10px;
+  word-wrap: break-word;
+}
+
+.lighter {
+  color: #666;
+  font-size: 12px;
+}
+
+.hidden {
+  display: none;
+}
+
+.frame2d {
+  stroke: black;
+  stroke-width: 1;
+  fill: none;
+}
+
+.solid2d {
+  stroke: none;
+  fill: black;
+  fill-opacity: 0.88;
+}
+
+.solidfr {
+  stroke: black;
+  stroke-width: 1;
+  fill: black;
+  fill-opacity: 0.88;
+}
