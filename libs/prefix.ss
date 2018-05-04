@@ -89,11 +89,13 @@
         ((_ var prop)
          #`'#,(datum->syntax #'var (lookup #'var #'prop)))))))
 
-(define (get-type a)
-  (get-property a type))
+(define-syntax (get-object-type stx)
+  (syntax-case stx ()
+    ((_ var) #'(get-property var type))))
 
-(define (get-type-string a)
-  (symbol->string (get-type a)))
+(define-syntax (get-type-string stx)
+  (syntax-case stx ()
+    ((_ var) #'(symbol->string (get-type var)))))
 
 (define-syntax (test-property stx)
   (syntax-case stx ()
@@ -144,10 +146,10 @@
 
 ;; string operations
 
-(define (empty-string? s)
+(define (string-empty? s)
   (eq? 0 (string-length s)))
 
-(define (split s c)   ;; split a string into two parts, c must be a character
+(define (string-split s c)   ;; split a string into two parts, c must be a character
   (let ((len (string-length s)))
     (let find ((n 0))
       (if (< n len)
@@ -162,21 +164,125 @@
 (define (string->syntax stx str)
   (datum->syntax stx (string->symbol str)))
 
-(meta define (split-id stx sep)
-  (symbol->string (syntax->datum stx)
+(define (symbol-type? stx)
+  (let ((d (syntax->datum stx)))
+    (if (and (list? d) (not (null? d)))
+        (let ((1st (car d))
+              (2nd (if (null? (cdr d)) (void) (cadr d))))
+          (and (or (eq? 1st 'quote) (eq? 1st 'quasiquote))
+               (not (eq? 2nd (void)))
+               ((identifier? (datum->syntax #'1st 2nd)))))
+        #f)))
+
+      ((identifier? stx) 'identifier)
+      ((string? d) 'constant)
+      ((number? d) 'constant)
+      ((char? d) 'constant)
+      ((boolean? d) 'constant)
+      ((bytevector? d) 'constant)
+      ((vector? d) 'vector)
+      ((null? d) 'list)
+      ((list? d)
+         (let ((1st (car d))
+               (2nd (if (null? (cdr d)) (void) (cadr d))))
+           (if (or (eq? 1st 'quote) (eq? 1st 'quasiquote))
+               (cond
+                 ((eq? 2nd (void)) 'list)
+                 ((identifier? (datum->syntax #'1st 2nd)) 'symbol)
+
+
+(define (string->identifier ctx str)
+  (let ((obj (inspect/object (syntax->datum str))))
+    (printf "\nobject ~s ~s: ~s ~s\n" obj (obj 'type) (car obj) (cdr obj))
+    (if (symbol? obj)
+        (datum->syntax ctx obj)
+        (datum->syntax ctx (string->symbol obj)))))
+
+(define-syntax (format->syntax stx)
+  (syntax-case stx ()
+    ((_ stx-obj fmt arg ...)
+     #'(string->syntax stx-obj (format fmt arg ...)))))
+
+(define (split-id stx sep)
+  (symbol->string (syntax->datum stx)))
+
+;; constructures attach compile-time property
+
+(define-syntax (attach-string-type stx)
+  (syntax-case stx ()
+    ((_ var)
+     #'(define-property var type 'string))))
 
 ;; dot access style
 
 (define-syntax (dot stx)
   (syntax-case stx ()
-    ((_ (name arg ...) ...)
+    ((_ (name arg ...) (name-2 arg-2 ...) ...)
      (let-values (((var-name func-name) (split (string-id #'name) #\.)))
-       (cond
-         ((empty-string? func-name) stx)
-         (else
+       (if (string-empty? func-name)
+           stx
            (with-syntax* ((var (string->syntax #'name var-name))
-                          (real-func (string->syntax #'name (format "~a-~a" (get-type-string var) func-name))))
+                          (real-func (format->syntax #'name "~a-~a" (get-type-string var) func-name))))
              #'(begin
                  (real-func var arg ...)
-                 ...))))))))
+
+(define-syntax (dot-part stx)
+   (syntax-case stx ()
+     ((_ name arg ...)
+      (let-values (((var-name func-name) (string-split (string-id #'name) #\.)))
+        (printf "~a ~a\n" var-name func-name)
+        (if (string-empty? func-name)
+            #'(name arg ...)
+            (let ((var (string->syntax #'name var-name)))
+              (printf "string s ~a\n" s)
+              (printf "variable ~s\n" var)
+              (printf "s type ~s\n" (get-type-string s))
+              (printf "var type ~s\n" (get-type-string var))
+              (with-syntax ((real-func (format->syntax #'name "~a-~a" (get-type-string var) func-name)))
+                (printf "~a ~a\n" var #'real-func)
+                #'(real-func var arg ...))))))))
+
+
+(define-syntax (string-type stx)
+  (syntax-case stx ()
+    ((name str) (string? (syntax->datum #'str))
+     (with-syntax ((var (string->syntax #'name (syntax->datum #'str))))
+       (printf "printf outside ~a\n" #'var)
+       #'(printf "printf inside ~a\n" var)))))
+
+(define-syntax (string-syntax? stx)
+  (
+
+(define-syntax (object-type stx)
+  (syntax-case stx ()
+    ((name obj)
+     (identifier? #'obj)
+     #'(get-object-type obj))
+    ((name obj)
+     (with-syntax ((id (string->identifier #'name #'obj)))
+       #'(get-object-type id)))))
+
+(define-syntax (object-type stx)
+  (syntax-case stx ()
+    ((name obj)
+     (identifier? #'obj)
+     #'(display obj))
+    ((name obj)
+     (write #'obj)
+     (with-syntax ((id (string->identifier #'name #'obj)))
+       #'(display id)))))
+
+
+(define-syntax (dot stx)
+  (syntax-case stx ()
+    ((_ (name arg ...) ...)
+     #`(begin #,(dot-part name arg ...) ...))))
+
+
+(define-syntax with-values
+  (syntax-rules ()
+    ((_ expr proc)
+     (call-with-values (lambda () expr) proc))))
+
+
 
