@@ -1,29 +1,25 @@
 
-;; assert helpers
+;; ## assert helpers
+;;
+;; (assert-enable-print! enable) -> void
+;; (assert-tr expr) -> void
+;; (assert-nt expr) -> void
+;; (assert-eq expr1 expr2) -> void
+;; (assert-nq expr1 expr2) -> void
 
-(define assert-pass-display? #t)
+(define assert-pass-print? #t)
+
+(define (assert-enable-print! enable)
+  (set! assert-pass-print? (if enable #t #f)))
 
 (define (assert-pass expr)
-  (cond
-    (assert-pass-display?
-      (display "[A] PASS ")
-      (display expr)
-      (newline))
-    (else (void))))
+  (if assert-pass-print? (printf "[A] PASS ~s\n" expr)))
 
 (define (assert-fail expr)
-  (display "[A] FAIL ")
-  (display expr)
-  (newline))
+  (printf "[A] FAIL ~s\n" expr))
 
 (define (assert-fail-3 expr a b)
-  (display "[A] FAIL ")
-  (display expr)
-  (display ": ")
-  (display a)
-  (display " ")
-  (display b)
-  (newline))
+  (printf "[A] FAIL ~s: ~s ~s\n" expr a b))
 
 (define-syntax (assert-tr stx)
   (syntax-case stx ()
@@ -55,6 +51,33 @@
            ((eq? x y) (assert-fail '(name expr-a expr-b)))
            (else (assert-pass '(name expr-a expr-b))))))))
 
+;; ## macro helpers
+;;
+;; (string->identifier ctx str) -> identifer-syntax
+;; (format->identifier ctx fmt arg ...) -> identifier-syntax
+;; (identifier->string stx) -> string
+;; (eval-syntax stx)
+
+(define (string->identifier ctx str)
+  (printf "string->identifier ~s\n" str)
+  (if (string? str)
+      (datum->syntax ctx (string->symbol str))
+      (datum->syntax ctx (string->symbol (syntax->datum str)))))
+
+(define-syntax (format->identifier stx)
+  (syntax-case stx ()
+    ((_ ctx fmt arg ...)
+     #'(string->identifier ctx (format fmt (syntax->datum arg) ...)))))
+
+(define (identifier->string stx)
+  (symbol->string (syntax->datum stx)))
+
+(define-syntax (eval-syntax stx)
+  (syntax-case stx ()
+    ((_ syntax-expr) #'(eval (syntax->datum syntax-expr)))))
+
+;; ## compile time property
+;;
 ;; (define-property <variable> <property> <value>)
 ;;
 ;; Attaches a property to an existing identifier binding without disturbing
@@ -79,92 +102,81 @@
 ;; of id, or #f if id has no compile-time value. With two arguments, id and
 ;; key, lookup returns the value of id's key property, or #f if id has no key
 ;; property.
+;;
+;; (attach-prop var prop value) -> void
+;; (attach-type var value) -> void
+;; (attach-string-type var) -> void
+;; (attach-symbol-table-type var) -> void
+;; (obtain-prop var prop) -> property-value
+;; (obtain-prop-from identifier/literal-string prop) -> property-value
+;; (obtain-type identifier/literal-string) -> type-property-value
+;; (obtain-type->string var) -> type-property-value-as-string
 
-(define-syntax (set-object-prop stx)
+(define-syntax (attach-prop stx)
   (syntax-case stx ()
     ((_ var prop value)
-     (and (identifier? #'var) (identifier? #'prop) (not (identifier? #'value)))
-     (with-syntax ((id (
+     (and (identifier? #'var) (identifier? #'prop))
+     #'(define-property var prop value))))
 
-(define-syntax (get-object-prop stx)
+(define-syntax (obtain-prop stx)
   (lambda (lookup)
     (syntax-case stx ()
       ((_ var prop)
        #`'#,(datum->syntax #'var (lookup #'var #'prop))))))
 
+(define-syntax (obtain-prop-from stx)
+  (syntax-case stx ()
+    ((name identifier/literal-string prop)
+     (identifier? #'identifier/literal-string)
+     #'(obtain-prop identifier/literal-string prop))
+    ((name identifier/literal-string prop)
+     (with-syntax ((identifier (string->identifier #'name #'identifier/literal-string)))
+       #'(obtain-prop identifier prop)))))
+
 (define type)
 
-(define-syntax (get-object-type stx)
+(define-syntax (attach-type stx)
   (syntax-case stx ()
-    ((_ var) #'(get-object-prop var type))))
+    ((_ var value) #'(attach-prop var type value))))
 
-(define-syntax (get-type-string stx)
+(define-syntax (obtain-type stx)
   (syntax-case stx ()
-    ((_ var) #'(symbol->string (get-type var)))))
+    ((_ identifier/literal-string)
+     #'(begin (printf "obtain-type ~s\n" 'identifier/literal-string) (obtain-prop-from identifier/literal-string type)))))
 
 (define-syntax (attach-string-type stx)
   (syntax-case stx ()
-    ((_ var) #'(define-property var type 'string))))
+    ((_ var) #'(attach-type var 'string))))
 
-(define-syntax (object-type-string-impl stx)
+(define-syntax (attach-symbol-table-type stx)
   (syntax-case stx ()
-    ((name str)
-     (with-syntax ((identifier (string->identifier #'name #'str)))
-       #'(get-type-string identifier)))))
+    ((_ var) #'(attach-type var 'symbol-table))))
 
-(define (object-type-string obj)
-  (cond
-    ((identifier? #'obj) (get-type-string obj))
-    ((string? obj) (object-type-string-impl obj))
-    (else (object-type-string-impl (syntax->datum obj)))))
+(define-syntax (obtain-type->string stx)
+  (syntax-case stx ()
+    ((_ var) #'(begin (printf "obtain-type->string ~s\n" 'var) (symbol->string (obtain-type var))))))
 
-;; syntax types
-;; constant - string, number, character, boolean, bytevector
-;; identifier symbol list vector pair unknown
+(define-syntax (test-prop stx)
+  (syntax-case stx ()
+    ((_)
+     #'(let ((s "hello"))
+         (attach-string-type s)
+         (assert-eq 'string (obtain-type s))
+         (assert-eq 'string (obtain-type "s"))
+         (printf "(obtain-type s) ~s\n" (obtain-type s))
+         (printf "(obtain-type \"s\") ~s\n" (obtain-type "s"))
+         (printf "(obtain-type->string s) ~s\n" (obtain-type->string s))
+         (printf "(obtain-type->string \"s\") ~s\n" (obtain-type->string "s"))))))
 
-(meta define (syntax-type-class stx)
-  (let ((d (syntax->datum stx)))
-    (cond
-      ((identifier? stx) 'identifier)
-      ((string? d) 'constant)
-      ((number? d) 'constant)
-      ((char? d) 'constant)
-      ((boolean? d) 'constant)
-      ((bytevector? d) 'constant)
-      ((vector? d) 'vector)
-      ((null? d) 'list)
-      ((list? d)
-         (let ((1st (car d))
-               (2nd (if (null? (cdr d)) (void) (cadr d))))
-           (if (or (eq? 1st 'quote) (eq? 1st 'quasiquote))
-               (cond
-                 ((eq? 2nd (void)) 'list)
-                 ((identifier? (datum->syntax #'1st 2nd)) 'symbol)
-                 ((string? 2nd) 'constant)
-                 ((number? 2nd) 'constant)
-                 ((char? 2nd) 'constant)
-                 ((boolean? 2nd) 'constant)
-                 ((bytevector? 2nd) 'constant)
-                 (else 'list)))
-               'list)))
-      ((pair? d) 'pair)
-      (else 'unknown)))
+;; ## string operations
+;;
+;; (string-empty? str) -> boolean
+;; (string-split str ch) -> string-part-one string-part-two
 
-(define-syntax (test-syntax-type-class stx)
-      (syntax-case stx ()
-        ((_ a) (let* ((s #'a)
-                      (d (syntax->datum s)))
-                 (write s) (newline)
-                 (write d) (newline)
-                 (write (syntax-type-class s))
-                 #'(newline)))))
+(define (string-empty? str)
+  (eq? 0 (string-length str)))
 
-;; string operations
-
-(define (string-empty? s)
-  (eq? 0 (string-length s)))
-
-(define (string-split str ch)   ;; split a string into two parts, ch must be a character
+(define (string-split str ch) ;; split a string into two parts, ch must be a character
   (let ((len (string-length str)))
     (let find ((n 0))
       (if (< n len)
@@ -173,29 +185,19 @@
               (find (+ n 1)))
           (values str "")))))
 
-;; syntax helpers
-
-(define (string->identifier ctx str)
-  (if (string? str)
-      (datum->syntax ctx (string->symbol str))
-      (datum->syntax ctx (string->symbol (syntax->datum str)))))
-
-(define (identifier->string stx)
-  (symbol->string (syntax->datum stx)))
-
-(define-syntax (format->identifier stx)
-  (syntax-case stx ()
-    ((_ stx-obj fmt arg ...)
-     #'(string->identifier stx-obj (format fmt (syntax->datum arg) ...)))))
-
-;; dot access style
+;; ## dot access style
+;;
+;; (dot (var.func arg ...) ...)
+;; (dot-values (var.func arg ...) ...)
 
 (define-syntax (dot-part-impl stx)
   (syntax-case stx ()
     ((k type-name var-name func-name arg ...)
+     (begin
+       (printf "dot-part-impl ~s ~s ~s\n" #'type-name #'var-name #'func-name)
      (with-syntax ((real-func (format->identifier #'k "~a-~a" #'type-name #'func-name))
                    (obj (string->identifier #'k #'var-name)))
-       #'(real-func obj arg ...)))))
+       #'(real-func obj arg ...))))))
 
 (define-syntax (dot-part stx)
   (syntax-case stx ()
@@ -203,13 +205,52 @@
      (let-values (((var-name func-name) (string-split (identifier->string #'name) #\.)))
        (if (string-empty? func-name)
            #'(name arg ...)
-           (with-syntax* ((var-literal-name (datum->syntax #'name var-name))
-                          (func-literal-name (datum->syntax #'name func-name))
-                          (var-type-name (object-type-string #'var-literal-name)))
-             #'(dot-part-impl var-type-string var-literal-name func-literal-name arg ...))))))
+           (let ((type-name (eval-syntax #`(obtain-type->string #,(datum->syntax #'name var-name)))))
+             #`(dot-part-impl
+                 #,(datum->syntax #'name type-name)
+                 #,(datum->syntax #'name var-name)
+                 #,(datum->syntax #'name func-name)
+                 arg ...)))))))
 
 (define-syntax (dot stx)
   (syntax-case stx ()
     ((_ (name arg ...) ...)
      #'(begin (dot-part name arg ...) ...))))
+
+(define-syntax (dot-values stx)
+  (syntax-case stx ()
+    ((_ (name arg ...) ...)
+     #'(values (dot-part name arg ...) ...))))
+
+(define s "hello")
+(attach-string-type s)
+(printf "(obtain-type s) ~s\n" (obtain-type s))
+(printf "(dot (s.ref 0)) ~s\n" (dot (s.ref 0)))
+(printf "(dot (string-ref s 0)) ~s\n" (dot (string-ref s 0)))
+
+;; 匹配变量指向的是表达式中对应位置的数据，如数字、字符串、列表等，包裹成的语法对象
+;; 匹配变量的#'操作相当于获取匹配变量的值，即对应的语法对象，但是普通标识符和数据的#'操作会生成标识符语法对象和对应的数据语法对象
+;; 语法对象需要进行一次 syntax->datum 的操作才能得到原本的数据本身
+;; #'操作会获取其中匹配变量的值，还会将普通标识符和数据转换成语法对象
+;; #`操作与#'类似，但是还会对其中的#,表达式求值
+;; 由于 with-syntax 可以手动给匹配变量赋值，匹配变量可能被置成实际的数据而不是包裹后的语法对象
+;; 此时对匹配变量的#'操作，也仅仅是获取匹配变量的值，这不是问题，因为普通数据的 syntax->datum 操作简单返回数据本身
+;; 如果一个标识符的值是一个编译时常量，datum->syntax 可以将这个标识符转换成常量语法对象
+;; 即使一个标识符的值是一个运行时数据，例如是字符串、数字等，通过调用 eval 和 datum->syntax 也可以将这个标识符转换成常量语法对象
+
+(define-syntax (syntax-test stx)
+  (syntax-case stx ()
+    ((k pattern-var)
+     (let ((plain-var 0))
+       (printf "#`(proc plain-var pattern-var #,(datum->syntax #'* string)) ~s\n" #`(proc plain-var pattern-var #,(datum->syntax #'* "string")))
+       (printf "#`(proc plain-var pattern-var #,string) ~s\n" #`(proc plain-var pattern-var #,"string"))
+       (with-syntax ((with-pattern-var "string")
+                     (with-pattern-var-string (datum->syntax #'k "string")))
+         (printf "#'(proc with-pattern-var with-pattern-var-string) ~s \n" #'(proc with-pattern-var with-pattern-var-string))
+         #'(printf "syntax-test ~s\n" 'var))))))
+
+
+
+
+
 
