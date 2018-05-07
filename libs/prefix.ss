@@ -12,44 +12,54 @@
 (define (assert-enable-print! enable)
   (set! assert-pass-print? (if enable #t #f)))
 
-(define (assert-pass expr)
-  (if assert-pass-print? (printf "[A] PASS ~s\n" expr)))
+(define-syntax (assert-pass-print stx)
+  (syntax-case stx ()
+    ((_ ctx expr) (not assert-pass-print?) #'(void))
+    ((_ ctx expr) #'(printf "[A] PASS ~s\n" expr))
+    ((_ ctx msg expr) (not assert-pass-print?) #'(void))
+    ((_ ctx msg expr) #'(printf "[A] PASS ~s: ~s\n" msg expr))))
 
-(define (assert-fail expr)
-  (printf "[A] FAIL ~s\n" expr))
+(define-syntax (assert-fail-print stx)
+  (syntax-case stx ()
+    ((_ ctx expr) #'(printf "[A] FAIL ~s\n" expr))
+    ((_ ctx msg expr) #'(printf "[A] FAIL ~s: ~s\n" msg expr))
+    ((_ ctx expr a b) #'(printf "[A] FAIL ~s ~s ~s\n" expr a b))
+    ((_ ctx msg expr a b) #'(printf "[A] FAIL ~s: ~s ~s ~s\n" msg expr a b))))
 
-(define (assert-fail-3 expr a b)
-  (printf "[A] FAIL ~s: ~s ~s\n" expr a b))
+(define-syntax (assert-fail stx)
+  (syntax-case stx ()
+    ((name msg)
+     #'(assert-fail-print name msg))))
 
 (define-syntax (assert-tr stx)
   (syntax-case stx ()
     ((name expr)
      #'(cond
-         (expr (assert-pass '(name expr)))
-         (else (assert-fail '(name expr)))))))
+         (expr (assert-pass-print name '(name expr)))
+         (else (assert-fail-print name '(name expr)))))))
 
 (define-syntax (assert-nt stx)
   (syntax-case stx ()
     ((name expr)
      #'(cond
-         (expr (assert-fail '(name expr)))
-         (else (assert-pass '(name expr)))))))
+         (expr (assert-fail-print name '(name expr)))
+         (else (assert-pass-print name '(name expr)))))))
 
 (define-syntax (assert-eq stx)
   (syntax-case stx ()
     ((name expr-a expr-b)
      #'(let ((x expr-a) (y expr-b))
          (cond
-           ((eq? x y) (assert-pass '(name expr-a expr-b)))
-           (else (assert-fail-3 '(name expr-a expr-b) x y)))))))
+           ((eq? x y) (assert-pass-print name '(name expr-a expr-b)))
+           (else (assert-fail-print name '(name expr-a expr-b) x y)))))))
 
 (define-syntax (assert-nq stx)
   (syntax-case stx ()
     ((name expr-a expr-b)
      #'(let ((x expr-a) (y expr-b))
          (cond
-           ((eq? x y) (assert-fail '(name expr-a expr-b)))
-           (else (assert-pass '(name expr-a expr-b))))))))
+           ((eq? x y) (assert-fail-print name '(name expr-a expr-b)))
+           (else (assert-pass-print name '(name expr-a expr-b))))))))
 
 ;; ## macro helpers
 ;;
@@ -59,7 +69,6 @@
 ;; (eval-syntax stx)
 
 (define (string->identifier ctx str)
-  (printf "string->identifier ~s\n" str)
   (if (string? str)
       (datum->syntax ctx (string->symbol str))
       (datum->syntax ctx (string->symbol (syntax->datum str)))))
@@ -142,7 +151,7 @@
 (define-syntax (obtain-type stx)
   (syntax-case stx ()
     ((_ identifier/literal-string)
-     #'(begin (printf "obtain-type ~s\n" 'identifier/literal-string) (obtain-prop-from identifier/literal-string type)))))
+     #'(obtain-prop-from identifier/literal-string type))))
 
 (define-syntax (attach-string-type stx)
   (syntax-case stx ()
@@ -154,7 +163,7 @@
 
 (define-syntax (obtain-type->string stx)
   (syntax-case stx ()
-    ((_ var) #'(begin (printf "obtain-type->string ~s\n" 'var) (symbol->string (obtain-type var))))))
+    ((_ var) #'(symbol->string (obtain-type var)))))
 
 (define-syntax (test-prop stx)
   (syntax-case stx ()
@@ -187,23 +196,24 @@
 
 ;; ## dot access style
 ;;
-;; (dot (var.func arg ...) ...)
-;; (dot-values (var.func arg ...) ...)
+;; (dot (obj.func arg ...) ...)
+;; (dot-values (obj.func arg ...) ...)
+;; (dot-def ((var (obj.func arg ...)) ...))
+;; (dot-let ((var (obj.func arg ...)) ...) body body2 ...)
+;; (dot-let* ((var (obj.func arg ...)) ...) body body2 ...)
 
 (define-syntax (dot-part-impl stx)
   (syntax-case stx ()
     ((k type-name var-name func-name arg ...)
-     (begin
-       (printf "dot-part-impl ~s ~s ~s\n" #'type-name #'var-name #'func-name)
      (with-syntax ((real-func (format->identifier #'k "~a-~a" #'type-name #'func-name))
                    (obj (string->identifier #'k #'var-name)))
-       #'(real-func obj arg ...))))))
+       #'(real-func obj arg ...)))))
 
 (define-syntax (dot-part stx)
   (syntax-case stx ()
     ((_ name arg ...)
      (let-values (((var-name func-name) (string-split (identifier->string #'name) #\.)))
-       (if (string-empty? func-name)
+       (if (or (string-empty? var-name) (string-empty? func-name))
            #'(name arg ...)
            (let ((type-name (eval-syntax #`(obtain-type->string #,(datum->syntax #'name var-name)))))
              #`(dot-part-impl
@@ -222,10 +232,29 @@
     ((_ (name arg ...) ...)
      #'(values (dot-part name arg ...) ...))))
 
+(define-syntax (dot-def stx)
+  (syntax-case stx ()
+    ((_ ((var (name arg ...)) ...))
+     #'(begin
+         (define var (dot-part name arg ...))
+         ...))))
+
+(define-syntax (dot-let stx)
+  (syntax-case stx ()
+    ((_ ((var (name arg ...)) ...) body body2 ...)
+     #'(let ((var (dot-part name arg ...)) ...) body body2 ...))))
+
+(define-syntax (dot-let* stx) 
+  (syntax-case stx ()
+    ((_ ((var (name arg ...)) ...) body body2 ...)
+     #'(let* ((var (dot-part name arg ...)) ...) body body2 ...))))
+
 (define s "hello")
 (attach-string-type s)
 (printf "(obtain-type s) ~s\n" (obtain-type s))
 (printf "(dot (s.ref 0)) ~s\n" (dot (s.ref 0)))
+(dot-def ((char-at (s.ref 1)) (str-len (s.length))))
+(printf "(dot-def ((char-at (s.ref 0)) (str-len (s.length)))) ~s ~s\n" char-at str-len)
 (printf "(dot (string-ref s 0)) ~s\n" (dot (string-ref s 0)))
 
 ;; 匹配变量指向的是表达式中对应位置的数据，如数字、字符串、列表等，包裹成的语法对象
@@ -240,17 +269,23 @@
 
 (define-syntax (syntax-test stx)
   (syntax-case stx ()
-    ((k pattern-var)
+    ((k pattern-var) (identifier? #'pattern-var)
      (let ((plain-var 0))
        (printf "#`(proc plain-var pattern-var #,(datum->syntax #'* string)) ~s\n" #`(proc plain-var pattern-var #,(datum->syntax #'* "string")))
        (printf "#`(proc plain-var pattern-var #,string) ~s\n" #`(proc plain-var pattern-var #,"string"))
        (with-syntax ((with-pattern-var "string")
                      (with-pattern-var-string (datum->syntax #'k "string")))
          (printf "#'(proc with-pattern-var with-pattern-var-string) ~s \n" #'(proc with-pattern-var with-pattern-var-string))
-         #'(printf "syntax-test ~s\n" 'var))))))
+         #'(printf "syntax-test ~s\n" 'pattern-var))))
+    ((k pattern-var)
+     (begin
+       (printf "syntax-test ~s\n" #'pattern-var)
+       #'(void)))))
 
-
-
-
-
+(syntax-test var)
+(syntax-test "string")
+(syntax-test 'symbol)
+(syntax-test 1024)
+(syntax-test #\A)
+(test-prop)
 
