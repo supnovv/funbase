@@ -1,65 +1,14 @@
 
+
 ;; ## assert helpers
 ;;
 ;; (assert-enable-print! enable) -> void
+;; (assert-fail msg) -> void
 ;; (assert-tr expr) -> void
 ;; (assert-nt expr) -> void
 ;; (assert-eq expr1 expr2) -> void
 ;; (assert-nq expr1 expr2) -> void
 
-(define assert-pass-print? #t)
-
-(define (assert-enable-print! enable)
-  (set! assert-pass-print? (if enable #t #f)))
-
-(define-syntax (assert-pass-print stx)
-  (syntax-case stx ()
-    ((_ ctx expr) (not assert-pass-print?) #'(void))
-    ((_ ctx expr) #'(printf "[A] PASS ~s\n" expr))
-    ((_ ctx msg expr) (not assert-pass-print?) #'(void))
-    ((_ ctx msg expr) #'(printf "[A] PASS ~s: ~s\n" msg expr))))
-
-(define-syntax (assert-fail-print stx)
-  (syntax-case stx ()
-    ((_ ctx expr) #'(printf "[A] FAIL ~s\n" expr))
-    ((_ ctx msg expr) #'(printf "[A] FAIL ~s: ~s\n" msg expr))
-    ((_ ctx expr a b) #'(printf "[A] FAIL ~s ~s ~s\n" expr a b))
-    ((_ ctx msg expr a b) #'(printf "[A] FAIL ~s: ~s ~s ~s\n" msg expr a b))))
-
-(define-syntax (assert-fail stx)
-  (syntax-case stx ()
-    ((name msg)
-     #'(assert-fail-print name msg))))
-
-(define-syntax (assert-tr stx)
-  (syntax-case stx ()
-    ((name expr)
-     #'(cond
-         (expr (assert-pass-print name '(name expr)))
-         (else (assert-fail-print name '(name expr)))))))
-
-(define-syntax (assert-nt stx)
-  (syntax-case stx ()
-    ((name expr)
-     #'(cond
-         (expr (assert-fail-print name '(name expr)))
-         (else (assert-pass-print name '(name expr)))))))
-
-(define-syntax (assert-eq stx)
-  (syntax-case stx ()
-    ((name expr-a expr-b)
-     #'(let ((x expr-a) (y expr-b))
-         (cond
-           ((eq? x y) (assert-pass-print name '(name expr-a expr-b)))
-           (else (assert-fail-print name '(name expr-a expr-b) x y)))))))
-
-(define-syntax (assert-nq stx)
-  (syntax-case stx ()
-    ((name expr-a expr-b)
-     #'(let ((x expr-a) (y expr-b))
-         (cond
-           ((eq? x y) (assert-fail-print name '(name expr-a expr-b)))
-           (else (assert-pass-print name '(name expr-a expr-b))))))))
 
 ;; ## macro helpers
 ;;
@@ -68,22 +17,6 @@
 ;; (identifier->string stx) -> string
 ;; (eval-syntax stx)
 
-(define (string->identifier ctx str)
-  (if (string? str)
-      (datum->syntax ctx (string->symbol str))
-      (datum->syntax ctx (string->symbol (syntax->datum str)))))
-
-(define-syntax (format->identifier stx)
-  (syntax-case stx ()
-    ((_ ctx fmt arg ...)
-     #'(string->identifier ctx (format fmt (syntax->datum arg) ...)))))
-
-(define (identifier->string stx)
-  (symbol->string (syntax->datum stx)))
-
-(define-syntax (eval-syntax stx)
-  (syntax-case stx ()
-    ((_ syntax-expr) #'(eval (syntax->datum syntax-expr)))))
 
 ;; ## compile time property
 ;;
@@ -182,72 +115,8 @@
 ;; (string-empty? str) -> boolean
 ;; (string-split str ch) -> string-part-one string-part-two
 
-(define (string-empty? str)
-  (eq? 0 (string-length str)))
 
-(define (string-split str ch) ;; split a string into two parts, ch must be a character
-  (let ((len (string-length str)))
-    (let find ((n 0))
-      (if (< n len)
-          (if (eq? ch (string-ref str n))
-              (values (substring str 0 n) (substring str (+ n 1) len))
-              (find (+ n 1)))
-          (values str "")))))
 
-;; ## dot access style
-;;
-;; (dot (obj.func arg ...) ...)
-;; (dot-values (obj.func arg ...) ...)
-;; (dot-def ((var (obj.func arg ...)) ...))
-;; (dot-let ((var (obj.func arg ...)) ...) body body2 ...)
-;; (dot-let* ((var (obj.func arg ...)) ...) body body2 ...)
-
-(define-syntax (dot-part-impl stx)
-  (syntax-case stx ()
-    ((k type-name var-name func-name arg ...)
-     (with-syntax ((real-func (format->identifier #'k "~a-~a" #'type-name #'func-name))
-                   (obj (string->identifier #'k #'var-name)))
-       #'(real-func obj arg ...)))))
-
-(define-syntax (dot-part stx)
-  (syntax-case stx ()
-    ((_ name arg ...)
-     (let-values (((var-name func-name) (string-split (identifier->string #'name) #\.)))
-       (if (or (string-empty? var-name) (string-empty? func-name))
-           #'(name arg ...)
-           (let ((type-name (eval-syntax #`(obtain-type->string #,(datum->syntax #'name var-name)))))
-             #`(dot-part-impl
-                 #,(datum->syntax #'name type-name)
-                 #,(datum->syntax #'name var-name)
-                 #,(datum->syntax #'name func-name)
-                 arg ...)))))))
-
-(define-syntax (dot stx)
-  (syntax-case stx ()
-    ((_ (name arg ...) ...)
-     #'(begin (dot-part name arg ...) ...))))
-
-(define-syntax (dot-values stx)
-  (syntax-case stx ()
-    ((_ (name arg ...) ...)
-     #'(values (dot-part name arg ...) ...))))
-
-(define-syntax (dot-def stx)
-  (syntax-case stx ()
-    ((_ ((var (name arg ...)) ...))
-     #'(begin
-         (define var (dot-part name arg ...))
-         ...))))
-
-(define-syntax (dot-let stx)
-  (syntax-case stx ()
-    ((_ ((var (name arg ...)) ...) body body2 ...)
-     #'(let ((var (dot-part name arg ...)) ...) body body2 ...))))
-
-(define-syntax (dot-let* stx) 
-  (syntax-case stx ()
-    ((_ ((var (name arg ...)) ...) body body2 ...)
-     #'(let* ((var (dot-part name arg ...)) ...) body body2 ...))))
 
 (define s "hello")
 (attach-string-type s)
@@ -288,4 +157,19 @@
 (syntax-test 1024)
 (syntax-test #\A)
 (test-prop)
+
+(define (test-symbol-table)
+  (symbol-table t 32 ('mode "direct") ('type "strength"))
+  (printf "type ~s\n" (obtain-type->string t))
+  (printf "mode ~s type ~s\n" (apply symbol-table-cell (list t 'type)) (dot (t.ref 'mode))))
+  #|(dot-let* ((has-mode (t.has? 'mode))
+             (mode (t.ref 'mode))
+             (pair (t.cell 'type))
+             (type (begin (t.set! 'type "wisdom") (t.ref 'type))))
+    (printf "has-mode ~s mode ~s old-type ~s new-type ~s\n"
+            has-mode mode (cdr pair) type))
+  (let ((new-mode (dot (t.del! 'mode) (t.ref 'mode))))
+    (printf "new-mode is (void) ~s after delete\n" (eq? new-node (void)))))|#
+
+(test-symbol-table)
 
