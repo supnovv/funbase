@@ -1,5 +1,41 @@
 
+#define l_msg_ptr(b) ((l_message*)(b)->p)
+#define L_MSG_MASTER_MIN_ID
+#define L_MSG_MASTER_MAX_ID
+#define L_MSG_START_SRVC_REQ
+#define L_MSG_CLOSE_SRVC_REQ
+#define L_MSG_ADD_SRVC_EVENT
+#define L_MSG_DEL_SRVC_EVENT
+#define L_MSG_START_LAUNCHER
+#define L_MSG_CLOSE_MASTER_CMD
+#define L_MSG_CLOSE_WORKER_REQ
+#define L_MSG_CLOSE_WORKER_RSP
+#define L_MSG_SOCKET_EVENT_IND
+#define L_MSG_SOCK_CONNECT_RSP
+#define L_MSG_SOCK_CONNECT_IND
+#define L_MSG_USER_MIN_ID (0xffff+1)
 
+#define L_SERVICE_MASTER   0x00
+#define L_SERVICE_WORKER   0x01
+#define L_SERVICE_LAUNCHER 0x02
+#define L_SERVICE_USER_MIN_ID (0xffff+1)
+
+typedef struct {
+  l_smplnode node;
+  l_int bfsz;
+} L_BUFHEAD;
+
+typedef struct {
+  L_BUFHEAD HEAD;
+  l_ulong dest;
+  l_umedit mgid;
+  l_umedit data;
+  l_ulong extra;
+} l_message;
+
+typedef struct {
+  void* p;
+} l_buffer;
 
 typedef struct {
   l_mutex mtxa;
@@ -8,30 +44,209 @@ typedef struct {
   l_squeue qa;
   l_squeue qb;
   l_squeue qc;
+  l_squeue qd;
   l_freebq frbq;
-} l_thrblock;
+} l_thrdata;
+
+typedef struct {
+  l_squeue rxmq;
+  l_mutex mgmx;
+  l_ioevmgr emgr;
+  l_mutex svmx;
+  l_umedit seed;
+} l_global;
+
+typedef struct {
+  l_global* G;
+  l_luastate* L;
+  l_scheme* S;
+  l_thread* curthr;
+  l_service* service;
+  l_thread* master;
+  void* thiz;
+  l_string strbuf;
+  l_file logout;
+  l_thrdata data;
+} l_curenv;
 
 typedef struct {
   l_linknode node;
+  l_curenv* env;
   l_umedit weight;
   l_ushort index;
   /* shared with master */
-  l_mutex* svmtx;
-  l_mutex* mutex;
-  l_condv* condv;
+  l_mutex* svmx; /* mutex to guard service */
+  l_mutex* trmx; /* mutex to guard thread */
+  l_condv* cndv; /* condition variable */
   l_squeue* rxmq;
   int msgwait;
   /* thread own use */
-  lua_State* L;
   l_squeue* txmq;
   l_squeue* txms;
-  l_string log;
-  l_file logfile;
-  l_freebq* freebq;
+  l_squeue* txme;
+  l_freebq* frbq;
   l_thrhdl thrhdl;
-  int (*start)();
-  l_thrblock* block;
+  int (*start)(l_curenv*);
 } l_thread;
+
+typedef struct {
+  L_BUFHEAD HEAD;
+  l_filedesc evfd; /* guard by svmx */
+  l_ushort evmk;   /* guard by svmx */
+  l_ushort flag;   /* guard by svmx */
+  l_thread* thrd;  /* only set once when init */
+  int (*proc)(l_service*, l_message*);
+  l_ulong svid;    /* only set once when init */
+  l_umedit hint;   /* only access by a worker */
+  l_luastate* co;  /* need save int coref */
+  int (*func)(l_service*);
+  int (*kfun)(l_service*);
+} l_service;
+
+static void
+l_start_thread(l_curenv* env, int (*start)(l_curenv*)) {
+  if (env->curthr != env->master) {
+    l_loge_s("should start thread by master");
+    return;
+  }
+  { l_thread* thread = env->thiz;
+    thread->start = start;
+    thread->env->curthr = thread;
+    thread->env->master = env->master;
+    thread->env->G = env->G;
+    l_thrhdl_create(&thread->thrhdl, l_thread_proc, thread);
+  }
+}
+
+static void*
+l_thread_proc(void* para) {
+  l_thread* thread = (l_thread*)para;
+  return (void*)(l_int)thread->start(thread->env);
+}
+
+static l_umedit
+l_create_fresh_svid(l_global_env* env) {
+  l_umedit svid = 0;
+
+  l_mutex_lock(env->svmx);
+  env->seed += 1;
+  if (env->seed < L_SERVICE_USER_MIN_ID) {
+    env->seed = L_SERVICE_USER_MIN_ID;
+  }
+  svid = env->seed;
+  l_mutex_unlock(env->svmx);
+
+  return svid;
+}
+
+/** thread memory management
+fixed size memory allocation: the max size of this kind of memory
+can be known beforehead. or if the actual data size is larger than
+the memory size, a new larger memory is allocated, the data is
+copied to the new memory, the older one is discard and wasted.
+i.e., the discarded memory cannot be used anymore, unless it is
+anssigned to a new object to use explicity.
+how to move fixed size memory between thread? the fixed size
+memory is allocated once and used once. it is not reallocated
+and reused. if the thread that own the memory doesn't use the
+memory anymore, the fixed size memory can be dilivered to other
+threads by the messages.
+each service in a thread can manage a fixed size memory pool
+for its own use. but it is configureable, a service also can
+use thread's global fixed size memory pool. but if a service
+need reuse the memory pool, and need move memory to other
+threads via messages, it need use thread's global memory pool
+to allocate this kind of data. because thread's global memory
+is never be reallocated. or we already allocation messeage's
+data in thread's global memory pool.
+because the fixed size memory is allocated once and used once,
+and don't care when it is freed. so if the memory pool is full,
+a new memory need allocated and chained with the old memories.
+it needs to be chained is that we must keep the allocated
+memory address not be changed.
+the fixed size memory allocation usually suitable for small
+object allocation. if the discarded memory wasted, it will
+not cost much.
+---
+reusable small objects allocation:
+---
+large object allocation: larger than 8K or like, allocate
+directly from system.
+---
+string allocation:
+*/
+
+#define l_srvc_buf(b) ((l_service*)(b)->p)
+
+L_EXTERN l_service*
+l_create_service(l_curenv* env, l_int size, int (*proc)(l_curenv*, l_message*)) {
+  if (size < (l_int)sizeof(l_service)) {
+    l_loge_1("size %d", ld(size));
+    return 0;
+  }
+}
+
+L_EXTERN l_service*
+l_create_service_from(l_service* from, l_int size, int (*proc)(l_service*, l_message*)) {
+
+  if (size < (l_int)sizeof(l_service)) {
+    l_loge_1("size %d", ld(size));
+    return 0;
+  }
+
+  { l_thread* thrd = 0;
+
+    if (from && from->thrd) {
+      thrd = from->thrd;
+    } else {
+      thrd = l_thread_self();
+    }
+
+    { l_buffer* b = 0;
+
+      if (!l_buffer_new(&b, size, thrd)) {
+        return 0;
+      }
+
+      l_srvc_buf(b)->evfd = l_filedesc_();
+      l_srvc_buf(b)->svid = l_create_fresh_svid();
+      l_srvc_buf(b)->thrd = thrd;
+      l_srvc_buf(b)->proc = proc;
+
+      return l_srvc_buf(b);
+    }
+  }
+}
+
+static void
+l_master_wakeup(l_global_env* env) {
+  /* wakeup master to handle messages */
+  l_ioevmgr_wakeup(&env->evmgr);
+}
+
+static void /* send message to dest service from current thread */
+l_send_message(l_thread* cur, l_ulong destid, l_umedit msgid, l_umedit u32, l_umedit u64, l_message* msg) {
+  msg->dest = destid;
+  msg->msgid = msgid;
+  msg->data = u32;
+  msg->extra = u64;
+
+  if (l_msg_dest_tidx(msg) == cur->index) {
+    l_squeue_push(cur->txme, &msg->HEAD.node); /* send to self */
+  }
+  else if ((msgid >= L_MSG_MASTER_MIN_ID && msgid <= L_MSG_MASTER_MAX_ID) || l_msg_dest_svid(msg) == 0) {
+    l_squeue_push(cur->txms, &msg->HEAD.node); /* master messages or send to master */
+  }
+  else {
+    l_squeue_push(cur->txmq, &msg->HEAD.node); /* send to other threads */
+  }
+}
+
+static void
+l_flush_message(l_thread* cur) {
+}
+
+
 
 #if defined(L_THREAD_LOCAL)
 L_THREAD_LOCAL l_thread* l_self_thread;
@@ -99,9 +314,11 @@ l_thread_init(l_thread* t, l_config* conf) {
   t->rxmq = &b->qa;
   t->txmq = &b->qb;
   t->txms = &b->qc;
+  t->txme = &b->qd;
   l_squeue_init(t->rxmq);
   l_squeue_init(t->txmq);
   l_squeue_init(t->txms);
+  l_squeue_init(t->txme);
 
   t->freebq = &b->frbq;
   l_zero_n(t->freebq, sizeof(l_freebq));
@@ -114,48 +331,46 @@ l_thread_init(l_thread* t, l_config* conf) {
 static void
 l_thread_free(l_thread* t) {
   l_smplnode* node = 0;
-  l_squeue* frbq = 0;
-  l_squeue msgq;
-  l_squeue_init(&msgq);
-
-  if (!t->block)
+  if (!t->block) {
     return; /* already freed */
-
-  /* free all messages */
-
-  l_thread_lock(t);
-  l_squeue_pushQueue(&msgq, t->rxmq);
-  l_thread_unlock(t);
-
-  l_squeue_pushQueue(&msgq, t->txmq);
-  l_squeue_pushQueue(&msgq, t->txms);
-
-  while ((node = l_squeue_pop(&msgq))) {
-    l_raw_mfree(node);
   }
 
-  /* free all buffers */
+  { /* free all messages */
+    l_squeue msgq;
+    l_squeue_init(&msgq);
 
-  frbq = &t->freebq->queue;
-  while ((node = l_squeue_pop(frbq))) {
-    l_raw_mfree(node);
+    l_thread_lock(t);
+    l_squeue_pushQueue(&msgq, t->rxmq);
+    l_thread_unlock(t);
+
+    l_squeue_pushQueue(&msgq, t->txmq);
+    l_squeue_pushQueue(&msgq, t->txms);
+    l_squeue_pushQueue(&msgq, t->txme);
+
+    while ((node = l_squeue_pop(&msgq))) {
+      l_raw_mfree(node);
+    }
+  }
+
+  { /* free all buffers */
+    l_squeue* frbq = 0;
+    frbq = &t->freebq->queue;
+    while ((node = l_squeue_pop(frbq))) {
+      l_raw_mfree(node);
+    }
   }
 
   /* free locks */
-
   l_mutex_free(t->svmtx);
   l_mutex_free(t->mutex);
   l_condv_free(t->condv);
 
   /* others */
-
   l_thread_freeLog(t);
-
   if (t->L) {
     l_luastate_close(t->L);
     t->L = 0;
   }
-
   l_raw_mfree(t->block);
   t->block = 0;
 }

@@ -1,6 +1,5 @@
 #include "core/base.h"
-{
-  /* sizeof array test */
+{ /* sizeof array test */
   char s[] = "abc";
   l_medit a[] = {1, 2, 3, 4};
   l_assert(sizeof(s) == 4);
