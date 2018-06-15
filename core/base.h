@@ -33,8 +33,10 @@
 
 #undef L_SUCCESS
 #undef L_ERROR
+#undef L_EINVAL
 #define L_SUCCESS (0)
 #define L_ERROR (-1)
+#define L_EINVAL (-2)
 
 #undef L_MKSTR
 #undef L_X_MKSTR

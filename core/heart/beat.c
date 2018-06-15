@@ -1,4 +1,103 @@
 
+typedef struct {
+  l_int num_workers;
+  l_int max_stbl_size;
+  l_int min_lbuf_size;
+  l_byte filename[FILENAME_MAX+1];
+  l_byte* name_prefix_pend;
+  lua_State* L;
+} l_config;
+
+typedef struct {
+  int is_setup;
+  l_config conf;
+  l_squeue rxmq;
+  l_mutex mgmx;
+  l_ioevmgr emgr;
+  l_mutex svmx;
+  l_umedit seed;
+} l_global;
+
+typedef struct {
+  l_global* G;
+  lua_State* L;
+  l_scheme* S;
+  l_thread* curthr;
+  l_thread* master;
+  l_string strbuf;
+  l_stanfile logout;
+} l_curenv;
+
+struct l_service;
+typedef struct {
+  l_linknode node;
+  l_umedit weight;
+  l_ushort index;
+  /* shared with master */
+  l_mutex* svmx; /* mutex to guard service */
+  l_mutex* trmx; /* mutex to guard thread */
+  l_condv* cndv; /* condition variable */
+  l_squeue* rxmq;
+  int msgwait;
+  /* thread own use */
+  l_squeue* txmq;
+  l_squeue* txms;
+  l_squeue* txme;
+  l_freebq* frbq;
+  struct l_service* cursvc;
+  int (*start)(l_curenv*);
+  l_thrhdl thrhdl;
+  l_squeue q[4];
+  l_freebq frbq;
+  l_mutex mx[2];
+  l_condv cnda;
+} l_thread;
+
+static l_curenv* l_master_init();
+static int l_master_loop(l_curenv* env, int (*start)(l_curenv*));
+static int l_master_clean(l_curenv* env);
+static int l_master_parse_cmdline(l_curenv* env, int argc, char** argv);
+static int l_worker_start(l_curenv* env);
+static int l_thread_start(l_curenv* env, l_thread* t, int (*start)(l_curenv*));
+static int l_thread_join(l_curenv* env, l_thread* t);
+
+L_EXTERN int
+l_start_main_thread(int (*start)(l_curenv*), int argc, char** argv)
+{
+  l_curenv* env = l_master_init();
+  l_master_parse_cmdline(env, argc, argv);
+  l_logm_s("master initialized");
+
+  { int i = 0;
+    int num_workers = env->G->num_workers;
+    l_thread* t = env->G->workers;
+
+    for (; i < num_workers; ++i) {
+        l_thread_start(env, t + i, l_worker_start);
+    }
+
+    l_logm_s("%d-worker started", ld(num_workers));
+
+    i = l_master_loop(env, start);
+    l_logm_s("master exited %d", ld(i));
+
+    for (i = 0; i < num_workers; ++i) {
+      l_thread_join(env, t + i);
+      logm_s("worker %d exited", ld(i+1));
+    }
+    l_logm_s("workers exited");
+  }
+
+  l_master_clean(env);
+  return 0;
+}
+
+static l_curenv*
+l_master_init()
+{
+  
+}
+
 #define l_msg_ptr(b) ((l_message*)(b)->p)
 #define L_MSG_MASTER_MIN_ID
 #define L_MSG_MASTER_MAX_ID
@@ -36,58 +135,6 @@ typedef struct {
 typedef struct {
   void* p;
 } l_buffer;
-
-typedef struct {
-  l_mutex mtxa;
-  l_mutex mtxb;
-  l_condv cnda;
-  l_squeue qa;
-  l_squeue qb;
-  l_squeue qc;
-  l_squeue qd;
-  l_freebq frbq;
-} l_thrdata;
-
-typedef struct {
-  l_squeue rxmq;
-  l_mutex mgmx;
-  l_ioevmgr emgr;
-  l_mutex svmx;
-  l_umedit seed;
-} l_global;
-
-typedef struct {
-  l_global* G;
-  l_luastate* L;
-  l_scheme* S;
-  l_thread* curthr;
-  l_service* service;
-  l_thread* master;
-  void* thiz;
-  l_string strbuf;
-  l_file logout;
-  l_thrdata data;
-} l_curenv;
-
-typedef struct {
-  l_linknode node;
-  l_curenv* env;
-  l_umedit weight;
-  l_ushort index;
-  /* shared with master */
-  l_mutex* svmx; /* mutex to guard service */
-  l_mutex* trmx; /* mutex to guard thread */
-  l_condv* cndv; /* condition variable */
-  l_squeue* rxmq;
-  int msgwait;
-  /* thread own use */
-  l_squeue* txmq;
-  l_squeue* txms;
-  l_squeue* txme;
-  l_freebq* frbq;
-  l_thrhdl thrhdl;
-  int (*start)(l_curenv*);
-} l_thread;
 
 typedef struct {
   L_BUFHEAD HEAD;
