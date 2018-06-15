@@ -95,7 +95,6 @@ l_start_main_thread(int (*start)(l_curenv*), int argc, char** argv)
 static l_curenv*
 l_master_init()
 {
-  
 }
 
 #define l_msg_ptr(b) ((l_message*)(b)->p)
@@ -151,28 +150,30 @@ typedef struct {
 } l_service;
 
 static void
-l_start_thread(l_curenv* env, int (*start)(l_curenv*)) {
+l_thread_start(l_curenv* env, l_thread* t, int (*start)(l_curenv*))
+{
   if (env->curthr != env->master) {
     l_loge_s("should start thread by master");
     return;
   }
-  { l_thread* thread = env->thiz;
-    thread->start = start;
-    thread->env->curthr = thread;
-    thread->env->master = env->master;
-    thread->env->G = env->G;
-    l_thrhdl_create(&thread->thrhdl, l_thread_proc, thread);
-  }
+
+  t->start = start;
+  t->env->curthr = thread;
+  t->env->master = env->master;
+  t->env->G = env->G;
+  l_thrhdl_create(&t->thrhdl, l_thread_proc, t);
 }
 
 static void*
-l_thread_proc(void* para) {
-  l_thread* thread = (l_thread*)para;
-  return (void*)(l_int)thread->start(thread->env);
+l_thread_proc(void* para)
+{
+  l_thread* t = (l_thread*)para;
+  return (void*)(l_int)t->start(t->env);
 }
 
 static l_umedit
-l_create_fresh_svid(l_global_env* env) {
+l_create_fresh_svid(l_global_env* env)
+{
   l_umedit svid = 0;
 
   l_mutex_lock(env->svmx);
@@ -226,7 +227,8 @@ string allocation:
 #define l_srvc_buf(b) ((l_service*)(b)->p)
 
 L_EXTERN l_service*
-l_create_service(l_curenv* env, l_int size, int (*proc)(l_curenv*, l_message*)) {
+l_create_service(l_curenv* env, l_int size, int (*proc)(l_curenv*, l_message*))
+{
   if (size < (l_int)sizeof(l_service)) {
     l_loge_1("size %d", ld(size));
     return 0;
@@ -234,7 +236,8 @@ l_create_service(l_curenv* env, l_int size, int (*proc)(l_curenv*, l_message*)) 
 }
 
 L_EXTERN l_service*
-l_create_service_from(l_service* from, l_int size, int (*proc)(l_service*, l_message*)) {
+l_create_service_from(l_service* from, l_int size, int (*proc)(l_service*, l_message*))
+{
 
   if (size < (l_int)sizeof(l_service)) {
     l_loge_1("size %d", ld(size));
