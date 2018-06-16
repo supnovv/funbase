@@ -144,6 +144,11 @@ extern void l_impl_logger_func(const void* tag, const void* fmt, ...);
 #define l_logd_8(fmt,a,b,c,d,e,f,g,h) l_impl_logger_8("48[D] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g,h)
 #define l_logd_9(t,a,b,c,d,e,f,g,h,i) l_impl_logger_9("49[D] " L_FILE_LINE, (t), a,b,c,d,e,f,g,h,i)
 
+typedef union {
+  double d;
+  l_byte a[8];
+} l_eightbyte;
+
 typedef struct {
   const l_byte* start;
   l_int len;

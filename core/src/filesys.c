@@ -218,6 +218,11 @@ l_stanfile_write(l_stanfile* s, const void* p, l_int len)
 }
 
 L_EXTERN l_int
+l_stanfile_write_strn(l_stanfile* out, l_strn s) {
+  return l_stanfile_write(out, s.start, s.len);
+}
+
+L_EXTERN l_int
 l_stanfile_put(l_stanfile* s, l_byte ch)
 {
   if (s->file == 0) {

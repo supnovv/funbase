@@ -1,32 +1,83 @@
+#define L_MALLOC(type) ((type)*)l_rawapi_malloc(sizeof(type))
+#define L_CALLOC(type) ((type)*)l_rawapi_calloc(sizeof(type))
+#define L_MALLOC_N(type, n) ((type)*)l_rawapi_malloc(sizeof(type) * (n))
+#define L_CALLOC_N(type, n) ((type)*)l_rawapi_calloc(sizeof(type) * (n))
+
+typedef union {
+  l_byte start;
+  l_eightbyte a[10];
+} l_strint;
+
+L_EXTERN l_strn
+l_strint_strn(l_strint* s)
+{
+  return l_strn_p(((l_byte*)s) + s->start, s+1);
+}
+
+L_EXTERN l_strint
+l_ulong_to_string(l_ulong n) {
+  l_strint s;
+  l_byte* p = (l_byte*)((&s) + 1);
+
+  *(--p) = (n % 10) + '0';
+
+  while ((n /= 10)) {
+    *(--p) = (n % 10) + '0';
+  }
+
+  s->start = p - (l_byte*)&s;
+  return s;
+}
+
+typedef struct {
+  l_smplnode node;
+  l_int bfsize;
+} L_BUFHEAD;
+
+typedef struct {
+  L_BUFHEAD HEAD;
+  l_int size;
+  l_int fixed_max_size;
+} l_strbuf;
 
 typedef struct {
   l_int num_workers;
   l_int max_stbl_size;
-  l_int min_lbuf_size;
+  l_int max_lbuf_size;
   l_byte filename[FILENAME_MAX+1];
-  l_byte* name_prefix_pend;
-  lua_State* L;
+  l_byte* name_prefix_end;
 } l_config;
 
-typedef struct {
-  int is_setup;
-  l_config conf;
-  l_squeue rxmq;
-  l_mutex mgmx;
-  l_ioevmgr emgr;
-  l_mutex svmx;
-  l_umedit seed;
-} l_global;
+static void
+l_config_load(l_config* C)
+{
+  lua_State* L = luastate_new();
+  C->num_workers = luastate_readint(c->L, "workers");
+  if (C->num_workers < 0) {
+    C->num_workers = 0;
+  }
+  // ...
 
+  luastate_close(&L);
+}
+
+struct l_global;
 typedef struct {
-  l_global* G;
+  struct l_global* G;
   lua_State* L;
   l_scheme* S;
   l_thread* curthr;
   l_thread* master;
-  l_string strbuf;
+  l_string logstr;
   l_stanfile logout;
 } l_curenv;
+
+typedef struct {
+  l_squeue queue; /* free buffer q */
+  l_int size;  /* size of the queue */
+  l_int frmem; /* free memory size */
+  l_int limit; /* free memory limit */
+} l_freebq;
 
 struct l_service;
 typedef struct {
@@ -47,53 +98,220 @@ typedef struct {
   struct l_service* cursvc;
   int (*start)(l_curenv*);
   l_thrhdl thrhdl;
-  l_squeue q[4];
-  l_freebq frbq;
+  l_curenv E;
   l_mutex mx[2];
-  l_condv cnda;
+  l_condv cond;
+  l_squeue q[4];
+  l_freebq free;
 } l_thread;
 
-static l_curenv* l_master_init();
-static int l_master_loop(l_curenv* env, int (*start)(l_curenv*));
-static int l_master_clean(l_curenv* env);
-static int l_master_parse_cmdline(l_curenv* env, int argc, char** argv);
-static int l_worker_start(l_curenv* env);
-static int l_thread_start(l_curenv* env, l_thread* t, int (*start)(l_curenv*));
-static int l_thread_join(l_curenv* env, l_thread* t);
+static void
+l_thread_init(l_thread* t)
+{
+  if (t->svmx) {
+    return;
+  }
+
+  t->svmx = &t->mx[0];
+  t->trmx = &t->mx[1];
+  t->cndv = &t->cond;
+
+  t->rxmq = &t->q[0];
+  t->txmq = &t->q[1];
+  t->txms = &t->q[2];
+  t->txme = &t->q[3];
+
+  t->frbq = &t->free;
+
+  l_mutex_init(t->svmx);
+  l_mutex_init(t->trmx);
+  l_condv_init(t->cndv);
+
+  l_squeue_init(t->rxmq);
+  l_squeue_init(t->txmq);
+  l_squeue_init(t->txms);
+  l_squeue_init(t->txme);
+
+  l_squeue_init(&t->frbq.queue);
+}
+
+typedef struct l_global {
+  l_config conf;
+  /* thread global */
+  l_thread tmas;
+  l_thread* wrks;
+  l_priorq thrq;
+  /* io event global */
+  l_ioevmgr emgr;
+  /* message global */
+  l_mutex mgmx;
+  l_squeue rxmq;
+  /* service global */
+  l_mutex svmx;
+  l_umedit seed;
+  l_svctbl stbl;
+} l_global;
+
+static void
+l_thread_setup(l_curenv* env)
+{
+  l_config* C = &env->G.conf;
+  l_strn start_log = l_strn_literal("--------" L_NEWLINE);
+  if (l_strn_eq(l_strn_literal("stdout"), l_strn_c(C->filename))) {
+    env->logstr.impl = 1;
+    env->logout.file = stdout;
+    l_stanfile_write_strn(&env->logout, start_log);
+  } else if (l_strn_eq(l_strn_literal("stderr"), l_strn_c(C->filename))) {
+    env->logstr.impl = 2;
+    env->logout.file = stderr;
+    l_stanfile_write_strn(&env->logout, start_log);
+  } else {
+    l_string_create(&env->logstr, C->max_lbuf_size);
+    { l_byte* name = C->name_prefix_end;
+      l_strint index = l_ulong_to_string(C->curthr->index);
+      l_strn idxstr = l_strint_strn(&index);
+      *name++ = '_';
+      name = l_copy_strn(idxstr, name);
+      name = l_copy_strn(l_strn_literal(".lnlylib.log"), name);
+      *name = 0;
+      env->logout = l_stanfile_open_append_nobuf(C->filename);
+      l_string_append(&env->logstr, start_log);
+    }
+  }
+}
+
+static l_global*
+l_global_setup()
+{
+  l_global* G = L_CALLOC(l_global);
+  l_config* C = &G->conf;
+  l_config_load(&G->conf);
+
+  /* thread */
+
+  l_thread_init(&G->tmas, C);
+
+  l_priorq_init(&G->thrq);
+
+  if (C->num_workers) {
+    G->wrks = L_CALLOC_N(l_thread, C->num_workers);
+    { l_thread* t = 0;
+      int i = 0;
+      for (; i < C->num_workers; ++i) {
+        t = G->wrks + i;
+        t->index = i + 1; /* worker thread index start with 1 */
+        l_thread_init(t, C);
+        l_priorq_push(&G->thrq, &t->node);
+      }
+    }
+  }
+
+  /* io event */
+
+  l_ioevmgr_init(&G->emgr);
+
+  /* message */
+
+  l_mutex_init(&G->mgmx);
+  l_squeue_init(&G->rxmq);
+
+  /* service */
+
+  l_mutex_init(&G->svmx);
+  G->seed = L_SERVICE_START_ID;
+  l_svctbl_init(&G->stbl, C->max_stbl_size);
+
+  /* others */
+
+  { l_strn logfile = l_strn_p(C->filename, C->name_prefix_end);
+    l_logm_5("workers %d max_lbuf_size %d max_stbl_size 2^%d logfile %strn",
+      ld(C->num_workers), ld(C->max_lbuf_size), ld(C->max_stbl_size),
+      lstrn(&logfile));
+  }
+
+  return G;
+}
+
+static void
+l_global_clean(l_global* G)
+{
+}
+
+static void*
+l_thread_proc(void* para)
+{
+  l_thread* t = (l_thread*)para;
+  return (void*)(l_int)t->start(t->env);
+}
+
+static void
+l_thread_start(l_curenv* env, l_thread* t, int (*start)(l_curenv*))
+{
+  if (env->curthr != env->master) {
+    l_loge_s("should start thread by master");
+    return;
+  }
+  t->start = start;
+  t->E.G = env->G;
+  t->E.L = luastate_new();
+  t->E.curthr = t;
+  t->E.master = env->master;
+  l_thread_setup(&t->E);
+  l_rawapi_thread_create(&t->thrhdl, l_thread_proc, t);
+}
+
+static l_curenv* l_master_setup();
+static void l_master_clean(l_curenv* env);
 
 L_EXTERN int
 l_start_main_thread(int (*start)(l_curenv*), int argc, char** argv)
 {
-  l_curenv* env = l_master_init();
+  l_curenv* env = l_master_setup(start);
   l_master_parse_cmdline(env, argc, argv);
-  l_logm_s("master initialized");
+  l_logm_s("master startup");
 
-  { int i = 0;
-    int num_workers = env->G->num_workers;
-    l_thread* t = env->G->workers;
+  { l_int i = 0;
+    l_int num_workers = env->G->conf.num_workers;
+    l_thread* t = env->G->wrks;
 
     for (; i < num_workers; ++i) {
         l_thread_start(env, t + i, l_worker_start);
     }
 
-    l_logm_s("%d-worker started", ld(num_workers));
+    l_logm_s("worker %d start", ld(num_workers));
 
-    i = l_master_loop(env, start);
-    l_logm_s("master exited %d", ld(i));
+    i = l_master_loop(env);
+    l_logm_s("master exit %d", ld(i));
 
     for (i = 0; i < num_workers; ++i) {
       l_thread_join(env, t + i);
-      logm_s("worker %d exited", ld(i+1));
+      logm_s("worker %d exit", ld(i+1));
     }
-    l_logm_s("workers exited");
   }
 
+  l_logm_s("cleanup");
   l_master_clean(env);
   return 0;
 }
 
 static l_curenv*
-l_master_init()
+l_master_setup(int (*start)(l_curenv*))
+{
+  l_global* G = l_global_setup();
+  l_thread* master = &G->tmas;
+
+  master->start = start;
+  master->thdhdl = l_rawapi_thread_self();
+  master->E.G = G;
+  master->E.L = luastate_new();
+  master->E.curthr = master;
+  master->E.master = master;
+  l_thread_setup(&master->E, master);
+  return E;
+}
+
+static void
+l_master_clean(l_curenv* env)
 {
 }
 
@@ -148,28 +366,6 @@ typedef struct {
   int (*func)(l_service*);
   int (*kfun)(l_service*);
 } l_service;
-
-static void
-l_thread_start(l_curenv* env, l_thread* t, int (*start)(l_curenv*))
-{
-  if (env->curthr != env->master) {
-    l_loge_s("should start thread by master");
-    return;
-  }
-
-  t->start = start;
-  t->env->curthr = thread;
-  t->env->master = env->master;
-  t->env->G = env->G;
-  l_thrhdl_create(&t->thrhdl, l_thread_proc, t);
-}
-
-static void*
-l_thread_proc(void* para)
-{
-  l_thread* t = (l_thread*)para;
-  return (void*)(l_int)t->start(t->env);
-}
 
 static l_umedit
 l_create_fresh_svid(l_global_env* env)
@@ -344,41 +540,6 @@ l_thread_unlock(l_thread* t) {
 }
 
 static void
-l_thread_init(l_thread* t, l_config* conf) {
-  l_thrblock* b = 0;
-  if (t->block) return; /* already initialized */
-
-  t->weight = 0;
-  t->msgwait = 0;
-
-  t->block = l_raw_malloc(sizeof(l_thrblock));
-  b = t->block;
-
-  t->svmtx = &b->mtxa;
-  t->mutex = &b->mtxb;
-  t->condv = &b->cnda;
-  l_mutex_init(t->svmtx);
-  l_mutex_init(t->mutex);
-  l_condv_init(t->condv);
-
-  t->rxmq = &b->qa;
-  t->txmq = &b->qb;
-  t->txms = &b->qc;
-  t->txme = &b->qd;
-  l_squeue_init(t->rxmq);
-  l_squeue_init(t->txmq);
-  l_squeue_init(t->txms);
-  l_squeue_init(t->txme);
-
-  t->freebq = &b->frbq;
-  l_zero_n(t->freebq, sizeof(l_freebq));
-  l_squeue_init(&b->frbq.queue);
-  b->frbq.limit = conf->thread_max_free_memory;
-
-  l_thread_initLog(t, conf);
-}
-
-static void
 l_thread_free(l_thread* t) {
   l_smplnode* node = 0;
   if (!t->block) {
@@ -433,12 +594,6 @@ l_thread_proc(void* para) {
   n = self->start();
   l_thread_setSelf(0);
   return (void*)(l_int)n;
-}
-
-static int
-l_thread_start(l_thread* t, int (*start)()) {
-  t->start = start;
-  return l_thrhdl_create(&t->thrdhl, l_thread_proc, t);
 }
 
 static int
