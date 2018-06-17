@@ -102,7 +102,7 @@ typedef struct {
   l_mutex mx[2];
   l_condv cond;
   l_squeue q[4];
-  l_freebq free;
+  l_freebq bufq;
 } l_thread;
 
 static void
@@ -121,7 +121,7 @@ l_thread_init(l_thread* t)
   t->txms = &t->q[2];
   t->txme = &t->q[3];
 
-  t->frbq = &t->free;
+  t->frbq = &t->bufq;
 
   l_mutex_init(t->svmx);
   l_mutex_init(t->trmx);
@@ -336,6 +336,57 @@ l_master_clean(l_curenv* env)
 #define L_SERVICE_LAUNCHER 0x02
 #define L_SERVICE_USER_MIN_ID (0xffff+1)
 
+static int
+l_launcher_service_proc(l_curenv* env, l_message* msg)
+{
+  switch (msg->mgid) {
+  case L_MSG_START_SRVC_REQ:
+    l_logm_s(env, "launcher service started");
+    break;
+  case L_MSG_CLOSE_SRVC_REQ:
+    l_logm_s(env, "launcher service closed");
+    break;
+  case L_MSG_START_LAUNCHER:
+    l_logm_1("launcher service %d", ld(env->cursvc->svid));
+    if (msg->ptra) {
+      typedef int (*start_proc)(l_curenv*);
+      start_proc start = (start_proc)(void*)msg->ptra;
+      return start(env);
+    }
+    break;
+  default:
+    break;
+  }
+  return 0;
+}
+
+static int
+l_master_loop(l_curenv* E)
+{
+  l_squeue rxmq;
+  l_squeue frmq;
+  l_squeue* mq = 0;
+  l_service* srvc = 0;
+  l_message* msg = 0;
+  l_int i = 0;
+  l_int n = 0;
+
+  l_logm_s(E, "master run");
+
+  if (E->G->conf.num_workers) {
+    n = E->G->conf.num_workers;
+    mq = L_CALLOC_N(l_squeue, n);
+    for (i = 0; i < n; ++i) {
+      l_squeue_init(mq + i);
+    }
+  }
+
+  l_squeue_init(&rxmq);
+  l_squeue_init(&frmq);
+
+  
+}
+
 typedef struct {
   l_smplnode node;
   l_int bfsz;
@@ -346,11 +397,14 @@ typedef struct {
   l_ulong dest;
   l_umedit mgid;
   l_umedit data;
-  l_ulong extra;
+  l_ulong numa;
+  l_ulong numb;
+  l_uint ptra;
+  l_uint ptrb;
 } l_message;
 
 typedef struct {
-  void* p;
+  void* impl;
 } l_buffer;
 
 typedef struct {
