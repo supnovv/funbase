@@ -791,3 +791,625 @@ l_master_clean() {
   l_initialized = false;
 }
 
+/* -------- new version heart beat implementation -------- */
+
+#define L_SERVICE_FLAG_ALIVE 0x0001
+
+typedef struct {
+  l_squeue node;
+  l_service* service;
+  l_umedit index;
+  l_umedit srvc_alive;
+  l_squeue bkmq;
+} l_srvcslot;
+
+typedef struct {
+  l_umedit capacity; /* total services the slot array can contain */
+  l_umedit size; /* number of current exist services */
+  l_squeue free_slots;
+  l_srvcslot* slot;
+} l_srvctable;
+
+static l_srvcslot*
+l_srvctable_alloc_slot(l_srvctable* stbl)
+{
+  l_squeue* free_slots = &stbl->free_slots;
+  l_srvcslot* slot = 0;
+  l_srvcslot* new_slot = 0;
+  l_umedit new_size = 0;
+  l_umedit i = 0;
+
+  if ((slot = (l_srvcslot*)l_squeue_pop(free_slots))) {
+    stbl->size += 1;
+    return slot;
+  }
+
+  l_logw_2("stbl is full: capacity %d size %d",
+      ld(stbl->capacity), ld(stbl->size));
+
+  new_size = stbl->capacity * 2;
+  if (new_size <= stbl->capacity) {
+    l_loge_2("current stbl is too large %d", stbl->capacity);
+    return 0;
+  }
+
+  l_logw_1("stbl alloced to new size %d", ld(new_size));
+  new_slot = L_MALLOC_N(l_srvcslot, new_size);
+
+  /* copy the old slots and free the old */
+  for (i = 0; i < stbl->capacity; ++i) {
+    new_slot[i] = stbl->slot[i];
+  }
+
+  l_rawapi_mfree(stbl->slot);
+
+  /* init the new slots */
+  for (; i < new_size; ++i) {
+    slot = new_slot + i;
+    slot->service = 0;
+    slot->index = i;
+    slot->srvc_alive = 0;
+    l_squeue_init(&slot->bkmq);
+    /* insert new slot to free queue */
+    l_squeue_push(free_slots, &slot->node);
+  }
+
+  stbl->capacity = new_size;
+  stbl->slot = new_slot;
+
+  if ((slot = (l_srvcslot*)l_squeue_pop(free_slots))) {
+    stbl->size += 1;
+    return slot;
+  }
+
+  return 0;
+}
+
+static void
+l_srvctable_init(l_srvctable* stbl, l_int init_size)
+{
+  l_srvcslot* slot = 0;
+  l_umedit i = 0;
+
+  stbl->capacity = init_size;
+  stbl->size = 0;
+  l_squeue_init(&stbl->frslot);
+
+  stbl->slot = L_MALLOC_N(l_srvcslot, stbl->capacity);
+  for (i = 0; i < stbl->capacity; ++i) {
+    /* init the service slot */
+    slot = stbl->slot + i;
+    slot->service = 0;
+    slot->srvc_alive = 0;
+    slot->index = i;
+    l_squeue_init(&slot->bkmq);
+
+    /* insert the slot to free queue */
+    l_squeue_push(&stbl->frslot, &slot->node);
+  }
+}
+
+typedef struct {
+  l_worker* worker;
+  l_squeue rxmq;
+  l_mutex rxlk;
+} l_worknode;
+
+typedef struct {
+  l_thrhdl thrhdl;
+  void (*start)(lnlylib_env*);
+  l_uint mast_flags;
+  l_squeue mast_frsq; /* free service queue */
+  l_squeue mast_frmq; /* free message queue in master */
+  l_int workers; /* size of work node array */
+  l_worknode* node;
+  l_srvctable stbl;
+  lnlylib_env main_env;
+} l_master;
+
+typedef struct {
+  l_int capacity;
+  l_int size;
+  l_byte a[FILENAME_MAX+1];
+} l_filename;
+
+typedef struct {
+  l_int num_workers;
+  l_int init_stbl_size;
+  l_filename log_file_name;
+} l_config;
+
+typedef struct {
+} l_cmdline;
+
+typedef struct {
+  l_config conf;
+  l_cmdline cmds;
+  l_master master;
+  l_squeue Q;
+  l_mutex QLOCK;
+  l_condv QCNDV;
+} l_global;
+
+
+static void
+l_config_load(l_config* C)
+{
+  lua_State* L = luastate_new();
+  C->num_workers = luastate_readint(c->L, "workers");
+  if (C->num_workers < 0) {
+    C->num_workers = 0;
+  }
+  // ...
+
+  luastate_close(&L);
+}
+
+static lnlylib_env*
+l_master_init(void (*start)(lnlylib_env*), int argc, char** argv)
+{
+  l_global* G = L_MALLOC(l_global);
+  l_master* M = &G->master;
+  l_config* C = &G->conf;
+  l_workernode* node = 0;
+  l_worker* worker = 0;
+  lnlylib_env* man_env = 0;
+  l_int i = 0;
+
+  l_parse_cmd_line(&G->cmds, argc, argv);
+
+  l_config_load(C);
+
+  l_squeue_init(&G->Q);
+  l_mutex_init(&G->QLOCK);
+  l_condv_init(&G->QCNDV);
+
+  M->thrhdl = l_rawapi_thrhdl_self();
+  M->start = start;
+  l_squeue_init(&M->frsq);
+
+  M->workers = C->num_workers;
+  M->node = L_MALLOC_N(l_worknode, M->workers);
+
+  for (i = 0; i < M->workers; ++i) {
+    node = M->node + i;
+    l_squeue_init(&node->rxmq);
+    l_mutex_init(&node->rxlk);
+
+    worker = &node->worker;
+    worker->index = i;
+    worker->weight = 0; /* TODO: consider thread weight */
+
+    l_condv_init(&worker->cond);
+    l_squeue_init(worker->mq + 0);
+    l_squeue_init(worker->mq + 1);
+    l_squeue_init(worker->mq + 2);
+  }
+
+  l_srvctable_init(&M->stbl, C->min_stbl_size);
+
+  main_env = &M->main_env;
+  main_env->G = G;
+  main_env->csvc = 0;
+  main_env->cthr = 0;
+  main_env->cmsg = 0;
+
+  return main_env;
+}
+
+typedef struct {
+  l_smplnode node; /* chained in global q */
+  l_umedit svid;
+  l_squeue srvc_msgq;
+  l_uint srvc_flags;
+  lua_State* L;
+  l_squeue co;
+  l_uint turns;
+  void (*cb)(lnlylib_env*);
+  void* ud;
+} l_service;
+
+static void
+l_service_init(l_service* srvc, l_umedit svid, void (*cb)(lnlylib_env*), void* ud, l_umedit flags)
+{
+  srvc->svid = svid;
+  l_squeue_init(&srvc->msgq);
+  srvc->L = 0;
+  l_squeue_init(&srvc->co);
+  srvc->flags = flags;
+  srvc->turns = 0;
+  srvc->cb = cb;
+  srvc->ud = ud;
+}
+
+static l_service*
+l_master_create_service_impl(l_master* M, void (*cb)(lnlylib_env*), void* ud, l_umedit flags)
+{
+  l_service* service = 0;
+  l_srvcslot* slot = 0;
+  l_srvctable* stbl = &M->stbl;
+
+  service = (l_service*)l_squeue_pop(&M->frsq);
+  if (service == 0) {
+    service = L_MALLOC(l_service);
+  }
+
+  slot = l_srvctable_alloc_slot(stbl);
+  if (slot == 0) {
+    return 0;
+  }
+
+  l_service_init(service, slot->index, cb, ud, flags);
+  slot->service = 0;
+  slot->srvc_alive = 1;
+  return service;
+}
+
+static int
+l_master_loop(lnlylib_env* main_env)
+{
+  l_global* G = main_env->G;
+  l_squeue* Q = &G->Q;
+  l_mutex* QLOCK = &G->QLOCK;
+  l_condv* QCNDV = &G->QCNDV;
+
+  l_master* M = &G->master;
+  l_worknode* node = 0;
+  l_int workers = M->workers;
+  l_message* msg = 0;
+  l_message* cur_msg = 0;
+  l_service* service = 0;
+  l_srvctable* stbl = &M->stbl;
+  l_srvcslot* srvc_slot = 0;
+  l_msg_current_work_done* done;
+  l_int i = 0;
+  l_int mssg_dest = 0;
+
+  l_service* launcher = 0;
+  l_message* oncreate = 0;
+  l_int global_q_is_empty = 0;
+  l_squeue rxmq;
+  l_squeue svcq;
+  l_squeue temp_svcq;
+
+  l_squeue_init(&svcq);
+  l_squeue_init(&rxmq);
+  l_squeue_init(&temp_svcq);
+
+  /* create 1st service to bang the new world */
+  launcher = l_master_create_service_impl(M, M->start, 0, 0);
+  oncreate = L_MALLOC(l_message);
+  oncreate.dest = launcher->svid;
+  oncreate.from = 0;
+  oncreate.mgid = L_MSG_SERVICE_ONCREATE;
+  oncreate.flags = 0;
+  oncreate.size = 0;
+  oncreate.data = 0;
+
+  l_squeue_push(&launcher->msgq, &oncreate->node);
+  l_squeue_push(&svcq, &launcher->node);
+
+  for (; ;) {
+
+    /* insert services in svcq to global q to handle */
+    l_mutex_lock(QLOCK);
+    global_q_is_empty = l_squeue_is_empty(Q);
+    l_squeue_push_queue(Q, &svcq->node);
+    l_mutex_unlock(QLOCK);
+
+    if (global_q_is_empty) {
+      l_condv_broadcast(QCNDV);
+    }
+
+    for (; ;) {
+      for (i = 0; i < workers; ++i) {
+        node = M->node + i;
+        l_mutex_lock(&node->rxlk);
+        l_squeue_push_queue(&rxmq, &node->rxmq);
+        l_mutex_unlock(&node->rxlk);
+      }
+
+      if (l_squeue_is_empty(&rxmq)) {
+        l_rawapi_sleep(30);
+        continue;
+      }
+
+      while ((msg = (l_message*)l_sqeueue_pop(&rxmq))) {
+        switch (msg->mgid) {
+        case L_MSG_CURTASK_DONE:
+          done = (l_msg_current_work_done)msg->mssg_data;
+          service = done->service;
+          srvc_slot = stbl->slot + service->svid;
+          srvc_slot->service = service;
+          l_squeue_push(&service->srvc_msgq, &(srvc_slot->bkmq.node));
+
+          l_assert((service->srvc_flags & L_FLAG_NOT_HANDLED_SERVICE_INSERTED_INTO_TEMPQ) == 0);
+          l_squeue_push(&temp_svcq, &service->node);
+          service->srvc_flags |= L_FLAG_NOT_HANDLED_SERVICE_INSERTED_INTO_TEMPQ;
+
+          while ((cur_msg = (l_message*)l_squeue_pop(&done->txmq))) {
+            mssg_dest = cur_msg->mssg_dest;
+            srvc_slot = stbl->slot + mssg_dest;
+            if (mssg_dest < stbl->capacity && srvc_slot->srvc_alive) {
+              service = srvc_slot->service;
+              if (service) {
+                /* service is in the service table and not handled yet,
+                   push the message to service's message queue */
+                l_squeue_push(&service->srvc_msgq, &cur_msg->node);
+                if ((service->srvc_flags & L_FLAG_NOT_HANDLED_SERVICE_INSERTED_INTO_TEMPQ) == 0) {
+                  l_squeue_push(&temp_svcq, &service->node);
+                  service->srvc_flags |= L_FLAG_NOT_HANDLED_SERVICE_INSERTED_INTO_TEMPQ;
+                }
+              } else {
+                /* service is in global queue or is handling in worker thread,
+                   just push the message to its backup message queue */
+                l_squeue_push(&srvc_slot->bkmq, &cur_msg->node);
+              }
+            } else {
+              /* invalide message, just free it. TODO: free message data */
+              l_squeue_push(&M->mast_frmq, &cur_msg->node);
+            }
+          }
+          break;
+        default:
+          /* unrecognized message, just free it. TODO: free message data */
+          l_squeue_push(&M->mast_frmq, &cur_msg->node);
+          break;
+        }
+      }
+
+      while ((service = (l_service*)l_squeue_pop(&temp_svcq))) {
+        srvc_slot = stbl->slot + service->svid;
+        if (l_squeue_is_empty(&service->srvc_msgq)) {
+          service->srvc_flags &= ~L_FLAG_NOT_HANDLED_SERVICE_INSERTED_INTO_TEMPQ;
+          l_assert(srvc_slot->service);
+        } else {
+          service->srvc_flags &= ~L_FLAG_NOT_HANDLED_SERVICE_INSERTED_INTO_TEMPQ;
+          srvc_slot->service = 0;
+          l_squeue_push(&svcq, &service->node);
+        }
+      }
+
+      if (l_squeue_nt_empty(&svcq)) {
+        break;
+      }
+    }
+  }
+}
+
+
+
+typedef struct {
+  l_service* srvc;
+  l_squeue txmq;
+} l_msg_current_work_done;
+
+
+typedef struct {
+  l_worker* worker;
+  l_squeue rxmq;
+  l_mutex rxlk;
+} l_worknode;
+
+typedef struct {
+  l_thrhdl thrhdl;
+  void (*start)(lnlylib_env*);
+  l_uint mast_flags;
+  l_squeue mast_frsq; /* free service queue */
+  l_squeue mast_frmq; /* free message queue in master */
+  l_int workers; /* size of work node array */
+  l_worknode* node;
+  l_srvctable stbl;
+  lnlylib_env main_env;
+} l_master;
+
+static void*
+l_worker_thread_proc(void* para)
+{
+  lnlylib_env* main_env = (lnlylib_env*)para;
+  return (void*)(l_int)l_worker_loop(main_env);
+}
+
+L_EXTERN int
+lnlylib_main(void (*start)(lnlylib_env*), int argc, char** argv)
+{
+  lnlylib_env* main_env = l_master_init(start, argc, argv);
+  l_master* M = &main_env->G->master;
+  l_worker* W = 0;
+  l_int i = 0;
+  int exit = 0;
+
+  l_logm_s("master started");
+
+  for (i = 0; i < M->workers; ++i) {
+    W = &M->node[i].worker;
+    main_env->cthr = W;
+    l_rawapi_thread_create(&W->thrhdl, l_worker_thread_proc, main_env);
+  }
+
+  exit = l_master_loop(main_env);
+  l_logm_s("master loop finished %d", ld(exit));
+
+  for (i = 0; i < M->workers; ++i) {
+    W = &M->node[i].worker;
+    l_rawapi_thread_join(W);
+    l_logm_s("worker %d joined", ld(W->index));
+  }
+
+  l_logm_s("master exited");
+  l_master_exit(main_env);
+  return 0;
+}
+
+typedef struct {
+  l_smplnode node;
+  l_umedit mgid;
+  l_umedit mssg_dest;
+  l_umedit mssg_from;
+  l_umedit mssg_flags;
+  l_int mssg_size;
+  void* mssg_data;
+} l_message;
+
+struct l_global;
+typedef struct {
+  struct l_global* G;
+  l_service* csvc;
+  l_worker* cthr;
+  l_message* cmsg;
+  void* ud;
+} lnlylib_env;
+
+#define L_FLAG_WORKER_QUIT 0x01
+
+typedef struct {
+  l_thrhdl thrhdl;
+  l_int weight;
+  l_int index;
+  l_squeue* work_txmq;
+  l_squeue* work_txme;
+  l_squeue* work_frmq;
+  l_uint work_flags;
+  l_mutex* mast_rxlk;
+  l_squeue* mast_rxmq;
+  l_squeue mq[3];
+  lnlylib_env ENV;
+} l_worker;
+
+static l_message*
+l_create_message(l_svcenv* E, l_umedit dest_srvc_id, l_umedit msg_id, l_umedit flags, void* data, l_int size)
+{
+  l_worker* W = E->cthr;
+  l_service* S = E->csvc;
+  l_message* M = 0;
+
+  M = (l_message*)l_squeue_pop(W->frmq);
+  if (M == 0) {
+    M = L_MALLOC(l_message);
+  }
+
+  msg->dest = dest_srvc_id;
+  msg->mgid = msg_id;
+  msg->from = S->svid;
+
+  /* TODO: consider flags */
+
+  if (data && size > 0) {
+    msg->size = size;
+    msg->data = l_rawapi_malloc(size);
+    l_copy_n(msg->data, data, size);
+  } else {
+    msg->size = 0;
+    msg->data = 0;
+  }
+
+  return msg;
+}
+
+L_EXTERN void
+l_send_message(l_svcenv* E, l_umedit dest_srvc_id, l_umedit msg_id, l_umedit flags, void* data, l_int size)
+{
+  l_message* msg = 0;
+
+  msg = l_create_message(E, dest_srvc_id, msg_id, flags, data, size);
+  if (msg == 0) {
+    return;
+  }
+
+  if (dest_srvc_id == msg->from) {
+    l_squeue_push(W->txme, &msg->node);
+  } else {
+    l_squeue_push(W->txmq, &msg->node);
+  }
+}
+
+#define L_MSG_CURRENT_WORK_DONE 0x0010
+
+typedef struct {
+  l_service* srvc;
+  l_squeue txmq;
+} l_msg_current_work_done;
+
+static void
+l_worker_flush_messages(l_srvenv* E)
+{
+  l_worker* W = E->cthr;
+  l_service* S = E->csvc;
+  l_msg_current_work_done data;
+  l_message* msg = 0;
+
+  l_squeue_push_queue(&S->msgq, W->txme);
+  data.srvc = S;
+  data.txmq = l_squeue_move(W->txmq);
+
+  msg = l_create_new_message(E, 0, L_MSG_CURRENT_WORK_DONE, 0, &data, sizeof(l_msg_current_work_done));
+  if (msg == 0) {
+    return;
+  }
+
+  /* deliver the msg to master to dispatch */
+  l_mutex_lock(W->rxlk);
+  l_squeue_push(W->rxmq, msg);
+  l_mutex_unlock(W->rxlk);
+}
+
+static int
+l_worker_loop(l_svcenv* env)
+{
+  l_worker* W = env->cthr;
+  l_global* G = env->G;
+  l_squeue* Q = &G->Q;
+  l_mutex* QLOCK = &G->QLOCK;
+  l_condv* QCNDV = &Q->QCNDV;
+  l_srvenv* ENV = &W->ENV;
+  l_service* S = 0;
+  l_message* M = 0;
+  l_int i = 0, n = 0;
+
+  W->txmq = W->mq + 0;
+  W->txme = W->mq + 1;
+  W->frmq = W->mq + 2;
+
+  W->rxlk = &(G->master.node[W->index].rxlk);
+  W->rxmq = &(G->master.node[W->index].rxmq);
+
+  ENV->G = env->G;
+  ENV->cthr = W;
+  ENV->csvc = 0;
+  ENV->cmsg = 0;
+
+  l_logm_1("worker %d started", ld(W->index));
+
+  for (; ;) {
+    l_mutex_lock(QLOCK);
+    while (l_squeue_is_empty(Q)) {
+      l_condv_wait(QCNDV, QLOCK);
+    }
+    S = (l_service*)l_squeue_pop(Q);
+    l_mutex_unlock(QLOCK);
+
+    ENV->csvc = S;
+    ENV->ud = S->ud;
+    W->flags = 0;
+
+    n = l_messages_should_handle(W);
+    for (i = 0; i < n; ++i) {
+      if ((M = (l_message*)l_squeue_pop(&S->msgq))) {
+        ENV->cmsg = M;
+        S->cb(ENV);
+      } else {
+        break;
+      }
+    }
+
+    l_worker_flush_messages(ENV);
+
+    if (W->flags & L_FLAG_WORKER_QUIT) {
+      break;
+    }
+  }
+
+  l_logm_1("worker %d exited", ld(W->index));
+  return 0;
+}
+
