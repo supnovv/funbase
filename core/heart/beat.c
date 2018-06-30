@@ -798,67 +798,68 @@ l_master_clean() {
 typedef struct {
   l_squeue node;
   l_service* service;
-  l_umedit index;
-  l_umedit srvc_alive;
+  l_uint slot_index;
   l_squeue bkmq;
 } l_srvcslot;
 
 typedef struct {
-  l_umedit capacity; /* total services the slot array can contain */
-  l_umedit size; /* number of current exist services */
+  l_uint capacity; /* total services the slot array can contain */
+  l_uint num_services; /* number of current exist services */
   l_squeue free_slots;
-  l_srvcslot* slot;
+  l_srvcslot* slot_arr;
 } l_srvctable;
 
 static l_srvcslot*
 l_srvctable_alloc_slot(l_srvctable* stbl)
 {
-  l_squeue* free_slots = &stbl->free_slots;
+  l_squeue* free_slots = 0;
   l_srvcslot* slot = 0;
-  l_srvcslot* new_slot = 0;
-  l_umedit new_size = 0;
-  l_umedit i = 0;
-
+  
+  free_slots = &stbl->free_slots;
   if ((slot = (l_srvcslot*)l_squeue_pop(free_slots))) {
-    stbl->size += 1;
+    stbl->num_services += 1;
     return slot;
   }
 
   l_logw_2("stbl is full: capacity %d size %d",
       ld(stbl->capacity), ld(stbl->size));
 
-  new_size = stbl->capacity * 2;
-  if (new_size <= stbl->capacity) {
-    l_loge_2("current stbl is too large %d", stbl->capacity);
-    return 0;
+  { l_srvcslot* new_sarr = 0;
+    l_uint new_size = 0;
+    l_uint i = 0;
+
+    new_size = stbl->capacity * 2;
+    if (new_size <= stbl->capacity) {
+      l_loge_2("current stbl is too large %d", stbl->capacity);
+      return 0;
+    }
+
+    l_logw_1("stbl alloced to new size %d", ld(new_size));
+    new_sarr = L_MALLOC_N(l_srvcslot, new_size);
+
+    /* copy the old slots and free the old */
+    for (i = 0; i < stbl->capacity; ++i) {
+      new_sarr[i] = stbl->slot_arr[i];
+    }
+
+    l_rawapi_mfree(stbl->slot_arr);
+
+    /* init the new slots */
+    for (; i < new_size; ++i) {
+      slot = new_sarr + i;
+      slot->service = 0;
+      slot->slot_index = i << 1; /* the lowerest bit is for service alive or not */
+      l_squeue_init(&slot->bkmq);
+      /* insert new slot to free queue */
+      l_squeue_push(free_slots, &slot->node);
+    }
+
+    stbl->capacity = new_size;
+    stbl->slot = new_slot;
   }
-
-  l_logw_1("stbl alloced to new size %d", ld(new_size));
-  new_slot = L_MALLOC_N(l_srvcslot, new_size);
-
-  /* copy the old slots and free the old */
-  for (i = 0; i < stbl->capacity; ++i) {
-    new_slot[i] = stbl->slot[i];
-  }
-
-  l_rawapi_mfree(stbl->slot);
-
-  /* init the new slots */
-  for (; i < new_size; ++i) {
-    slot = new_slot + i;
-    slot->service = 0;
-    slot->index = i;
-    slot->srvc_alive = 0;
-    l_squeue_init(&slot->bkmq);
-    /* insert new slot to free queue */
-    l_squeue_push(free_slots, &slot->node);
-  }
-
-  stbl->capacity = new_size;
-  stbl->slot = new_slot;
 
   if ((slot = (l_srvcslot*)l_squeue_pop(free_slots))) {
-    stbl->size += 1;
+    stbl->num_services += 1;
     return slot;
   }
 
@@ -869,23 +870,21 @@ static void
 l_srvctable_init(l_srvctable* stbl, l_int init_size)
 {
   l_srvcslot* slot = 0;
-  l_umedit i = 0;
+  l_uint i = 0;
 
   stbl->capacity = init_size;
-  stbl->size = 0;
-  l_squeue_init(&stbl->frslot);
+  stbl->num_services = 0;
+  l_squeue_init(&stbl->free_slots);
 
-  stbl->slot = L_MALLOC_N(l_srvcslot, stbl->capacity);
+  stbl->slot_arr = L_MALLOC_N(l_srvcslot, stbl->capacity);
   for (i = 0; i < stbl->capacity; ++i) {
     /* init the service slot */
-    slot = stbl->slot + i;
+    slot = stbl->slot_arr + i;
     slot->service = 0;
-    slot->srvc_alive = 0;
-    slot->index = i;
+    slot->slot_index = i << 1; /* the lowerest bit for service alive or not */
     l_squeue_init(&slot->bkmq);
-
     /* insert the slot to free queue */
-    l_squeue_push(&stbl->frslot, &slot->node);
+    l_squeue_push(&stbl->free_slots, &slot->node);
   }
 }
 
@@ -901,15 +900,15 @@ typedef struct {
   l_uint mast_flags;
   l_squeue mast_frsq; /* free service queue */
   l_squeue mast_frmq; /* free message queue in master */
-  l_int workers; /* size of work node array */
-  l_worknode* node;
+  l_int num_workers; /* size of work node array */
+  l_worknode* node_arr;
   l_srvctable stbl;
   lnlylib_env main_env;
 } l_master;
 
 typedef struct {
-  l_int capacity;
-  l_int size;
+  l_int buff_max_len;
+  l_int name_len;
   l_byte a[FILENAME_MAX+1];
 } l_filename;
 
@@ -968,15 +967,16 @@ l_master_init(void (*start)(lnlylib_env*), int argc, char** argv)
   M->start = start;
   l_squeue_init(&M->frsq);
 
-  M->workers = C->num_workers;
-  M->node = L_MALLOC_N(l_worknode, M->workers);
+  M->num_workers = C->num_workers;
+  M->node_arr = L_MALLOC_N(l_worknode, M->num_workers);
 
-  for (i = 0; i < M->workers; ++i) {
-    node = M->node + i;
+  for (i = 0; i < M->num_workers; ++i) {
+    node = M->node_arr + i;
     l_squeue_init(&node->rxmq);
     l_mutex_init(&node->rxlk);
 
-    worker = &node->worker;
+    node->worker= L_MALLOC(l_worker);
+    worker = node->worker;
     worker->index = i;
     worker->weight = 0; /* TODO: consider thread weight */
 
@@ -1003,7 +1003,7 @@ typedef struct {
   l_squeue srvc_msgq;
   l_uint srvc_flags;
   lua_State* L;
-  l_squeue co;
+  l_squeue srvc_frco;
   l_uint turns;
   void (*cb)(lnlylib_env*);
   void* ud;
@@ -1013,10 +1013,10 @@ static void
 l_service_init(l_service* srvc, l_umedit svid, void (*cb)(lnlylib_env*), void* ud, l_umedit flags)
 {
   srvc->svid = svid;
-  l_squeue_init(&srvc->msgq);
+  l_squeue_init(&srvc->srvc_msgq);
   srvc->L = 0;
-  l_squeue_init(&srvc->co);
-  srvc->flags = flags;
+  l_squeue_init(&srvc->srvc_frco);
+  srvc->srvc_flags = flags;
   srvc->turns = 0;
   srvc->cb = cb;
   srvc->ud = ud;
@@ -1025,13 +1025,13 @@ l_service_init(l_service* srvc, l_umedit svid, void (*cb)(lnlylib_env*), void* u
 static l_service*
 l_master_create_service_impl(l_master* M, void (*cb)(lnlylib_env*), void* ud, l_umedit flags)
 {
-  l_service* service = 0;
+  l_service* S = 0;
   l_srvcslot* slot = 0;
   l_srvctable* stbl = &M->stbl;
 
-  service = (l_service*)l_squeue_pop(&M->frsq);
-  if (service == 0) {
-    service = L_MALLOC(l_service);
+  S = (l_service*)l_squeue_pop(&M->mast_frsq);
+  if (S == 0) {
+    S = L_MALLOC(l_service);
   }
 
   slot = l_srvctable_alloc_slot(stbl);
@@ -1039,9 +1039,9 @@ l_master_create_service_impl(l_master* M, void (*cb)(lnlylib_env*), void* ud, l_
     return 0;
   }
 
-  l_service_init(service, slot->index, cb, ud, flags);
+  l_service_init(S, slot->slot_index >> 1, cb, ud, flags);
   slot->service = 0;
-  slot->srvc_alive = 1;
+  slot->slot_index |= 1; /* service alive */
   return service;
 }
 
@@ -1055,10 +1055,10 @@ l_master_loop(lnlylib_env* main_env)
 
   l_master* M = &G->master;
   l_worknode* node = 0;
-  l_int workers = M->workers;
-  l_message* msg = 0;
+  l_int num_workers = M->num_workers;
+  l_message* MSG = 0;
   l_message* cur_msg = 0;
-  l_service* service = 0;
+  l_service* S = 0;
   l_srvctable* stbl = &M->stbl;
   l_srvcslot* srvc_slot = 0;
   l_msg_current_work_done* done;
@@ -1102,8 +1102,8 @@ l_master_loop(lnlylib_env* main_env)
     }
 
     for (; ;) {
-      for (i = 0; i < workers; ++i) {
-        node = M->node + i;
+      for (i = 0; i < num_workers; ++i) {
+        node = M->node_arr + i;
         l_mutex_lock(&node->rxlk);
         l_squeue_push_queue(&rxmq, &node->rxmq);
         l_mutex_unlock(&node->rxlk);
@@ -1114,8 +1114,8 @@ l_master_loop(lnlylib_env* main_env)
         continue;
       }
 
-      while ((msg = (l_message*)l_sqeueue_pop(&rxmq))) {
-        switch (msg->mgid) {
+      while ((MSG = (l_message*)l_sqeueue_pop(&rxmq))) {
+        switch (MSG->mgid) {
         case L_MSG_CURTASK_DONE:
           done = (l_msg_current_work_done)msg->mssg_data;
           service = done->service;
@@ -1197,8 +1197,8 @@ typedef struct {
   l_uint mast_flags;
   l_squeue mast_frsq; /* free service queue */
   l_squeue mast_frmq; /* free message queue in master */
-  l_int workers; /* size of work node array */
-  l_worknode* node;
+  l_int num_workers; /* size of work node array */
+  l_worknode* node_arr;
   l_srvctable stbl;
   lnlylib_env main_env;
 } l_master;
@@ -1247,8 +1247,8 @@ typedef struct {
   l_umedit mssg_dest;
   l_umedit mssg_from;
   l_umedit mssg_flags;
-  l_int mssg_size;
   void* mssg_data;
+  l_int data_size;
 } l_message;
 
 struct l_global;
@@ -1256,8 +1256,8 @@ typedef struct {
   struct l_global* G;
   l_service* csvc;
   l_worker* cthr;
-  l_message* cmsg;
-  void* ud;
+  l_message* cmsg
+  void* svud;
 } lnlylib_env;
 
 #define L_FLAG_WORKER_QUIT 0x01
