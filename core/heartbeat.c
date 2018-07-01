@@ -57,6 +57,7 @@ typedef struct {
   l_uint mast_flags;
   l_squeue mast_frsq; /* free service q */
   l_squeue mast_frmq; /* free message q */
+  l_squeue temp_svcq;
   l_int num_workers; /* size of work node array */
   l_worknode* node_arr;
   l_srvctable stbl;
@@ -90,6 +91,7 @@ typedef struct l_global {
 typedef struct l_service {
   l_smplnode node; /* chained in global q */
   l_uint svid;
+  l_uint parent_svid;
   l_squeue srvc_msgq;
   l_uint srvc_flags;
   lua_State* L;
@@ -102,7 +104,14 @@ typedef struct l_service {
 typedef struct {
   l_service* service;
   l_squeue txmq;
+  l_squeue txms;
 } l_worker_feedback_ind;
+
+typedef struct {
+  l_uint flags;
+  void (*proc)(lnlylib_env*);
+  void* ud;
+} l_create_service_req;
 
 typedef struct {
   l_umedit ma, mb, mc, md;
@@ -125,13 +134,14 @@ typedef struct l_worker {
   l_thrhdl thrhdl;
   l_int weight;
   l_int index;
-  l_squeue* work_txmq;
-  l_squeue* work_txme;
   l_squeue* work_frmq;
+  l_squeue* work_txme; /* msgs send to current service */
+  l_squeue* work_txmq; /* msgs send to other services */
+  l_squeue* work_txms; /* msgs send to master */
   l_uint work_flags;
   l_mutex* mast_rxlk;
   l_squeue* mast_rxmq;
-  l_squeue mq[3];
+  l_squeue mq[4];
   lnlylib_env ENV;
 } l_worker;
 
@@ -264,6 +274,7 @@ l_master_init(void (*start)(void), int argc, char** argv)
   M->mast_flags = 0;
   l_squeue_init(&M->mast_frsq);
   l_squeue_init(&M->mast_frmq);
+  l_squeue_init(&M->temp_svcq);
 
   M->num_workers = C->num_workers;
   M->node_arr = L_MALLOC_N(l_worknode, M->num_workers);
@@ -281,6 +292,7 @@ l_master_init(void (*start)(void), int argc, char** argv)
     l_squeue_init(worker->mq + 0);
     l_squeue_init(worker->mq + 1);
     l_squeue_init(worker->mq + 2);
+    l_squeue_init(worker->mq + 3);
   }
 
   l_srvctable_init(&M->stbl, C->min_stbl_size);
@@ -299,6 +311,7 @@ static void
 l_service_init(l_service* S, l_uint svid, void (*proc)(lnlylib_env*), void* ud, l_uint flags)
 {
   S->svid = svid;
+  S->parent_svid = 0;
   l_squeue_init(&S->srvc_msgq);
   S->srvc_flags = flags;
   S->L = 0;
@@ -306,6 +319,11 @@ l_service_init(l_service* S, l_uint svid, void (*proc)(lnlylib_env*), void* ud, 
   S->turns = 0;
   S->proc = proc;
   S->ud = ud;
+}
+
+static void
+l_service_free_co(l_service* S)
+{
 }
 
 static l_service*
@@ -335,7 +353,6 @@ l_master_create_reserved_service(l_master* M, l_uint svid, void (*proc)(lnlylib_
   slot->service = service; /* dock the service to the table */
   slot->slot_index |= L_SERVICE_ALIVE;
   return service;
-
 }
 
 static l_service*
@@ -366,6 +383,12 @@ l_master_destroy_service(l_master* M, l_service* S)
 {
 }
 
+L_EXTERN void
+l_stop_service(lnlylib_env* E)
+{
+  E->csvc->srvc_flags |= L_SRVC_FLAG_STOP_SERVICE;
+}
+
 static void
 l_launcher_service_proc(lnlylib_env* E)
 {
@@ -385,6 +408,34 @@ l_launcher_service_proc(lnlylib_env* E)
   }
 }
 
+static l_message*
+l_master_create_message(l_master* M, l_uint dest_svid, l_uint mgid, l_umedit flags, void* data, l_umedit size)
+{
+  l_message* msg = 0;
+
+  msg = (l_message*)l_squeue_pop(M->mast_frmq);
+  if (msg == 0) {
+    msg = L_MALLOC(l_message);
+  }
+
+  msg->mgid = mgid;
+  msg->mssg_dest = dest_svid;
+  msg->mssg_from = 0;
+  msg->mssg_flags = flags;
+
+  /* TODO: consider flags */
+
+  if (data && size > 0) {
+    msg->data_size = size;
+    l_assert(size <= sizeof(l_msgdata);
+    l_copy_n(&msg->mssg_data, data, size);
+  } else {
+    msg->data_size = 0;
+  }
+
+  return msg;
+}
+
 static int
 l_master_loop(lnlylib_env* main_env)
 {
@@ -395,38 +446,36 @@ l_master_loop(lnlylib_env* main_env)
 
   l_master* M = &G->master;
   l_srvctable* stbl = &M->stbl;
-  l_service* S = 0;
+  l_squeue* temp_svcq = &M->temp_svcq;
+  l_service* cur_service = 0;
+  l_service* dest_service = 0;
   l_srvcslot* srvc_slot = 0;
 
   l_int num_workers = M->num_workers;
+  l_squeue* mast_frmq = &M->mast_frmq;
+  l_squeue* mast_frsq = &M->mast_frsq;
   l_worknode* work_node = 0;
   l_worker_feedback_ind* feedback_ind = 0;
   l_message* MSG = 0;
   l_message* tx_msg = 0;
   l_uint mssg_dest = 0;
+  l_uint mssg_from = 0;
   l_int i = 0;
 
   l_squeue rxmq;
+  l_squeue rxms;
   l_squeue svcq;
-  l_squeue temp_svcq;
 
   l_squeue_init(&rxmq);
+  l_squeue_init(&rxms);
   l_squeue_init(&svcq);
-  l_squeue_init(&temp_svcq);
 
   { /* launcher is the service to bang the whole new world */
-
     l_service* launcher = 0;
     l_message* on_create_msg = 0;
 
     launcher = l_master_create_reserved_service(M, L_SERVICE_LAUNCHER, l_launcher_service_proc, 0, 0);
-
-    on_create_msg = L_MALLOC(l_message);
-    on_create_msg->mssg_dest = launcher->svid;
-    on_create_msg->mssg_from = 0;
-    on_create_msg.mgid = L_MSG_SERVICE_ON_CREATE;
-    on_create_msg.mssg_flags = 0;
-    on_create_msg.data_size = 0;
+    on_create_msg = l_master_create_message(M, launcher->svid, L_MSG_SERVICE_ON_CREATE, 0, 0, 0);
     l_squeue_push(&launcher->srvc_msgq, &on_create_msg->node);
 
     stbl->slot_arr[launcher->svid].service = 0; /* need detach the service from the table first before insert into global q to handle */
@@ -470,27 +519,48 @@ check_feeded_messages:
       switch (MSG->mgid) {
       case L_MSG_WORKER_FEEDBACK_IND:
         feedback_ind = (l_worker_feedback_ind)&MSG->mssg_data;
-        S = feedback_ind->service;
-        srvc_slot = stbl->slot + S->svid;
-        srvc_slot->service = S; /* dock the service to the table first */
-        l_squeue_push(&S->srvc_msgq, &(srvc_slot->bkmq.node));
+        cur_service = feedback_ind->service;
+        srvc_slot = stbl->slot + cur_service->svid;
+        srvc_slot->service = cur_service; /* dock the service to the table first */
+        l_squeue_push_queue(&cur_service->srvc_msgq, &srvc_slot->bkmq));
 
-        l_assert((S->srvc_flags & L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ) == 0);
-        l_squeue_push(&temp_svcq, &S->node);
-        S->srvc_flags |= L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ;
+        if (cur_service->srvc_flags & L_SRVC_FLAG_STOP_SERVICE) {
+          l_message* destroy_service_msg = 0;
+          cur_service->srvc_flags &= (~L_SRVC_FLAG_STOP_SERVICE);
+          destroy_service_msg = l_master_create_message(M, cur_service->svid, L_MSG_SERVICE_ON_DESTROY, 0, 0, 0);
+          l_squeue_push_queue(&cur_service->srvc_msgq, &destroy_service_msg->node);
+        }
+        
+        if (cur_service->srvc_flags & L_SRVC_FLAG_DESTROY_SERVICE) {
+          srvc_slot->service = 0;
+          srvc_slot->slot_index &= (~L_SERVICE_ALIVE);
+          if (l_squeue_nt_empty(&cur_service->srvc_msgq)) {
+            l_message* srvc_msg = 0;
+            l_loge_1("service %d destroyed with unhandled messages", ld(cur_service->svid));
+            while ((srvc_msg = (l_message*)l_squeue_pop(&cur_service->srvc_msgq))) {
+              l_squeue_push(mast_frmq, &srvc_msg->node); /* TODO: how to free msgdata */
+            }
+          }
+          l_service_free_co(cur_service);
+          l_squeue_push(mast_frsq, &cur_service->node);
+        } else {
+          l_assert((cur_service->srvc_flags & L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ) == 0);
+          l_squeue_push(&temp_svcq, &cur_service->node);
+          cur_service->srvc_flags |= L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ;
+        }
 
         while ((tx_msg = (l_message*)l_squeue_pop(&feedback_ind->txmq))) {
           mssg_dest = tx_msg->mssg_dest;
-          srvc_slot = stbl->slot + mssg_dest;
-          if (mssg_dest < stbl->capacity && srvc_slot->slot_index & L_SERVICE_ALIVE) {
-            S = srvc_slot->service;
-            if (S) {
+          srvc_slot = stbl->slot_arr + mssg_dest;
+          if (mssg_dest < stbl->capacity && (srvc_slot->slot_index & L_SERVICE_ALIVE)) {
+            dest_service = srvc_slot->service;
+            if (dest_service) {
               /* service is docked in the service table, docked service is waiting to handle,
                  push the message to service's message q and insert the service to temp q if needed */
-              l_squeue_push(&S->srvc_msgq, &tx_msg->node);
-              if ((S->srvc_flags & L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ) == 0) {
-                l_squeue_push(&temp_svcq, &S->node);
-                S->srvc_flags |= L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ;
+              l_squeue_push(&dest_service->srvc_msgq, &tx_msg->node);
+              if ((dest_service->srvc_flags & L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ) == 0) {
+                l_squeue_push(&temp_svcq, &dest_service->node);
+                dest_service->srvc_flags |= L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ;
               }
             } else {
               /* service is already in global q or is handling in worker thread,
@@ -498,19 +568,67 @@ check_feeded_messages:
               l_squeue_push(&srvc_slot->bkmq, &tx_msg->node);
             }
           } else {
-            /* invalid message, just insert into free q. TODO: how to free message data */
+            /* invalid message, just insert into free q. TODO: how to free msgdata */
             l_loge_3("invalid message %d from %d to %d", ld(tx_msg->mgid), ld(tx_msg->mssg_from), ld(mssg_dest));
-            l_squeue_push(&M->mast_frmq, &tx_msg->node);
+            l_squeue_push(mast_frmq, &tx_msg->node);
           }
+        }
+
+        while ((tx_msg = (l_message*)l_squeue_pop(txms))) {
+          switch (tx_msg->mgid) {
+          case L_MSG_CREATE_SERVICE_REQ: {
+            l_create_service_req* create_req = 0;
+            l_service* new_service = 0;
+            l_message* on_create_msg = 0;
+            
+            create_req = (l_create_service_req*)&tx_msg->msgdata;
+            new_service = l_master_create_service(M, create_req->proc, create_req->ud, create_req->flags);
+            new_service->parent_svid = tx_msg->mssg_from;
+            
+            on_create_msg = l_master_create_message(M, new_service->svid, L_MSG_SERVICE_ON_CREATE, 0, 0, 0);
+            l_squeue_push(&new_service->srvc_msgq, &on_create_msg->node);
+            
+            l_squeue_push(&temp_svcq, &new_service->node);
+            new_service->srvc_flags |= L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ;
+            }
+            break;  
+          case L_MSG_STOP_SERVICE_REQ:
+            mssg_dest = tx_msg->mssg_dest;
+            srvc_slot = stbl->slot_arr + mssg_dest;
+            if (mssg_dest < stbl->capacity && (srvc_slot->slot_index & L_SERVICE_ALIVE)) {
+              l_message* destroy_service_msg = 0;
+              l_assert(cur_service->svid != mssg_dest);
+              destroy_service_msg = l_master_create_message(M, mssg_dest, L_MSG_SERVICE_ON_DESTROY, 0, 0, 0);
+              dest_service = srvc_slot->service;
+              if (dest_service) {
+                l_squeue_push(&dest_service->srvc_msgq, &destroy_service_msg->node);
+                if ((dest_service->srvc_flags & L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ) == 0) {
+                  l_squeue_push(&temp_svcq, &dest_service->node);
+                  dest_service->srvc_flags |= L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ;
+                }
+              } else {
+                l_squeue_push(&srvc_slot->bkmq, &destroy_service_msg->node);
+              }
+            } else {
+              l_loge_("try to stop invalid service %d", ld(mssg_dest));
+            }
+            break;
+          default:
+            l_loge_3("invalid master message %d", ld(tx_msg->mgid));
+            break;    
+          }
+          l_squeue_push(mast_frmq, &tx_msg->node); /* no need to free msgdata */
         }
         break;
       default:
-        /* unrecognized message, just insert into free q. TODO: how to free message data */
+        /* unrecognized message, just insert into free q. TODO: how to free msgdata */
         l_loge_3("unrecognized message %d from %d to %d", ld(tx_msg->mgid), ld(tx_msg->mssg_from), ld(mssg_dest));
-        l_squeue_push(&M->mast_frmq, &tx_msg->node);
+        l_squeue_push(mast_frmq, &tx_msg->node);
         break;
       }
     }
+
+    l_squeue_push(mast_frmq, &MSG->node); /* TODO: how to free msgdata */
 
     while ((S = (l_service*)l_squeue_pop(&temp_svcq))) {
       srvc_slot = stbl->slot + S->svid;
@@ -566,6 +684,7 @@ static void
 l_send_message_impl(lnlylib_env* E, l_uint dest_svid, l_uint mgid, l_umedit flags, void* data, l_umedit size)
 {
   l_message* msg = 0;
+  l_worker* W = E->cthr;
 
   msg = l_create_message(E, dest_svid, mgid, flags, data, size);
   if (msg == 0) {
@@ -573,10 +692,25 @@ l_send_message_impl(lnlylib_env* E, l_uint dest_svid, l_uint mgid, l_umedit flag
   }
 
   if (dest_svid == msg->mssg_from) {
-    l_squeue_push(W->txme, &msg->node);
+    l_squeue_push(W->work_txme, &msg->node);
   } else {
-    l_squeue_push(W->txmq, &msg->node);
+    l_squeue_push(W->work_txmq, &msg->node);
   }
+}
+
+static void
+l_send_master_message(lnlylib_env* E, l_uint dest_svid, l_uint mgid, l_umedit flags, void* data, l_umedit size)
+{
+  l_message* msg = 0;
+  l_worker* W = E->cthr;
+
+  msg = l_create_message(E, dest_svid, mgid, flags, data, size);
+  if (msg == 0) {
+    return;
+  }
+
+  l_assert(dest_svid != msg->mssg_from);
+  l_squeue_push(W->work_txms, &msg->node);
 }
 
 L_EXTERN void
@@ -587,6 +721,22 @@ l_send_message(lnlylib_env* E, l_uint dest_svid, l_uint mgid, l_umedit flags, vo
   } else {
     l_send_message_impl(E, svid, mgid, flags, data, size);
   }
+}
+
+L_EXTERN void
+l_create_service(lnlylib_env* E, void (*proc)(lnlylib_env*), void* ud, l_uint flags)
+{
+  l_create_service_req create_service_req;
+  create_service_req.proc = proc;
+  create_service_req.ud = ud;
+  create_service_req.flags = flags;
+  l_send_master_message(E, 0, L_MSG_CREATE_SERVICE_REQ, 0, &create_service_req, sizeof(l_create_service_req));
+}
+
+L_EXTERN void
+l_stop_service_specific(lnlylib_env* E, l_uint svid)
+{
+  l_send_master_message(E, svid, L_MSG_STOP_SERVICE_REQ, 0, 0, 0);  
 }
 
 static void
@@ -600,6 +750,7 @@ l_worker_flush_messages(lnlylib_env* E)
   l_squeue_push_queue(&S->srvc_msgq, W->work_txme);
   feedback_ind.service = S;
   feedback_ind.txmq = l_squeue_move(W->work_txmq);
+  feedback_ind.txms = l_squeue_move(W->work_txms);
 
   msg = l_create_message(E, 0, L_MSG_WORKER_FEEDBACK_IND, 0, &feedback_ind, sizeof(l_worker_feedback_ind));
   if (msg == 0) {
@@ -624,10 +775,12 @@ l_worker_loop(l_svcenv* env)
   l_service* S = 0;
   l_message* msg = 0;
   l_int i = 0, n = 0;
+  l_uint mgid = 0;
 
-  W->txmq = W->mq + 0;
-  W->txme = W->mq + 1;
-  W->frmq = W->mq + 2;
+  W->work_frmq = W->mq + 0；
+  W->work_txme = W->mq + 1;
+  W->work_txmq = W->mq + 2;
+  W->work_txms = W->mq + 3;
 
   W->mast_rxlk = &(G->master.node[W->index].mast_rxlk);
   W->mast_rxmq = &(G->master.node[W->index].mast_rxmq);
@@ -654,11 +807,17 @@ l_worker_loop(l_svcenv* env)
 
     n = l_messages_should_handle(W);
     for (i = 0; i < n; ++i) {
-      if ((msg = (l_message*)l_squeue_pop(&S->srvc_msgq))) {
-        ENV->cmsg = msg;
-        S->proc(ENV);
-        S->turns += 1;
-      } else {
+      msg = (l_message*)l_squeue_pop(&S->srvc_msgq);
+      if (msg == 0) {
+        break;
+      }
+      mgid = msg->mgid;
+      ENV->cmsg = msg;
+      S->proc(ENV);
+      S->turns += 1;
+      l_squeue_push(W->work_frmq, &msg->node); /* TODO: how to free msgdata */
+      if (mgid == L_MSG_SERVICE_ON_DESTROY) {
+        S->srvc_flags |= L_SRVC_FLAG_DESTROY_SERVICE;
         break;
       }
     }
