@@ -290,5 +290,185 @@ l_impl_logger_n(const void* tag, const void* s, l_int n, const l_logval* a) {
   l_impl_logger_func(tag, s, n, a);
 }
 
+/** simple link list */
+
+typedef struct l_smplnode {
+  struct l_smplnode* next;
+} l_smplnode;
+
+L_INLINE void
+l_smplnode_init(l_smplnode* node) {
+  node->next = node;
+}
+
+L_INLINE int
+l_smplnode_is_empty(l_smplnode* node) {
+  return node->next == node;
+}
+
+L_INLINE void
+l_smplnode_insert_after(l_smplnode* node, l_smplnode* newnode) {
+  newnode->next = node->next;
+  node->next = newnode;
+}
+
+L_INLINE l_smplnode*
+l_smplnode_remove_next(l_smplnode* node) {
+  l_smplnode* p = node->next;
+  node->next = p->next;
+  return p;
+}
+
+/** bidirectional link list */
+
+typedef struct l_linknode {
+  struct l_linknode* next;
+  struct l_linknode* prev;
+} l_linknode;
+
+L_INLINE void
+l_linknode_init(l_linknode* node) {
+  node->next = node->prev = node;
+}
+
+L_INLINE int
+l_linknode_is_empty(l_linknode* node) {
+  return node->next == node;
+}
+
+L_INLINE void
+l_linknode_insert_after(l_linknode* node, l_linknode* newnode) {
+  newnode->next = node->next;
+  node->next = newnode;
+  newnode->prev = node;
+  newnode->next->prev = newnode;
+}
+
+L_INLINE l_linknode*
+l_linknode_remove(l_linknode* node) {
+  node->prev->next = node->next;
+  node->next->prev = node->prev;
+  return node;
+}
+
+/** simple linked queue */
+
+typedef struct l_squeue {
+  l_smplnode head;
+  l_smplnode* tail;
+} l_squeue;
+
+L_INLINE void
+l_squeue_init(l_squeue* self)
+{
+  l_smplnode_init(&self->head);
+  self->tail = &self->head;
+}
+
+L_INLINE void
+l_squeue_push(l_squeue* self, l_smplnode* newnode)
+{
+  l_smplnode_insert_after(self->tail, newnode);
+  self->tail = newnode;
+}
+
+L_INLINE void
+l_squeue_push_queue(l_squeue* self, l_squeue* q)
+{
+  if (l_squeue_is_empty(q)) {
+    return;
+  }
+  self->tail->next = q->head.next;
+  self->tail = q->tail;
+  self->tail->next = &self->head;
+  l_squeue_init(q);
+}
+
+L_INLINE l_squeue
+l_squeue_move(l_squeue* q)
+{
+  l_squeue newq;
+  l_squeue_init(&newq);
+  l_squeue_push_queue(&newq, q);
+  return newq;
+}
+
+L_INLINE l_bool
+l_squeue_is_empty(l_squeue* self)
+{
+  return (self->head.next == &self->head);
+}
+
+L_INLINE l_smplnode*
+l_squeue_pop(l_squeue* self)
+{
+  l_smplnode* node = 0;
+  if (l_squeue_is_empty(self)) {
+    return 0;
+  }
+  node = l_smplnode_remove_next(&self->head);
+  if (node == self->tail) {
+    self->tail = &self->head;
+  }
+  return node;
+}
+
+/** bidirectional queue */
+
+typedef struct l_dqueue {
+  l_linknode head;
+} l_dqueue;
+
+L_INLINE void
+l_dqueue_init(l_dqueue* self)
+{
+  l_linknode_init(&self->head);
+}
+
+L_INLINE void
+l_dqueue_push(l_dqueue* self, l_linknode* newnode)
+{
+  l_linknode_insert_after(&self->head, newnode);
+}
+
+L_INLINE void
+l_dqueue_push_queue(l_dqueue* self, l_dqueue* q)
+{
+  l_linknode* tail = 0;
+  if (l_dqueue_is_empty(q)) return;
+  /* chain self's tail with q's first element */
+  tail = self->head.prev;
+  tail->next = q->head.next;
+  q->head.next->prev = tail;
+  /* chain q's tail with self's head */
+  tail = q->head.prev;
+  tail->next = &self->head;
+  self->head.prev = tail;
+  /* init q to empty */
+  l_dqueue_init(q);
+}
+
+L_INLINE l_dqueue
+l_dqueue_move(l_dqueue* q)
+{
+  l_dqueue newq;
+  l_dqueue_init(&newq);
+  l_dqueue_push_queue(&newq, q);
+  return newq;
+}
+
+L_INLINE l_bool
+l_dqueue_is_empty(l_dqueue* self)
+{
+  return l_linknode_is_empty(&self->head);
+}
+
+L_INLINE l_linknode*
+l_dqueue_pop(l_dqueue* self)
+{
+  if (l_dqueue_is_empty(self)) return 0;
+  return l_linknode_remove(self->head.prev);
+}
+
 #endif /* L_CORE_BASE_H */
 
