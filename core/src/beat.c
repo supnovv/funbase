@@ -1,4 +1,4 @@
-#include "core/heartbeat.h"
+#include "core/beat.h"
 
 #define L_SERVICE_ALIVE 0x01
 #define L_MIN_USER_SERVICE_ID 256
@@ -7,6 +7,8 @@
 
 #define L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ 0x01
 #define L_SRVC_FLAG_STOP_SERVICE 0x02
+#define L_SRVC_FLAG_CREATE_FROM_MODULE 0x04
+#define L_SRVC_FLAG_CREATE_LUA_SERVICE 0x08
 #define L_SRVC_FLAG_DESTROY_SERVICE 0x04
 #define L_MSSG_FLAG_FREE_EXTRA_DATA 0x01
 #define L_WORK_FLAG_QUIT 0x01
@@ -40,16 +42,6 @@ typedef struct {
   l_squeue mast_rxmq;
   l_mutex mast_rxlk;
 } l_worknode;
-
-struct l_global;
-struct l_message;
-typedef struct {
-  struct l_global* G;
-  struct l_worker* cthr;
-  struct l_service* csvc;
-  struct l_message* cmsg
-  void* svud;
-} lnlylib_env;
 
 typedef struct {
   l_thrhdl thrhdl;
@@ -96,7 +88,7 @@ typedef struct l_service {
   l_uint srvc_flags;
   lua_State* L;
   l_squeue srvc_frco;
-  void (*proc)(lnlylib_env*);
+  l_service_callback cb;
   void* ud;
 } l_service;
 
@@ -108,8 +100,10 @@ typedef struct {
 
 typedef struct {
   l_uint flags;
-  void (*proc)(lnlylib_env*);
-  void* ud;
+  union {
+  l_strn module_name;
+  l_service_callback cb;
+  };
 } l_create_service_req;
 
 typedef struct {
@@ -141,6 +135,7 @@ typedef struct l_worker {
   l_mutex* mast_rxlk;
   l_squeue* mast_rxmq;
   l_squeue mq[4];
+  l_stanfile logfile;
   lnlylib_env ENV;
 } l_worker;
 
@@ -307,7 +302,7 @@ l_master_init(void (*start)(void), int argc, char** argv)
 }
 
 static void
-l_service_init(l_service* S, l_uint svid, void (*proc)(lnlylib_env*), void* ud, l_uint flags)
+l_service_init(l_service* S, l_uint svid, l_service_callback cb, l_uint flags)
 {
   S->svid = svid;
   S->parent_svid = 0;
@@ -315,8 +310,8 @@ l_service_init(l_service* S, l_uint svid, void (*proc)(lnlylib_env*), void* ud, 
   S->srvc_flags = flags;
   S->L = 0;
   l_squeue_init(&S->srvc_frco);
-  S->proc = proc;
-  S->ud = ud;
+  S->cb = cb;
+  S->ud = 0;
 }
 
 static void
@@ -325,16 +320,11 @@ l_service_free_co(l_service* S)
 }
 
 static l_service*
-l_master_create_reserved_service(l_master* M, l_uint svid, void (*proc)(lnlylib_env*), void* ud, l_uint flags)
+l_master_create_reserved_service(l_master* M, l_uint svid, l_service_callback cb, l_uint flags)
 {
   l_service* S = 0;
   l_srvcslot* slot = 0;
   l_srvctable* stbl = &M->stbl;
-
-  S = (l_service*)l_squeue_pop(&M->mast_frsq);
-  if (S == 0) {
-    S = L_MALLOC(l_service);
-  }
 
   if (svid >= L_MIN_USER_SERVICE_ID || svid >= stbl->capacity) {
     l_loge_1("invalid reserved service id %d", ld(svid));
@@ -347,38 +337,46 @@ l_master_create_reserved_service(l_master* M, l_uint svid, void (*proc)(lnlylib_
     return 0;
   }
 
-  l_service_init(S, svid, proc, ud, flags);
+  S = (l_service*)l_squeue_pop(&M->mast_frsq);
+  if (S == 0) {
+    S = L_MALLOC(l_service);
+  }
+
+  l_service_init(S, svid, cb, flags);
   slot->service = service; /* dock the service to the table */
   slot->slot_index |= L_SERVICE_ALIVE;
   return service;
 }
 
 static l_service*
-l_master_create_service(l_master* M, void (*proc)(lnlylib_env*), void* ud, l_uint flags)
+l_master_create_service(l_master* M, l_service_callback cb, l_uint flags)
 {
   l_service* S = 0;
   l_srvcslot* slot = 0;
   l_srvctable* stbl = &M->stbl;
-
-  S = (l_service*)l_squeue_pop(&M->mast_frsq);
-  if (S == 0) {
-    S = L_MALLOC(l_service);
-  }
 
   slot = l_srvctable_alloc_slot(stbl);
   if (slot == 0) {
     return 0;
   }
 
-  l_service_init(S, slot->slot_index >> 1, proc, ud, flags);
+  S = (l_service*)l_squeue_pop(&M->mast_frsq);
+  if (S == 0) {
+    S = L_MALLOC(l_service);
+  }
+
+  l_service_init(S, slot->slot_index >> 1, cb, flags);
   slot->service = service; /* dock the service to the table */
   slot->slot_index |= L_SERVICE_ALIVE;
   return service;
 }
 
-static void
-l_master_destroy_service(l_master* M, l_service* S)
+static l_service*
+l_master_create_service_from_module(l_master* M, l_strn module_name, l_uint flags)
 {
+  l_service_callback cb = {0};
+  /* TODO: load module and fill the cb, and may implement module cache */
+  return l_master_create_service(M, cb, flags);
 }
 
 L_EXTERN void
@@ -387,24 +385,33 @@ l_stop_service(lnlylib_env* E)
   E->csvc->srvc_flags |= L_SRVC_FLAG_STOP_SERVICE;
 }
 
+static void*
+l_launcher_on_create(lnlylib_env* E)
+{
+  l_logm_s("launcher on create");
+  E->G->master.start();
+  l_stop_service(E);
+  return 0;
+}
+
+static void
+l_launcher_on_destroy(lnlylib_env* E)
+{
+  l_logm_1("launcher on destroy (ud %d)", ld(E->svud));
+}
+
 static void
 l_launcher_service_proc(lnlylib_env* E)
 {
-  l_uint msgid = E->cmsg->mgid;
-  switch (mgid) {
-  case L_MSG_SERVICE_ON_CREATE:
-    l_logm_s("launcher on create");
-    E->G->master.start();
-    l_stop_service(E);
-    break;
-  case L_MSG_SERVICE_ON_DESTROY:
-    l_logm_s("launcher on destroy");
-    break;
-  default:
-    l_loge_1("invalid launcher msg %d", ld(mgid));
-    break;
-  }
+  l_logm_1("launcher handle msg %d", ld(E->cmsg->mgid));
 }
+
+static l_service_callback
+l_launcher_service_cb = {
+  l_launcher_on_create,
+  l_launcher_on_destroy,
+  l_launcher_service_proc
+};
 
 static l_message*
 l_master_create_message(l_master* M, l_uint dest_svid, l_uint mgid, l_umedit flags, void* data, l_umedit size)
@@ -529,7 +536,14 @@ l_master_handle_self_messages(l_master* M, l_squeue* txms)
       l_message* on_create_msg = 0;
       create_req = (l_create_service_req*)&msg->msgdata;
       /* create the service according to the request */
-      S = l_master_create_service(M, create_req->proc, create_req->ud, create_req->flags);
+      if (create_req->flags & L_SRVC_FLAG_CREATE_FROM_MODULE) {
+        S = l_master_create_service_from_module(M, create_req->module_name, create_req->flags);
+      } else if (create_req->flags & L_SRVC_FLAG_CREATE_LUA_SERVICE) {
+        /* TODO: how to create lua service */
+      } else {
+        S = l_master_create_service(M, create_req->cb, create_req->flags);
+      }
+      if (S == 0) { break; }
       S->parent_svid = msg->mssg_from;
       /* make service's first message *ON_CREATE* */
       on_create_msg = l_master_create_message(M, S->svid, L_MSG_SERVICE_ON_CREATE, 0, 0, 0);
@@ -582,7 +596,7 @@ l_master_loop(lnlylib_env* main_env)
   l_squeue_init(&svcq);
 
   /* launcher is the service to bang the whole new world */
-  launcher = l_master_create_reserved_service(M, L_SERVICE_LAUNCHER, l_launcher_service_proc, 0, 0);
+  launcher = l_master_create_reserved_service(M, L_SERVICE_LAUNCHER, l_launcher_service_cb, 0);
   on_create_msg = l_master_create_message(M, launcher->svid, L_MSG_SERVICE_ON_CREATE, 0, 0, 0);
   l_squeue_push(&launcher->srvc_msgq, &on_create_msg->node);
   stbl->slot_arr[launcher->svid].service = 0; /* need detach the service from the table first before insert into global q to handle */
@@ -750,13 +764,28 @@ l_send_message(lnlylib_env* E, l_uint dest_svid, l_uint mgid, l_umedit flags, vo
 }
 
 L_EXTERN void
-l_create_service(lnlylib_env* E, void (*proc)(lnlylib_env*), void* ud, l_uint flags)
+l_create_service(lnlylib_env* E, l_service_callback cb, l_uint flags)
 {
   l_create_service_req create_service_req;
-  create_service_req.proc = proc;
-  create_service_req.ud = ud;
+  flags &= ~(L_SRVC_FLAG_CREATE_FROM_MODULE | L_SRVC_FLAG_CREATE_LUA_SERVICE);
   create_service_req.flags = flags;
+  create_service_req.cb = cb;
   l_send_master_message(E, 0, L_MSG_CREATE_SERVICE_REQ, 0, &create_service_req, sizeof(l_create_service_req));
+}
+
+L_EXTERN void
+l_create_service_from_module(lnlylib_env* E, l_strn module_name, l_uint flags)
+{
+  l_create_service_req create_service_req;
+  flags &= ~(L_SRVC_FLAG_CREATE_LUA_SERVICE);
+  create_service_req.flags = flags | L_SRVC_FLAG_CREATE_FROM_MODULE;
+  create_service_req.module_name = module_name;
+  l_send_master_message(E, 0, L_MSG_CREATE_SERVICE_REQ, 0, &create_service_req, sizeof(l_create_service_req));
+}
+
+L_EXTERN void
+l_create_lua_service(lnlylib_env* E, l_strn lualib_name)
+{ /* TODO: how to create lua service */
 }
 
 L_EXTERN void
@@ -801,7 +830,6 @@ l_worker_loop(l_svcenv* env)
   l_service* S = 0;
   l_message* msg = 0;
   l_int i = 0, n = 0;
-  l_uint mgid = 0;
 
   W->work_frmq = W->mq + 0；
   W->work_txme = W->mq + 1;
@@ -834,17 +862,29 @@ l_worker_loop(l_svcenv* env)
     n = l_messages_should_handle(W);
     for (i = 0; i < n; ++i) {
       msg = (l_message*)l_squeue_pop(&S->srvc_msgq);
-      if (msg == 0) {
-        break;
-      }
-      mgid = msg->mgid;
+      if (msg == 0) { break; }
       ENV->cmsg = msg;
-      S->proc(ENV);
-      l_squeue_push(W->work_frmq, &msg->node); /* TODO: how to free msgdata */
-      if (mgid == L_MSG_SERVICE_ON_DESTROY) {
+      switch (msg->mgid) {
+      case L_MSG_SERVICE_ON_CREATE:
+        if (S->cb.service_on_create) {
+          S->ud = S->cb.service_on_create(ENV);
+          ENV->svud = S->ud;
+        } else {
+          ENV->svud = S->ud = 0;
+        }
+        break;
+      case L_MSG_SERVICE_ON_DESTROY:
+        if (S->cb.service_on_destroy) {
+          S->cb.service_on_destroy(ENV);
+        }
         S->srvc_flags |= L_SRVC_FLAG_DESTROY_SERVICE;
         break;
+      default:
+        /* service's procedure shall be not empty */
+        S->cb.service_proc(ENV);
+        break;
       }
+      l_squeue_push(W->work_frmq, &msg->node); /* TODO: how to free msgdata */
     }
 
     l_worker_flush_messages(ENV);
