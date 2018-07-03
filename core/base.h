@@ -54,6 +54,8 @@ l_int l_uint // pointer-size integer
 #define L_MAX_INT_SL ((l_long)0x7fffffffffffffff) /* 9223372036854775807 */
 #define L_MIN_INT_SL ((l_long)-9223372036854775807-1) /* 9223372036854775808 0x8000000000000000 */
 #define L_MAX_INT_IO (0x7fff0000) /* 2147418112 */
+/* on linux, write() and similar system calls will transfer at most 0x7ffff000 (2,147,479,522) bytes,
+returning the number of bytes actually transferred. this is true on both 32-bit and 64-bit systems. */
 
 #undef L_SUCCESS
 #undef L_ERROR
