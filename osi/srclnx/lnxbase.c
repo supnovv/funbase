@@ -1,5 +1,5 @@
 #define LNLYLIB_API_IMPL
-#include "osi/src_lnx/lnxpref.h"
+#include "osi/srclnx/lnxpref.h"
 #include "osi/base.h"
 
 /** Open shared object and resolve symbols **
