@@ -1,7 +1,29 @@
-#ifndef L_CORE_BASE_H
-#define L_CORE_BASE_H
-#include "osi/autoconf.h"
-#include "osi/prefix.h"
+#ifndef LNLYLIB_CORE_BASE_H
+#define LNLYLIB_CORE_BASE_H
+#include "autoconf.h"
+#include "core/prefix.h"
+
+/** pre-defines in makefile, prefix.h, and autoconf.c **
+L_PLAT_LINUX or L_PLAT_MACOSX or L_PLAT_WINDOWS
+L_NEWLINE  // "\n" or "\r\n"
+L_NL_SIZE  // 1 or 2
+L_PATH_SEP // "/" or "\\"
+L_INLINE
+L_EXTERN
+L_THREAD_LOCAL
+L_BUILD_SHARED
+LNLYLIB_AUTOCONF  // only defined in autoconf.c
+LNLYLIB_API_IMPL  // shall be defined in lib src file
+LNLYLIB_HOME_DIR  // the lnlylib root folder when make
+L_MACH_32_BIT or L_MACH_64_BIT
+L_LIT_ENDIAN or L_BIG_ENDIAN
+l_bool false true // boolean
+l_byte l_sbyte    // 8-bit integer
+l_short l_ushort  // 16-bit integer
+l_medit l_umedit  // 32-bit integer
+l_long l_ulong    // 64-bit integer
+l_int l_uint      // pointer-size integer
+**/
 
 #undef L_MAX_INT_UB
 #undef L_MAX_INT_SB
@@ -150,7 +172,7 @@ typedef union {
 } l_eightbyte;
 
 typedef struct {
-  const l_byte* start;
+  const l_byte* str;
   l_int len;
 } l_strn;
 
@@ -470,5 +492,5 @@ l_dqueue_pop(l_dqueue* self)
   return l_linknode_remove(self->head.prev);
 }
 
-#endif /* L_CORE_BASE_H */
+#endif /* LNLYLIB_CORE_BASE_H */
 

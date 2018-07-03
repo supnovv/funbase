@@ -1,3 +1,4 @@
+#define LNLYLIB_API_IMPL
 #include "core/beat.h"
 
 #define L_SERVICE_ALIVE 0x01
@@ -57,10 +58,62 @@ typedef struct {
 } l_master;
 
 typedef struct {
-  l_int buff_max_len;
+  l_int buff_len;
   l_int name_len;
-  l_byte a[FILENAME_MAX+1];
+  l_byte s[FILENAME_MAX];
 } l_filename;
+
+static void
+l_filename_init(l_filename* fn)
+{
+  fn->buff_len = FILENAME_MAX-8;
+  fn->name_len = 0;
+  fn->s[0] = 0;
+}
+
+static l_bool
+l_filename_append(l_filename* fn, l_strn s)
+{
+  if (s.len > 0 && fn->name_len + s.len < fn->buff_len) {
+    const l_byte* pend = s.str + s.len;
+    while (s.str < pend) {
+      fn->s[fn->name_len++] = *s.str++;
+    }
+    fn->s[fn->name_len] = 0;
+    return true;
+  } else {
+    return false;
+  }
+}
+
+static l_bool
+l_filename_addpath(l_filename* fn, l_strn path)
+{
+  if (path.len > 0 && fn->name_len + path.len < fn->buff_len) {
+    const l_byte* pend = path.str + path.len;
+    if (fn->name_len > 0) {
+      if (fn->s[fn->name_len - 1] == '/') {
+        if (*path.str == '/') {
+          path.str += 1;
+        }
+      } else {
+        if (*path.str != '/') {
+          fn->s[fn->name_len++] = '/';
+        }
+      }
+    }
+    while (path.str < pend) {
+      fn->s[fn->name_len++] = *path.str++;
+    }
+    if (fn->s[fn->name_len - 1] != '/') {
+      fn->s[fn->name_len++] = '/';
+    }
+    fn->s[fn->name_len] = 0;
+    return true;
+  } else {
+    return false;
+  }
+}
 
 typedef struct {
   l_int num_workers;

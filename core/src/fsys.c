@@ -1,4 +1,5 @@
-#include "core/filesys.h"
+#define LNLYLIB_API_IMPL
+#include "core/fsys.h"
 
 static l_stanfile
 ll_stanfile_open(const void* name, const char* mode)

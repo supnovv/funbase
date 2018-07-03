@@ -1,15 +1,14 @@
 #ifndef L_PLAT_PREFIX_H
 #define L_PLAT_PREFIX_H
 
-#undef L_PLAT_LINUX
 #undef L_PLAT_APPLE
-#undef L_PLAT_WINDOWS
-#undef L_PLAT_OSX
 #undef L_PLAT_IOS
 #undef L_PLAT_BSD
 
-#if defined(__linux__)
-#define L_PLAT_LINUX /* Linux (Centos, Debian, Fedora, OpenSUSE, RedHat, Ubuntu) */
+#if defined(__linux__) /* Linux (Centos, Debian, Fedora, OpenSUSE, RedHat, Ubuntu) */
+  #ifndef L_PLAT_LINUX
+  #error "L_PLAT_LINUX is not defined"
+  #endif
 #elif defined(__APPLE__) && defined(__MACH__)
 #define L_PLAT_APPLE /* Apple OSX and iOS (Darwin) */
 #include <TargetConditionals.h>
@@ -20,16 +19,20 @@ TARGET_OS_MAC           1        1        1
 TARGET_IPHONE_SIMULATOR 0        0        1 */
 #if TARGET_OS_EMBEDDED == 1 || TARGET_OS_IPHONE == 1
 #define L_PLAT_IOS /* iPhone, iPad, simulator, etc. */
-#elif TARGET_OS_MAC == 1
-#define L_PLAT_OSX /* MACOSX */
+#elif TARGET_OS_MAC == 1 /* MACOSX */
+  #ifndef L_PLAT_MACOSX
+  #error "L_PLAT_MACOSX is not defined"
+  #endif
 #endif
 #elif defined(__unix__)
 #include <sys/param.h>
 #if defined(BSD)
 #define L_PLAT_BSD /* DragonFly BSD, FreeBSD, OpenBSD, NetBSD */
 #endif
-#elif defined(_MSC_VER) && defined(_WIN32)
-#define L_PLAT_WINDOWS /* Microsoft Windows */
+#elif defined(_MSC_VER) && defined(_WIN32) /* Microsoft Windows */
+  #ifndef L_PLAT_WINDOWS
+  #error "L_PLAT_WINDOWS is not defined"
+  #endif
 #endif
 
 #undef L_CMPL_CLANG
@@ -71,7 +74,7 @@ TARGET_IPHONE_SIMULATOR 0        0        1 */
 #if defined(__GNUC__)
 #define L_EXTERN extern
 #else
-#if defined(L_API_IMPL)
+#if defined(LNLYLIB_API_IMPL)
 #define L_EXTERN __declspec(dllexport)
 #else
 #define L_EXTERN __declspec(dllimport)

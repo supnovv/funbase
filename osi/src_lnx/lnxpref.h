@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <dlfcn.h> /* link with -ldl */
 #include <pthread.h>
 #include <sys/eventfd.h>
 #include <sys/types.h>

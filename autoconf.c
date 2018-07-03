@@ -7,11 +7,8 @@
 #include <stddef.h>
 #include <float.h>
 
-#define LNLYLIB_AUTO_CONFIG
+#define LNLYLIB_AUTOCONF
 #include "core/prefix.h"
-#include "osi/plationf.h"
-#include "osi/platsock.h"
-
 #define l_byte unsigned char
 
 static void l_log_e(const void* fmt, ...) {
@@ -49,7 +46,8 @@ static int l_write_current_dir(FILE* self, const void* fmt) {
   it will malloc(3) an array big enough to hold the absolute pathname of the current
   working directory. if the environment variable PWD is set, and its value is correct,
   then that value will be returned. the caller should free(3) the returned buffer. */
-#if defined(l_plat_windows)
+#if defined(L_PLAT_WINDOWS)
+  #error "undefined l_write_current_dir"
 #else
   char* curdir = get_current_dir_name();
   int count = 0;
@@ -80,21 +78,20 @@ int main(void)
   }
 
   l_write_line(file, "#ifndef LNLYLIB_AUTOCONF_H%s#define LNLYLIB_AUTOCONF_H", L_NEWLINE);
-  l_write_line(file, "undef LNLYLIB_AUTO_CONFIG");
-  l_write_line(file, "#define _CRT_SECURE_NO_WARNINGS");
-  l_write_line(file, "#include \"core/prefix.h\"%s", L_NEWLINE);
+  l_write_line(file, "#undef LNLYLIB_AUTOCONF");
+  l_write_line(file, "#define _CRT_SECURE_NO_WARNINGS%s", L_NEWLINE);
 
-  l_write_line(file, "#undef LNLYLIB_HOME");
-  l_write_cdir(file, "#define LNLYLIB_HOME \"%s%s\"" L_NEWLINE);
+  l_write_line(file, "#undef LNLYLIB_HOME_DIR");
+  l_write_cdir(file, "#define LNLYLIB_HOME_DIR \"%s%s\"" L_NEWLINE);
 
-  l_write_line(file, "#undef L_PLAT_32_BIT");
-  l_write_line(file, "#undef L_PLAT_64_BIT");
+  l_write_line(file, "#undef L_MACH_32_BIT");
+  l_write_line(file, "#undef L_MACH_64_BIT");
   if (sizeof(void*) == 4) {
-    l_write_line(file, "#define L_PLAT_32_BIT");
+    l_write_line(file, "#define L_MACH_32_BIT");
   } else if (sizeof(void*) == 8) {
-    l_write_line(file, "#define L_PLAT_64_BIT");
+    l_write_line(file, "#define L_MACH_64_BIT");
   } else {
-    l_write_line(file, "#error \"unknown %d-bit platform\"", sizeof(void*) * 8);
+    l_write_line(file, "#error \"unknown machine of %d-bit\"", sizeof(void*) * 8);
   }
 
   if (sizeof(long) < 4) {
