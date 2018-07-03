@@ -1,5 +1,6 @@
 #define LNLYLIB_API_IMPL
 #include "core/beat.h"
+#include "osi/base.h"
 
 #define L_SERVICE_ALIVE 0x01
 #define L_MIN_USER_SERVICE_ID 256
@@ -84,6 +85,18 @@ l_filename_append(l_filename* fn, l_strn s)
   } else {
     return false;
   }
+}
+
+static l_bool
+l_filename_addname(l_filename* fn, l_strn name, l_strn suffix)
+{
+  return l_filename_append(fn, name) && l_filename_append(fn, suffix);
+}
+
+static l_bool
+l_filename_addname_combine(l_filename* fn, l_strn part1, l_strn part2, l_strn sep)
+{
+  return l_filename_append(fn, part1) && l_filename_append(fn, sep) && l_filename_append(fn, part2);
 }
 
 static l_bool
@@ -428,7 +441,22 @@ static l_service*
 l_master_create_service_from_module(l_master* M, l_strn module_name, l_uint flags)
 {
   l_service_callback cb = {0};
-  /* TODO: load module and fill the cb, and may implement module cache */
+  l_dynlib hdl = l_empty_dynlib();
+
+  hdl = l_dynlib_open2(l_const_strn(LNLYLIB_CLIB_DIR), module_name); /* TODO: implement module cache ? */
+  if (l_dynlib_is_empty(&hdl)) {
+    l_loge_1("open library %strn failed", lstrn(&module_name));
+    return 0;
+  }
+
+  cb.service_proc = (void (*)(lnlylib_env*))l_dynlib_sym2(&hdl, module_name, l_const_strn("service_proc"));
+  if (cb.service_proc == 0) {
+    l_loge_1("load %strn_service_proc failed", l_strn(&module_name));
+    return 0;
+  }
+
+  cb.service_on_create = (void* (*)(lnlylib_env*))l_dynlib_sym2(&hdl, module_name, l_const_strn("service_on_create"));
+  cb.service_on_destroy = (void (*)(lnlylib_env*))l_dynlib_sym2(&hdl, module_name, l_const_strn("service_on_destroy"));
   return l_master_create_service(M, cb, flags);
 }
 

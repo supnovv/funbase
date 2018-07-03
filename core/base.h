@@ -5,24 +5,26 @@
 
 /** pre-defines in makefile, prefix.h, and autoconf.c **
 L_PLAT_LINUX or L_PLAT_MACOSX or L_PLAT_WINDOWS
-L_NEWLINE  // "\n" or "\r\n"
-L_NL_SIZE  // 1 or 2
+L_NEWLINE // "\n" or "\r\n"
+L_NL_SIZE // 1 or 2
 L_PATH_SEP // "/" or "\\"
 L_INLINE
 L_EXTERN
 L_THREAD_LOCAL
 L_BUILD_SHARED
-LNLYLIB_AUTOCONF  // only defined in autoconf.c
-LNLYLIB_API_IMPL  // shall be defined in lib src file
-LNLYLIB_HOME_DIR  // the lnlylib root folder when make
+LNLYLIB_AUTOCONF // only defined in autoconf.c
+LNLYLIB_API_IMPL // shall be defined in lib src file
+LNLYLIB_HOME_DIR // the lnlylib root folder when make
+LNLYLIB_CLIB_DIR // c libraries folder
+LNLYLIB_LUALIB_DIR // lua libraries folder
 L_MACH_32_BIT or L_MACH_64_BIT
 L_LIT_ENDIAN or L_BIG_ENDIAN
 l_bool false true // boolean
-l_byte l_sbyte    // 8-bit integer
-l_short l_ushort  // 16-bit integer
-l_medit l_umedit  // 32-bit integer
-l_long l_ulong    // 64-bit integer
-l_int l_uint      // pointer-size integer
+l_byte l_sbyte // 8-bit integer
+l_short l_ushort // 16-bit integer
+l_medit l_umedit // 32-bit integer
+l_long l_ulong // 64-bit integer
+l_int l_uint // pointer-size integer
 **/
 
 #undef L_MAX_INT_UB
@@ -177,12 +179,12 @@ typedef struct {
 } l_strn;
 
 #undef l_strc
-#undef l_strn_literal
-#undef l_strn_zero
+#undef l_empty_strn
+#undef l_const_strn
 
 #define l_strc(s) ((l_byte*)(s)) /* zero terminated c string */
-#define l_strn_literal(s) ((l_strn){l_strc("" s), sizeof(s) - 1})
-#define l_strn_zero() ((l_strn){0, 0})
+#define l_empty_strn() ((l_strn){0, 0})
+#define l_const_strn(s) ((l_strn){l_strc("" s), sizeof(s) - 1})
 
 L_INLINE l_strn
 l_strn_l(const void* s, l_int len) {

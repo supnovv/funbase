@@ -109,10 +109,44 @@ dlerror() returned value is not NULL.
     l_loge_s(tag " fail"); \
   }}
 
-L_EXTERN l_dynlib_handle
-l_dynlib_open(l_strn path, l_strn name)
+L_EXTERN l_bool
+l_dynlib_is_empty(l_dynlib* hdl)
 {
-  l_dynlib_handle h = {0};
+  return (hdl->impl == 0);
+}
+
+L_EXTERN l_bool
+l_dynlib_nt_empty(l_dynlib* hdl)
+{
+  return (hdl->impl != 0);
+}
+
+L_EXTERN l_dynlib
+l_empty_dynlib()
+{
+  l_dynlib h;
+  h.impl = 0;
+  return h;
+}
+
+L_EXTERN l_dynlib
+l_dynlib_open(l_strn fullname)
+{
+  l_dynlib h = l_empty_dynlib();
+  if (fullname.str && fullname.len > 0) {
+    char* errmsg = 0;
+    dlerror(); /* clear old errors */
+    h.impl = dlopen(fullname.str, RTLD_NOW);
+    if (h.impl == 0 && (errmsg = dlerror())) {
+      l_loge_1("dlopen %s", ls(errmsg));
+    }
+  }
+  return h;
+}
+
+L_EXTERN l_dynlib
+l_dynlib_open2(l_strn path, l_strn lib_name)
+{
   l_filename fn;
   l_filename_init(&fn);
 
@@ -124,40 +158,49 @@ l_dynlib_open(l_strn path, l_strn name)
   add the path separator "/" automatically, therefore dlopen here only
   lookup in the folder specified. **/
 
-  if (l_filename_addpath(&fn, path) && l_filename_append(&fn, name)) {
-    h.impl = dlopen(fn.s, RTLD_NOW);
-    if (h.impl == 0) {
-      l_dynlib_logerr("dlopen");
-    }
-  }
-
-  return h;
-}
-
-L_EXTERN void
-l_dynlib_close(l_dynlib_handle* handle)
-{
-  if (handle->impl) {
-    if (dlclose(handle->impl) != 0) {
-      l_dynlib_logerr("dlclose");
-    }
-    handle->impl = 0;
+  if (l_filename_addpath(&fn, path) && l_filename_addname(&fn, lib_name, l_const_strn(".so"))) {
+    return l_dynlib_open(l_strn_l(fn.s, fn.name_len));
+  } else {
+    return l_empty_dynlib();
   }
 }
 
 L_EXTERN void*
-l_dynlib_symbol(l_dynlib_handle* handle, l_strn symbol_name)
+l_dynlib_symbol(l_dynlib* hdl, l_strn sym_name)
 {
   void* symbol = 0;
-  if (symbol_name.str && symbol_name.len > 0) {
+  if (sym_name.str && sym_name.len > 0) {
     char* errstr = 0;
     dlerror(); /* clear old error */
-    symbol = dlsym(handle->impl, symbol_name.str);
+    symbol = dlsym(hdl->impl, sym_name.str);
     if (symbol == 0 && (errstr = dlerror())) {
       l_loge_1("dlsym %s", ld(errstr));
     }
   }
   return symbol;
+}
+
+L_EXTERN void*
+l_dynlib_sym2(l_dynlib* hdl, l_strn lib_name, l_strn sym_name)
+{
+  l_filename fn;
+  l_filename_init(&fn);
+  if (l_filename_addname_combine(&fn, lib_name, sym_name, l_const_strn("_"))) {
+    return l_dynlib_symbol(hdl, l_strn_l(fn.s, fn.name_len)); 
+  } else {
+    return 0;
+  }
+}
+
+L_EXTERN void
+l_dynlib_close(l_dynlib* hdl)
+{
+  if (hdl->impl) {
+    if (dlclose(hdl->impl) != 0) {
+      l_dynlib_logerr("dlclose");
+    }
+    hdl->impl = 0;
+  }
 }
 
 L_EXTERN int

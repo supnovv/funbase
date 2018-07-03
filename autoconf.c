@@ -82,7 +82,11 @@ int main(void)
   l_write_line(file, "#define _CRT_SECURE_NO_WARNINGS%s", L_NEWLINE);
 
   l_write_line(file, "#undef LNLYLIB_HOME_DIR");
+  l_write_line(file, "#undef LNLYLIB_CLIB_DIR");
+  l_write_line(file, "#undef LNLYLIB_LUALIB_DIR");
   l_write_cdir(file, "#define LNLYLIB_HOME_DIR \"%s%s\"" L_NEWLINE);
+  l_write_line(file, "#define LNLYLIB_CLIB_DIR LNLYLIB_HOME_DIR \"/lib/\"");
+  l_write_line(file, "#define LNLYLIB_LUALIB_DIR LNLYLIB_HOME_DIR \"/lib/lua/\"");
 
   l_write_line(file, "#undef L_MACH_32_BIT");
   l_write_line(file, "#undef L_MACH_64_BIT");

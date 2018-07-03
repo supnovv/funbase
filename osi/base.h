@@ -2,13 +2,19 @@
 #define LNLYLIB_OSI_BASE_H
 #include "core/base.h"
 
-typedef struct {
+typedef union {
   void* impl;
-} l_dynlib_handle;
+  l_uint hdl;
+} l_dynlib;
 
-L_EXTERN l_dynlib_handle l_dynlib_open(l_strn path, l_strn name);
-L_EXTERN void l_dynlib_close(l_dynlib_handle* handle);
-L_EXTERN void* l_dynlib_symbol(l_dynlib_handle* handle, l_strn symbol_name);
+L_EXTERN l_bool l_dynlib_is_empty(l_dynlib* hdl);
+L_EXTERN l_bool l_dynlib_nt_empty(l_dynlib* hdl);
+L_EXTERN l_dynlib l_empty_dynlib();
+L_EXTERN l_dynlib l_dynlib_open(l_strn fullname);
+L_EXTERN l_dynlib l_dynlib_open2(l_strn path, l_strn lib_name);
+L_EXTERN void* l_dynlib_symbol(l_dynlib* hdl, l_strn sym_name);
+L_EXTERN void* l_dynlib_sym2(l_dynlib* hdl, l_strn lib_name, l_strn sym_name);
+L_EXTERN void l_dynlib_close(l_dynlib* hdl);
 
 L_EXTERN void l_thrkey_init(l_thrkey* self);
 L_EXTERN void l_thrkey_free(l_thrkey* self);
