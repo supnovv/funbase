@@ -37,6 +37,22 @@ Lua服务依附在C服务 snlua 上运行，Lua服务每收到一个消息，都
 
 注意如果是一个服务内部的协程相互将发送消息，直接保存在服务的消息列表中即可，
 因为这个通信在一个线程内，直接操作即可
+
+
+int lua_yield(lua_State* L, int nresults);
+int lua_yieldk(lua_State* L, int nresults, lua_KContext ctx, lua_KFunction k);
+
+The lua_yield function is equivalent to lua_yieldk, but it has no continuation.
+Therefore, when the thread resumes, it continues the function that called the
+function calling lua_yield.
+
+@nresults, number of results on the stack. These results will be returned to
+the caller who called the lua_resume to resume this coroutine.
+
+The coroutine suspend and resome detail flows:
+1.
+2.
+
 ]]
 
 local co = require "coroutine"
