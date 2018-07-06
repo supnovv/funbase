@@ -6,14 +6,21 @@ struct l_global;
 struct l_worker;
 struct l_service;
 struct l_message;
+struct l_coroutine;
 
 typedef struct {
-  struct l_global* G;
-  struct l_worker* cthr;
-  struct l_service* csvc;
-  struct l_message* cmsg
   void* svud;
+  struct l_message* cmsg
+
+  lua_State* L;
+  struct l_coroutine* co;
+
+  l_string* cstr;
   l_stanfile* logfile;
+
+  struct l_service* csvc;
+  struct l_worker* cthr;
+  struct l_global* G;
 } lnlylib_env;
 
 typedef struct {

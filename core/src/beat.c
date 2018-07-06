@@ -25,15 +25,15 @@
 
 struct l_service;
 typedef struct {
-  l_smplnode node;
+  l_smplnode node; /* chained to free q */
   struct l_service* service;
-  l_uint slot_index; /* the lowest bit is for service alive or not */
   l_squeue bkmq; /* service backup message q */
+  l_umedit slot_index; /* the lowest bit is for service alive or not */
 } l_srvcslot;
 
 typedef struct {
-  l_uint capacity;
-  l_uint num_services;
+  l_umedit capacity;
+  l_umedit num_services;
   l_squeue free_slots;
   l_srvcslot* slot_arr;
 } l_srvctable;
@@ -146,15 +146,43 @@ typedef struct l_global {
   l_condv QCNDV;
 } l_global;
 
+typedef struct {
+  l_smplnode node; /* chained to free q */
+  l_coroutine* coro;
+  l_umedit slot_index;
+} l_coroslot;
+
+typedef struct {
+  l_umedit capacity;
+  l_umedit num_coros;
+  l_squeue free_coro;
+  l_coroslot* slot_arr;
+  lua_State* L;
+} l_corotable;
+
+typedef struct {
+  l_umedit index;
+  l_umedit count;
+} l_svid;
+
+typedef struct {
+  l_umedit index;
+  l_umedit count;
+} l_coid;
+
+typedef struct {
+  l_smplnode node;
+  lua_State* co;
+  l_coid coid;
+} l_coroutine;
+
 typedef struct l_service {
   l_smplnode node; /* chained in global q */
-  l_uint svid;
-  l_uint parent_svid;
   l_squeue srvc_msgq;
   l_uint srvc_flags;
-  lua_State* L;
-  l_squeue srvc_frco;
-  l_service_callback cb;
+  l_svid svid;
+  l_corotable* coro_tabl; /* lua service if not null */
+  l_service_callback* cb;
   void* ud;
 } l_service;
 
@@ -168,7 +196,7 @@ typedef struct {
   l_uint flags;
   union {
   l_strn module_name;
-  l_service_callback cb;
+  l_service_callback* cb;
   };
 } l_create_service_req;
 
@@ -182,8 +210,8 @@ typedef struct {
 typedef struct l_message {
   l_smplnode node;
   l_uint mgid;
-  l_uint mssg_dest;
-  l_uint mssg_from;
+  l_svid mssg_dest;
+  l_svid mssg_from;
   l_umedit mssg_flags;
   l_umedit data_size;
   l_msgdata mssg_data;
@@ -202,6 +230,7 @@ typedef struct l_worker {
   l_squeue* mast_rxmq;
   l_squeue mq[4];
   l_stanfile logfile;
+  l_string thrstr;
   lnlylib_env ENV;
 } l_worker;
 
@@ -368,7 +397,7 @@ l_master_init(void (*start)(void), int argc, char** argv)
 }
 
 static void
-l_service_init(l_service* S, l_uint svid, l_service_callback cb, l_uint flags)
+l_service_init(l_service* S, l_uint svid, l_service_callback* cb, l_uint flags)
 {
   S->svid = svid;
   S->parent_svid = 0;
@@ -386,7 +415,7 @@ l_service_free_co(l_service* S)
 }
 
 static l_service*
-l_master_create_reserved_service(l_master* M, l_uint svid, l_service_callback cb, l_uint flags)
+l_master_create_reserved_service(l_master* M, l_uint svid, l_service_callback* cb, l_uint flags)
 {
   l_service* S = 0;
   l_srvcslot* slot = 0;
@@ -415,7 +444,7 @@ l_master_create_reserved_service(l_master* M, l_uint svid, l_service_callback cb
 }
 
 static l_service*
-l_master_create_service(l_master* M, l_service_callback cb, l_uint flags)
+l_master_create_service(l_master* M, l_service_callback* cb, l_uint flags)
 {
   l_service* S = 0;
   l_srvcslot* slot = 0;
@@ -440,15 +469,16 @@ l_master_create_service(l_master* M, l_service_callback cb, l_uint flags)
 static l_service*
 l_master_create_service_from_module(l_master* M, l_strn module_name, l_uint flags)
 {
-  l_service_callback cb = {0};
+  l_service_callback* cb = 0;
   l_dynlib hdl = l_empty_dynlib();
 
-  hdl = l_dynlib_open2(l_const_strn(LNLYLIB_CLIB_DIR), module_name); /* TODO: implement module cache ? */
+  hdl = l_dynlib_open2(l_const_strn(LNLYLIB_CLIB_DIR), module_name); /* TODO: 1. do module cache? 2. multiple service can exist in one module */
   if (l_dynlib_is_empty(&hdl)) {
     l_loge_1("open library %strn failed", lstrn(&module_name));
     return 0;
   }
 
+#if 0
   cb.service_proc = (void (*)(lnlylib_env*))l_dynlib_sym2(&hdl, module_name, l_const_strn("service_proc"));
   if (cb.service_proc == 0) {
     l_loge_1("load %strn_service_proc failed", l_strn(&module_name));
@@ -457,6 +487,13 @@ l_master_create_service_from_module(l_master* M, l_strn module_name, l_uint flag
 
   cb.service_on_create = (void* (*)(lnlylib_env*))l_dynlib_sym2(&hdl, module_name, l_const_strn("service_on_create"));
   cb.service_on_destroy = (void (*)(lnlylib_env*))l_dynlib_sym2(&hdl, module_name, l_const_strn("service_on_destroy"));
+#endif
+
+  cb = (l_service_callback*)l_dynlib_sym2(&hdl, module_name, l_const_strn("callback"));
+  if (cb->service_proc == 0) {
+    l_loge_1("load %strn_service_proc failed", l_strn(&module_name));
+    return 0;
+  }
   return l_master_create_service(M, cb, flags);
 }
 
@@ -677,7 +714,7 @@ l_master_loop(lnlylib_env* main_env)
   l_squeue_init(&svcq);
 
   /* launcher is the service to bang the whole new world */
-  launcher = l_master_create_reserved_service(M, L_SERVICE_LAUNCHER, l_launcher_service_cb, 0);
+  launcher = l_master_create_reserved_service(M, L_SERVICE_LAUNCHER, &l_launcher_service_cb, 0);
   on_create_msg = l_master_create_message(M, launcher->svid, L_MSG_SERVICE_ON_CREATE, 0, 0, 0);
   l_squeue_push(&launcher->srvc_msgq, &on_create_msg->node);
   stbl->slot_arr[launcher->svid].service = 0; /* need detach the service from the table first before insert into global q to handle */
@@ -845,7 +882,7 @@ l_send_message(lnlylib_env* E, l_uint dest_svid, l_uint mgid, l_umedit flags, vo
 }
 
 L_EXTERN void
-l_create_service(lnlylib_env* E, l_service_callback cb, l_uint flags)
+l_create_service(lnlylib_env* E, l_service_callback* cb, l_uint flags)
 {
   l_create_service_req create_service_req;
   flags &= ~(L_SRVC_FLAG_CREATE_FROM_MODULE | L_SRVC_FLAG_CREATE_LUA_SERVICE);
