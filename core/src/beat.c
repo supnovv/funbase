@@ -161,26 +161,16 @@ typedef struct {
 } l_corotable;
 
 typedef struct {
-  l_umedit index;
-  l_umedit count;
-} l_svid;
-
-typedef struct {
-  l_umedit index;
-  l_umedit count;
-} l_coid;
-
-typedef struct {
   l_smplnode node;
   lua_State* co;
-  l_coid coid;
+  l_ulong coro_id;
 } l_coroutine;
 
 typedef struct l_service {
   l_smplnode node; /* chained in global q */
   l_squeue srvc_msgq;
   l_uint srvc_flags;
-  l_svid svid;
+  l_ulong srvc_id; /* the higheest bit is for remote service or note */
   l_corotable* coro_tabl; /* lua service if not null */
   l_service_callback* cb;
   void* ud;
@@ -201,17 +191,19 @@ typedef struct {
 } l_create_service_req;
 
 typedef struct {
-  l_umedit ma, mb, mc, md;
-  l_ulong la, lb, lc, ld;
-  l_uint a, b, c, d;
+  l_umedit a, b, c, d;
+  l_ulong l, m, n, o;
+  l_uint u, v, w, x;
   void* extra;
 } l_msgdata;
 
 typedef struct l_message {
   l_smplnode node;
-  l_uint mgid;
-  l_svid mssg_dest;
-  l_svid mssg_from;
+  l_ulong dest_srvc;
+  l_ulong dest_coro;
+  l_ulong from_srvc;
+  l_ulong from_coro;
+  l_uint mgid; /* high 32-bit is id, lower 32-bit's behavior is user defined */
   l_umedit mssg_flags;
   l_umedit data_size;
   l_msgdata mssg_data;
@@ -1054,3 +1046,51 @@ lnlylib_main(void (*start)(void), int argc, char** argv)
   return 0;
 }
 
+static void
+l_lua_set_extra(lua_State* co, lnlylib_env* env)
+{
+}
+
+static lnlylib_env*
+l_lua_get_extra(lua_State* co)
+{
+  return 0; /* TODO */
+}
+
+typedef struct {
+  lua_Unsigned mgid;
+  lua_Unsigned service;
+  lua_Unsigned session;
+  lua_Unsigned format;
+  void* data;
+} l_msg_userdata;
+
+local heart = lnlylib_heartbeat
+msg = heart.wait_message(msgid) -- the msg content is moved to stack by c layer
+
+send_msg(mgid, dest_srvc, flags, ...)
+send_rsp(msg, mgid, flags, ...)
+
+static int
+l_lua_send_msg(lua_State* co)
+{
+  lnlylib_env* E = l_lua_get_extra(co);
+  int n = lua_gettop(co); /* number of arguments */
+  if (n < 3) {
+    l_loge_1("message args not enough %d", ld(n));
+  }
+
+  {
+  }
+  return 0;
+}
+
+static int
+l_lua_send_rsp(lua_State* co)
+{
+  lnlylib_env* E = l_lua_get_extra(co);
+  int n = lua_gettop(co); /* number of arguments */
+  if (n < 3) {
+    l_loge_1("message args not enough %d", ld(n));
+  }
+}
