@@ -52,8 +52,9 @@ typedef struct {
   l_squeue mast_frsq; /* free service q */
   l_squeue mast_frmq; /* free message q */
   l_squeue temp_svcq;
-  l_int num_workers; /* size of work node array */
   l_worknode* node_arr;
+  l_umedit num_workers; /* size of work node array */
+  l_umedit srvc_seed;
   l_srvctable stbl;
   lnlylib_env main_env;
 } l_master;
@@ -129,8 +130,8 @@ l_filename_addpath(l_filename* fn, l_strn path)
 }
 
 typedef struct {
-  l_int num_workers;
-  l_int init_stbl_size;
+  l_umedit num_workers;
+  l_umedit init_stbl_size;
   l_filename log_file_name;
 } l_config;
 
@@ -154,7 +155,7 @@ typedef struct {
 
 typedef struct {
   l_umedit capacity;
-  l_umedit num_coros;
+  l_umedit coro_seed;
   l_squeue free_coro;
   l_coroslot* slot_arr;
   lua_State* L;
@@ -164,13 +165,14 @@ typedef struct {
   l_smplnode node;
   lua_State* co;
   l_ulong coro_id;
+  l_ulong wait_mgid;
 } l_coroutine;
 
 typedef struct l_service {
   l_smplnode node; /* chained in global q */
   l_squeue srvc_msgq;
-  l_uint srvc_flags;
-  l_ulong srvc_id; /* the higheest bit is for remote service or note */
+  l_umedit srvc_flags;
+  l_ulong srvc_id; /* the highest bit is for remote service or note */
   l_corotable* coro_tabl; /* lua service if not null */
   l_service_callback* cb;
   void* ud;
@@ -389,14 +391,12 @@ l_master_init(void (*start)(void), int argc, char** argv)
 }
 
 static void
-l_service_init(l_service* S, l_uint svid, l_service_callback* cb, l_uint flags)
+l_service_init(l_service* S, l_ulong svid, l_service_callback* cb, l_umedit flags)
 {
-  S->svid = svid;
-  S->parent_svid = 0;
   l_squeue_init(&S->srvc_msgq);
   S->srvc_flags = flags;
-  S->L = 0;
-  l_squeue_init(&S->srvc_frco);
+  S->svid = svid;
+  S->coro_tabl = 0;
   S->cb = cb;
   S->ud = 0;
 }
@@ -407,7 +407,7 @@ l_service_free_co(l_service* S)
 }
 
 static l_service*
-l_master_create_reserved_service(l_master* M, l_uint svid, l_service_callback* cb, l_uint flags)
+l_master_create_reserved_service(l_master* M, l_ulong svid, l_service_callback* cb, l_umedit flags)
 {
   l_service* S = 0;
   l_srvcslot* slot = 0;
@@ -436,7 +436,7 @@ l_master_create_reserved_service(l_master* M, l_uint svid, l_service_callback* c
 }
 
 static l_service*
-l_master_create_service(l_master* M, l_service_callback* cb, l_uint flags)
+l_master_create_service(l_master* M, l_service_callback* cb, l_umedit flags)
 {
   l_service* S = 0;
   l_srvcslot* slot = 0;
@@ -459,7 +459,7 @@ l_master_create_service(l_master* M, l_service_callback* cb, l_uint flags)
 }
 
 static l_service*
-l_master_create_service_from_module(l_master* M, l_strn module_name, l_uint flags)
+l_master_create_service_from_module(l_master* M, l_strn module_name, l_umedit flags)
 {
   l_service_callback* cb = 0;
   l_dynlib hdl = l_empty_dynlib();
@@ -524,7 +524,7 @@ l_launcher_service_cb = {
 };
 
 static l_message*
-l_master_create_message(l_master* M, l_uint dest_svid, l_uint mgid, l_umedit flags, void* data, l_umedit size)
+l_master_create_message(l_master* M, l_ulong mgid, l_ulong dest_svid, l_umedit flags, void* data, l_umedit size)
 {
   l_message* msg = 0;
 
@@ -534,9 +534,9 @@ l_master_create_message(l_master* M, l_uint dest_svid, l_uint mgid, l_umedit fla
   }
 
   msg->mgid = mgid;
-  msg->mssg_dest = dest_svid;
-  msg->mssg_from = 0;
   msg->mssg_flags = flags;
+  msg->from_srvc = 0;
+  msg->from_coro = 0;
 
   /* TODO: consider flags */
 
@@ -548,6 +548,9 @@ l_master_create_message(l_master* M, l_uint dest_svid, l_uint mgid, l_umedit fla
     msg->data_size = 0;
   }
 
+  l_assert(l_service_nt_remote(dest_svid));
+  msg->dest_srvc = dest_svid;
+  msg->dest_coro = 0;
   return msg;
 }
 
@@ -600,7 +603,7 @@ l_master_stop_service(l_master* M, l_uint svid)
     l_loge_1("try to stop invalid service %d", ld(svid));
   } else {
     l_message* on_destroy_msg = 0;
-    on_destroy_msg = l_master_create_message(M, svid, L_MSG_SERVICE_ON_DESTROY, 0, 0, 0);
+    on_destroy_msg = l_master_create_message(M, L_MSG_SERVICE_ON_DESTROY, svid, 0, 0, 0);
     l_master_insert_message(M, on_destroy_msg);
   }
 }
@@ -656,7 +659,7 @@ l_master_handle_self_messages(l_master* M, l_squeue* txms)
       if (S == 0) { break; }
       S->parent_svid = msg->mssg_from;
       /* make service's first message *ON_CREATE* */
-      on_create_msg = l_master_create_message(M, S->svid, L_MSG_SERVICE_ON_CREATE, 0, 0, 0);
+      on_create_msg = l_master_create_message(M, L_MSG_SERVICE_ON_CREATE, S->svid, 0, 0, 0);
       l_squeue_push(&S->srvc_msgq, &on_create_msg->node);
       /* insert the service to tempq to handle */
       l_master_insert_message(M, on_create_msg);
@@ -686,7 +689,7 @@ l_master_loop(lnlylib_env* main_env)
   l_service* S = 0;
   l_srvcslot* srvc_slot = 0;
 
-  l_int num_workers = M->num_workers;
+  l_umedit num_workers = M->num_workers;
   l_squeue* mast_frmq = &M->mast_frmq;
   l_squeue* mast_frsq = &M->mast_frsq;
   l_worknode* work_node = 0;
@@ -707,7 +710,7 @@ l_master_loop(lnlylib_env* main_env)
 
   /* launcher is the service to bang the whole new world */
   launcher = l_master_create_reserved_service(M, L_SERVICE_LAUNCHER, &l_launcher_service_cb, 0);
-  on_create_msg = l_master_create_message(M, launcher->svid, L_MSG_SERVICE_ON_CREATE, 0, 0, 0);
+  on_create_msg = l_master_create_message(M, L_MSG_SERVICE_ON_CREATE, launcher->svid, 0, 0, 0);
   l_squeue_push(&launcher->srvc_msgq, &on_create_msg->node);
   stbl->slot_arr[launcher->svid].service = 0; /* need detach the service from the table first before insert into global q to handle */
   l_squeue_push(&svcq, &launcher->node);
@@ -801,7 +804,7 @@ check_feeded_messages:
 }
 
 static l_message*
-l_create_message(lnlylib_env* E, l_uint dest_svid, l_uint mgid, l_umedit flags, void* data, l_umedit size)
+l_create_message(lnlylib_env* E, l_ulong mgid, l_ulong dest_srvc, l_umedit flags, void* data, l_umedit size)
 {
   l_worker* W = E->cthr;
   l_service* S = E->csvc;
@@ -813,9 +816,9 @@ l_create_message(lnlylib_env* E, l_uint dest_svid, l_uint mgid, l_umedit flags, 
   }
 
   msg->mgid = mgid;
-  msg->mssg_dest = dest_svid;
-  msg->mssg_from = S->svid;
   msg->mssg_flags = flags;
+  msg->from_srvc = S->svid;
+  msg->from_coro = E->coro ? E->coro->coid : 0;
 
   /* TODO: consider flags */
 
@@ -827,21 +830,30 @@ l_create_message(lnlylib_env* E, l_uint dest_svid, l_uint mgid, l_umedit flags, 
     msg->data_size = 0;
   }
 
+  msg->mssg_dest = dest_svid;
+  if (l_service_is_remote(dest_svid)) {
+    msg->mssg_flags |= L_MSSG_FLAG_REMOTE_MSG;
+    /* TODO */
+  } else {
+    msg->mssg_flags &= (~L_MSSG_FLAG_REMOTE_MSG);
+    msg->dest_srvc = dest_svid;
+    msg->dest_coro = 0;
+  }
   return msg;
 }
 
 static void
-l_send_message_impl(lnlylib_env* E, l_uint dest_svid, l_uint mgid, l_umedit flags, void* data, l_umedit size)
+l_send_message_impl(lnlylib_env* E, l_message* msg)
 {
-  l_message* msg = 0;
   l_worker* W = E->cthr;
 
-  msg = l_create_message(E, dest_svid, mgid, flags, data, size);
   if (msg == 0) {
     return;
   }
 
-  if (dest_svid == msg->mssg_from) {
+  if (msg->mssg_flags & L_MSSG_FLAG_REMOTE_MSG) {
+    /* TODO */
+  } else if (msg->dest_srvc == msg->from_srvc) {
     l_squeue_push(W->work_txme, &msg->node);
   } else {
     l_squeue_push(W->work_txmq, &msg->node);
@@ -849,27 +861,42 @@ l_send_message_impl(lnlylib_env* E, l_uint dest_svid, l_uint mgid, l_umedit flag
 }
 
 static void
-l_send_master_message(lnlylib_env* E, l_uint dest_svid, l_uint mgid, l_umedit flags, void* data, l_umedit size)
+l_send_master_message(lnlylib_env* E, l_ulong mgid, l_ulong dest_svid, l_umedit flags, void* data, l_umedit size)
 {
   l_message* msg = 0;
   l_worker* W = E->cthr;
 
-  msg = l_create_message(E, dest_svid, mgid, flags, data, size);
+  msg = l_create_message(E, mgid, dest_svid, flags, data, size);
   if (msg == 0) {
     return;
   }
 
   l_assert(dest_svid != msg->mssg_from);
+  l_assert(l_service_nt_remote(dest_svid));
   l_squeue_push(W->work_txms, &msg->node);
 }
 
-L_EXTERN void
-l_send_message(lnlylib_env* E, l_uint dest_svid, l_uint mgid, l_umedit flags, void* data, l_umedit size)
+static void /* lua message has dest coroutine need to be specified */
+l_send_lua_message(lnlylib_env* E, l_ulong mgid, l_ulong dest_srvc, l_ulong dest_coro, l_umedit flags, void* data, l_umedit size)
 {
-  if (mgid < L_MIN_USER_MSG_ID) {
-    l_loge_1("invalid message id %d", ld(mgid));
+  if ((mgid >> 32) < L_MIN_USER_MSG_ID) {
+    l_loge_1("invalid message id %d", ld(mgid >> 32));
   } else {
-    l_send_message_impl(E, svid, mgid, flags, data, size);
+    l_message* msg = l_create_message(E, mgid, dest_srvc, flags, data, size);
+    if (msg) {
+      msg->dest_coro = dest_coro;
+      l_send_message_impl(E, msg);
+    }
+  }
+}
+
+L_EXTERN void
+l_send_message(lnlylib_env* E, l_ulong mgid, l_ulong dest_svid, l_umedit flags, void* data, l_umedit size)
+{
+  if ((mgid >> 32) < L_MIN_USER_MSG_ID) {
+    l_loge_1("invalid message id %d", ld(mgid >> 32));
+  } else {
+    l_send_message_impl(E, l_create_message(E, mgid, svid, flags, data, size));
   }
 }
 
@@ -880,7 +907,7 @@ l_create_service(lnlylib_env* E, l_service_callback* cb, l_uint flags)
   flags &= ~(L_SRVC_FLAG_CREATE_FROM_MODULE | L_SRVC_FLAG_CREATE_LUA_SERVICE);
   create_service_req.flags = flags;
   create_service_req.cb = cb;
-  l_send_master_message(E, 0, L_MSG_CREATE_SERVICE_REQ, 0, &create_service_req, sizeof(l_create_service_req));
+  l_send_master_message(E, L_MSG_CREATE_SERVICE_REQ, 0, 0, &create_service_req, sizeof(l_create_service_req));
 }
 
 L_EXTERN void
@@ -890,7 +917,7 @@ l_create_service_from_module(lnlylib_env* E, l_strn module_name, l_uint flags)
   flags &= ~(L_SRVC_FLAG_CREATE_LUA_SERVICE);
   create_service_req.flags = flags | L_SRVC_FLAG_CREATE_FROM_MODULE;
   create_service_req.module_name = module_name;
-  l_send_master_message(E, 0, L_MSG_CREATE_SERVICE_REQ, 0, &create_service_req, sizeof(l_create_service_req));
+  l_send_master_message(E, L_MSG_CREATE_SERVICE_REQ, 0, 0, &create_service_req, sizeof(l_create_service_req));
 }
 
 L_EXTERN void
@@ -899,9 +926,9 @@ l_create_lua_service(lnlylib_env* E, l_strn lualib_name)
 }
 
 L_EXTERN void
-l_stop_service_specific(lnlylib_env* E, l_uint svid)
+l_stop_service_specific(lnlylib_env* E, l_ulong svid)
 {
-  l_send_master_message(E, svid, L_MSG_STOP_SERVICE_REQ, 0, 0, 0);
+  l_send_master_message(E, L_MSG_STOP_SERVICE_REQ, svid, 0, 0, 0);
 }
 
 static void
@@ -917,7 +944,7 @@ l_worker_flush_messages(lnlylib_env* E)
   feedback_ind.txmq = l_squeue_move(W->work_txmq);
   feedback_ind.txms = l_squeue_move(W->work_txms);
 
-  msg = l_create_message(E, 0, L_MSG_WORKER_FEEDBACK_IND, 0, &feedback_ind, sizeof(l_worker_feedback_ind));
+  msg = l_create_message(E, L_MSG_WORKER_FEEDBACK_IND, 0, 0, &feedback_ind, sizeof(l_worker_feedback_ind));
   if (msg == 0) {
     return;
   }
@@ -1047,14 +1074,25 @@ lnlylib_main(void (*start)(void), int argc, char** argv)
 }
 
 static void
-l_lua_set_extra(lua_State* co, lnlylib_env* env)
+ll_set_extra(lua_State* co, lnlylib_env* env)
 {
+  /** void* lua_getextraspace(lua_State* L) **
+  Returns a pointer to a raw memory area associated with the given Lua
+  state. The application can use this area for any purpose; Lua does
+  not use it for anything. Each new thread has this area initialized
+  with a copy of the area of the main thread. By default, this area
+  has the size of a pointer to void, but you can recompile Lua with
+  a different size for this area. (See LUA_EXTRASPACE in luaconf.h)
+  ********************************************************************/
+  l_uint* extra = (l_uint*)lua_getextraspace(co);
+  *extra = (l_uint)env;
 }
 
 static lnlylib_env*
-l_lua_get_extra(lua_State* co)
+ll_get_extra(lua_State* co)
 {
-  return 0; /* TODO */
+  l_uint* extra = (l_uint*)lua_getextraspace(co);
+  return (lnlylib_env*)(*extra);
 }
 
 typedef struct {
@@ -1065,32 +1103,119 @@ typedef struct {
   void* data;
 } l_msg_userdata;
 
-local heart = lnlylib_heartbeat
-msg = heart.wait_message(msgid) -- the msg content is moved to stack by c layer
+/* c function registers for lua */
+static const struct luaL_Reg clanglib[] = {
+  {"name", cfuncname},
+  {"new", cfuncnew},
+  {NULL, NULL}
+};
 
-send_msg(mgid, dest_srvc, flags, ...)
-send_rsp(msg, mgid, flags, ...)
+int luaopen_clanglib(lua_State* L)
+{
+  luaL_newlib(L, clanglib);
+  return 1;
+}
+
+/* add metatable for type check and oop style access */
+
+int luaopen_clanglib(lua_State* L)
+{
+  luaL_newmetatable(L, "package.clanglib");
+  luaL_newlib(L, clanglib);
+  return 1;
+}
+
+static int clanglibnew(lua_State* L)
+{
+  // new the object
+  luaL_getmetatable(L, "package.clanglib");
+  lua_setmetatable(L, -2);
+  return 1; /* new userdata is already on the stack */
+}
+
+typedef union {
+  lua_Integer i;
+  lua_Unsigned u;
+} l_Integer_Union;
+
+static lua_Unsigned
+ll_Integer2Unsigned(lua_Integer i)
+{
+  l_Integer_Union a;
+  a.i = i;
+  return a.u;
+}
+
+static lua_Integer
+ll_Unsigned2Integer(lua_Unsigned u)
+{
+  l_Integer_Union a;
+  a.u = u;
+  return a.i;
+}
+
+static l_ulong
+ll_checkunsigned(lua_State* L, int index)
+{
+  lua_Integer i = luaL_checkinteger(L, index);
+  return (l_ulong)ll_Integer2Unsigned(i);
+}
+
+typedef struct {
+  l_umedit size;
+  l_umedit data[1];
+} ll_packdata;
 
 static int
-l_lua_send_msg(lua_State* co)
+ll_send_msg(lua_State* co)
 {
-  lnlylib_env* E = l_lua_get_extra(co);
-  int n = lua_gettop(co); /* number of arguments */
-  if (n < 3) {
-    l_loge_1("message args not enough %d", ld(n));
-  }
+  lnlylib_env* E = ll_get_extra(co);
+  l_ulong mgid = ll_checkunsigned(co, 1);
+  l_ulong dest = ll_checkunsigned(co, 2);
+  l_umedit flags = (l_umedit)luaL_checkinteger(co, 3);
+  ll_packdata* pack = (ll_packdata*)luaL_checkudata(co, 4, "lnlylib.packdata");
+  l_send_lua_message(E, mgid, dest, 0, flags, pack->data, pack->size);
+  return 0;
+}
 
-  {
-  }
+local heart = lnlylib_heartbeat
+msg = heart.wait_message(msgid) -- the msg content is moved to stack by c layer
+send_msg(mgid, dest_srvc, flags, data)
+send_rsp(msg, mgid, flags, data)
+
+static int
+ll_send_rsp(lua_State* co)
+{
+  lnlylib_env* E = ll_get_extra(co);
+  ll_mssgdata* dest = (ll_mssgdata*)luaL_checkudata(co, 1, "lnlylib.mssgdata");
+  l_ulong mgid = ll_checkunsigned(co, 2);
+  l_umedit flags = (l_umedit)luaL_checkinteger(co, 3);
+  ll_packdata* pack = (ll_packdata*)luaL_checkudata(co, 4, "lnlylib.packdata");
+  l_send_lua_message(E, mgid, dest->service, dest->session, flags, pack->data, pack->size);
   return 0;
 }
 
 static int
-l_lua_send_rsp(lua_State* co)
+ll_wait_msg(lua_State* co)
 {
-  lnlylib_env* E = l_lua_get_extra(co);
-  int n = lua_gettop(co); /* number of arguments */
-  if (n < 3) {
-    l_loge_1("message args not enough %d", ld(n));
-  }
+  lnlylib_env* E = ll_get_extra(co);
+  l_ulong mgid = ll_checkunsigned(co, 1);
+  E->coro->wait_mgid = mgid;
+  l_assert(E->coro->co == co);
+  ll_yield_impl(co, 0);
+  return 0;
 }
+
+L_EXTERN void
+ll_yield_impl(lua_State* co, int nresults)
+{
+  int status = lua_yield(co, nresults);
+  l_loge_1("lua_yield never returns to here %d", ld(status));
+}
+
+L_EXTERN int
+ll_yield(lua_State* co)
+{
+  return ll_yield_impl(co, lua_gettop(L));
+}
+

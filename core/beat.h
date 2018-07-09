@@ -13,7 +13,7 @@ typedef struct {
   struct l_message* cmsg
 
   lua_State* L;
-  struct l_coroutine* co;
+  struct l_coroutine* coro;
 
   l_string* cstr;
   l_stanfile* logfile;
