@@ -51,6 +51,7 @@ typedef struct {
   l_uint mast_flags;
   l_squeue mast_frsq; /* free service q */
   l_squeue mast_frmq; /* free message q */
+  l_squeue mast_frct; /* free coro tables */
   l_squeue temp_svcq;
   l_worknode* node_arr;
   l_umedit num_workers; /* size of work node array */
@@ -133,6 +134,7 @@ typedef struct {
   l_umedit num_workers;
   l_umedit init_stbl_size;
   l_filename log_file_name;
+  l_string start_script;
 } l_config;
 
 typedef struct {
@@ -154,6 +156,7 @@ typedef struct {
 } l_coroslot;
 
 typedef struct {
+  l_smplnode node;
   l_umedit capacity;
   l_umedit coro_seed;
   l_squeue free_coro;
@@ -222,9 +225,9 @@ typedef struct l_worker {
   l_uint work_flags;
   l_mutex* mast_rxlk;
   l_squeue* mast_rxmq;
-  l_squeue mq[4];
   l_stanfile logfile;
   l_string thrstr;
+  l_squeue mq[4];
   lnlylib_env ENV;
 } l_worker;
 
@@ -316,7 +319,9 @@ l_srvctable_alloc_slot(l_srvctable* stbl)
 static void
 l_config_load(l_config* C)
 {
-  lua_State* L = luastate_new();
+  lua_State* L = ll_newstate();
+
+  l_string_init(&C->start_script);
 
   C->num_workers = luastate_readint(c->L, "workers");
   if (C->num_workers < 1) {
@@ -357,6 +362,7 @@ l_master_init(void (*start)(void), int argc, char** argv)
   M->mast_flags = 0;
   l_squeue_init(&M->mast_frsq);
   l_squeue_init(&M->mast_frmq);
+  l_squeue_init(&M->mast_frct);
   l_squeue_init(&M->temp_svcq);
 
   M->num_workers = C->num_workers;
@@ -498,8 +504,20 @@ l_stop_service(lnlylib_env* E)
 static void*
 l_launcher_on_create(lnlylib_env* E)
 {
+  l_global* G = E->G;
+  l_master* M = &G->master;
+  l_config* C = &G->conf;
+
   l_logm_s("launcher on create");
-  E->G->master.start();
+
+  if (l_string_nt_empty(&C->start_script)) {
+    ll_pcall(C->L, l_string_strn(&C->start_script));
+  }
+
+  if (M->start) {
+    M->start();
+  }
+
   l_stop_service(E);
   return 0;
 }
