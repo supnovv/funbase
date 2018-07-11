@@ -1091,6 +1091,48 @@ lnlylib_main(void (*start)(void), int argc, char** argv)
   return 0;
 }
 
+/** string and logging **/
+
+static void
+l_start_logging(lnlylib_env* E, const l_byte* tag)
+{
+  l_ostream* out = 0;
+  int thridx = 0;
+
+  l_ostream_format(out, "%s %2x ", ls(tag), ld(thridx));
+  return out;
+}
+
+extern void
+l_impl_logger_func(lnlylib_env* E, const void* tag, const void* fmt, ...)
+{
+  int level = l_strc(tag)[0] - '0';
+  int nargs = l_strc(tag)[1];
+  l_ostream* out = 0;
+  va_list vl;
+
+  if (!fmt || level > l_cur_log_level()) {
+    return;
+  }
+
+  out = l_start_logging(E, l_strc(tag) + 2);
+
+  if (nargs == 'n') {
+    va_start(vl, fmt);
+    nargs = va_arg(vl, l_int);
+    l_ostream_format_n_impl(out, fmt, nargs, va_arg(vl, l_logval*));
+    va_end(vl);
+  } else {
+    va_start(vl, fmt);
+    l_ostream_format_v_impl(out, l_strc(fmt), nargs - '0', vl);
+    va_end(vl);
+  }
+
+  l_ostream_format_out(out, l_const_strn(L_NEWLINE));
+}
+
+/** interface for lua **/
+
 static void
 ll_set_extra(lua_State* co, lnlylib_env* env)
 {
