@@ -10,22 +10,10 @@
 
 typedef struct {
   int index;
-} l_stackindex;
-
-L_INLINE l_stackindex
-ll_sidx(int i)
-{
-  return (l_stackindex){i};
-}
-
-typedef union {
-  int index;
-  l_stackindex sidx;
 } l_tableindex;
 
-typedef union {
+typedef struct {
   int index;
-  l_stackindex sidx;
 } l_funcindex;
 
 #endif /* LNLYLIB_CORE_LAPI_H */
