@@ -4,17 +4,22 @@
 
 typedef union {
   void* impl;
-  l_uint hdl;
-} l_dynlib;
+  l_uint uhdl;
+  int ihdl;
+} l_handle;
 
-L_EXTERN l_bool l_dynlib_is_empty(l_dynlib* hdl);
-L_EXTERN l_bool l_dynlib_nt_empty(l_dynlib* hdl);
-L_EXTERN l_dynlib l_empty_dynlib();
-L_EXTERN l_dynlib l_dynlib_open(l_strn fullname);
-L_EXTERN l_dynlib l_dynlib_open2(l_strn path, l_strn lib_name);
-L_EXTERN void* l_dynlib_symbol(l_dynlib* hdl, l_strn sym_name);
-L_EXTERN void* l_dynlib_sym2(l_dynlib* hdl, l_strn lib_name, l_strn sym_name);
-L_EXTERN void l_dynlib_close(l_dynlib* hdl);
+typedef union {
+  void* impl;
+  l_uint uhdl;
+} l_dynhdl;
+
+L_EXTERN l_bool l_dynhdl_is_empty(l_dynhdl* hdl);
+L_EXTERN l_bool l_dynhdl_nt_empty(l_dynhdl* hdl);
+L_EXTERN l_dynhdl l_empty_dynhdl();
+L_EXTERN l_dynhdl l_dynhdl_open(l_strn name); /* the library file extension is auto determinted */
+L_EXTERN l_dynhdl l_dynhdl_open_from(l_strn path, l_strn lib_name);
+L_EXTERN void* l_dynhdl_load(l_dynhdl* hdl, l_strn sym_name);
+L_EXTERN void l_dynhdl_close(l_dynhdl* hdl);
 
 L_EXTERN void l_thrkey_init(l_thrkey* self);
 L_EXTERN void l_thrkey_free(l_thrkey* self);

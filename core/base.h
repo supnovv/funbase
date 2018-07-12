@@ -59,14 +59,7 @@ l_int l_uint // pointer-size integer
 returning the number of bytes actually transferred. this is true on both 32-bit and 64-bit systems. */
 
 #undef LNUL
-#undef L_SUCCESS
-#undef L_ERROR
-#undef L_EINVAL
-
 #define LNUL (0)
-#define L_SUCCESS (0)
-#define L_ERROR (-1)
-#define L_EINVAL (-2)
 
 typedef union {
   double d;
