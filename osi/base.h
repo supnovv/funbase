@@ -2,6 +2,14 @@
 #define LNLYLIB_OSI_BASE_H
 #include "core/base.h"
 
+#define L_EVENT_IO_READ  0x01
+#define L_EVENT_IO_WRITE 0x02
+#define L_EVENT_IO_RDWR  0x03
+#define L_EVENT_IO_PRI   0x04
+#define L_EVENT_IO_RDH   0x08
+#define L_EVENT_IO_HUP   0x10
+#define L_EVENT_IO_ERR   0x20
+
 typedef union {
   void* impl;
   l_uint uhdl;

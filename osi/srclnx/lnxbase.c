@@ -2,7 +2,8 @@
 #include "osi/srclnx/lnxpref.h"
 #include "osi/base.h"
 
-#define L_SOCKET_BACKLOG  (128)
+#define L_SOCKET_BACKLOG   (127)
+#define L_EPOLL_MAX_EVENTS (127)
 
 /** Open shared object and resolve symbols **
 #include <dlfcn.h> // link with -ldl
@@ -1823,3 +1824,699 @@ l_socket_write(l_filedesc sock, const void* from, l_int count, l_int* status)
   return sum;
 }
 
+/** io events management **/
+
+static l_handle
+l_evfd_create()
+{
+  /** eventfd - create a file descriptor for event notification **
+  #include <sys/eventfd.h>
+  int eventfd(unsigned int initval, int flags);
+  Creates an "eventfd object" that can be used as an event wait/notify
+  mechanism by user-space applications, and by the kernel to notify
+  user-space applications of events. The object contains an unsigned
+  64-bit integer (uint64_t) counter that is maintained by the kernel.
+  This counter is initialized with the value specified in the
+  argument initval.
+  eventfd() is available on Linux since kernel 2.6.22. Working support
+  is provided in glibc since version 2.8. The eventfd2() system call
+  is available on Linux since kernel 2.6.27. Since version 2.9, the
+  glibc eventfd() wrapper will employ the eventfd2() system call,
+  if it is supported by the kernel. eventfd() and eventfd2() are
+  Linux-specific.
+  The following values may be bitwise ORed in flags to change the
+  behavior of eventfd():
+  EFD_CLOEXEC (since Linux 2.6.27) - set the close-on-exec (FD_CLOEXEC)
+  flag on the new file descriptor.
+  EFD_NONBLOCK (since Linux 2.6.27) - set the O_NONBLOCK file status
+  flag on the new open fd. Using this flag saves extra calls to fcntl(2)
+  to achieve the same result.
+  EFD_SEMAPHORE (since Linux 2.6.30) - provided semaphore-like semantics
+  for reads from the new fd.
+  In Linux up to version 2.6.26, the flags arugment is unused, and must
+  be specified as zero.
+  ---
+  It returns a new fd that can be used to refer to the eventfd object. The
+  following operations can be perfromed on the file descriptor.
+  * read(2) - each successful read(2) returns an 8-byte integer. A read(2)
+  will fail with the error EINVAL if the size of the supplied buffer is less
+  than 8 bytes. The value returned by read(2) is host type order, i.e., the
+  native byte order for integers on the host machine.
+  The semantics of read(2) depend on whether the evenfd counter currently
+  has a nonzero value and whether the EFD_SEMAPHORE flag was specified when
+  creating the evenfd file descriptor:
+  If EFD_SEMAPHORE was not specified and the eventfd counter has a nonzero
+  value, than a read(2) returns 8 bytes containing that value, and the
+  counter's value is reset to zero.
+  If EFD_SEMAPHORE was specified and eventfd counter has a nonzero value,
+  then a read(2) returns 8 bytes containing the value 1, and the counter's
+  value is decremented by 1.
+  If the eventfd counter is zero at the time of the call to read(2), then
+  the call either blocks until the counter becomes nonzero (at which time,
+  the read(2) proceeds as described above) or fails with the error EAGAIN
+  if the file descriptor has been made nonblocking.
+  * write(2) - a write(2) call adds the 8-byte integer value supplied in
+  its buffer to the counter. The maximum value that may be stored in the
+  counter is the largest unsigned 64-bit value minux 1 (i.e., 0xfffffffe).
+  If the addition would cause the counter's value to exceed the maximum,
+  then the write(2) either blocks until a read(2) is performed on the fd.
+  or fails with the error EAGAIN if the fd has been made nonblocking.
+  A write(2) will fail with the error EINVAL if the size of the supplied
+  buffer is less than 8 bytes, or if an attempt is made to write the value
+  0xffffffff.
+  * poll(2), select(2) and similar - the returned fd supports poll(2),
+  epoll(7) and select(2), as follows:
+  The fd is readable if the counter has a value greater than 0. The fd is
+  writable if it is possible to write a value of at least "1" without blocking.
+  If an overflow of the counter value was detected, then select(2) indicates
+  the fd as being both readable and writable, and poll(2) returns a POLLERR
+  event. As noted above, write(2) can never overflow the counter. However an
+  overflow can occur if 2^64 evenfd "signal posts" were performed by the KAIO
+  subsystem (theoretically possible, but practically unlikely). If an overflow
+  has occured, then read(2) will return that maximum uint64_t value (i.e,
+  0xffffffff). The eventfd fd also supports the other fd multiplexing APIs:
+  pselect(2) and ppoll(2).
+  * close(2) - when the fd is no longer required it shoud be closed. When all
+  fd associated with the same eventfd object have been closed, the resources
+  for object are freed by the kernel.
+  ---
+  On success, eventfd() returns a new eventfd. On error, -1 is returned and
+  errno is set to indicate the error.
+  EINVAL - an unsupported value was specified in flags.
+  EMFILE - the per-process limit on open fd has been reached.
+  ENFILE - the system-wide limit on the total number of open files has been reached.
+  ENODEV - could not mount (internal) anonymous inode device.
+  ENOMEM - there was insufficent memory to create a new eventfd file descriptor.
+  Application can use an eventfd file descriptor instead of a pipe in all cases where
+  a pipe is used simply to signal events. The kernel overhead of an eventfd is
+  much lower than that of a pipe, and only one fd is required (versus the two required
+  for pipe). When used in the kernel, an eventfd descriptor can provide a bridge
+  from kernel to user space, allowing, for example, functionalities like (KAIO, kernel
+  AIO) to signal to a file descriptor that some operation is complete.
+  A key point about an eventfd is that it can be monitored just like any other fd
+  using select(2), poll(2), or epoll(7). This means that an application can simultaneously
+  monitor the readiness of "traditonal" files and the readiness of other kernel
+  mechanisms that support the eventfd interface. (Without the eventfd() interface, these
+  mechanisms could not be multiplexed via select(2), poll(2), or epoll(7)). */
+  int hdl = eventfd(0, EFD_NONBLOCK);
+  if (hdl == -1) {
+    l_loge_1(LNUL, "eventfd %s", lserror(errno));
+  }
+  return l_handle_from(hdl);
+}
+
+static void
+l_evfd_close(l_hanlde* hdl)
+{
+  if (hdl->unifd != -1) {
+    if (close(hdl->unifd) != 0) {
+      l_loge_1(LNUL, "eventfd close %s", lserror(errno));
+    }
+    hdl->unifd = -1;
+  }
+}
+
+static l_bool
+l_evfd_write(l_handle* hdl)
+{
+  l_ulong count = 1;
+  int n = l_impl_write(hdl->unifd, &count, sizeof(l_ulong));
+  if (n == sizeof(l_ulong)) {
+    return true;
+  } else {
+    l_loge_1(LNUL, "evfd write fail %s", lserror(errno));
+    return false;
+  }
+}
+
+static l_bool
+l_evfd_read(l_handle* hdl)
+{
+  l_ulong count = 0;
+  int n = l_impl_read(hdl->unifd, &count, sizeof(l_ulong));
+  if (n == sizeof(l_ulong)) {
+    return true;
+  } else {
+    l_loge_1(LNUL, "evfd read fail %s", lserror(errno));
+    return false;
+  }
+}
+
+typedef struct {
+  l_handle ephl;
+  l_handle wake_hdl;
+  int wake_hdl_added;
+  int wake_count;
+  int nready;
+  l_mutex wklk;
+  struct epoll_event ready_arr[L_EPOLL_MAX_EVENTS+1];
+} l_epollmgr;
+
+L_EXTERN void
+l_ioevmgr_init(l_ioevmgr* thiz)
+{
+  l_epollmgr* mgr = (l_epollmgr*)thiz;
+  l_zero_n(mgr, sizeof(l_epollmgr));
+  l_mutex_init(&mgr->wklk);
+  mgr->ephl = l_epoll_create();
+  mgr->wake_hdl = l_evfd_create();
+}
+
+L_EXTERN void
+l_ioevmgr_free(l_ioevmgr* thiz)
+{
+  l_epollmgr* mgr = (l_epollmgr*)thiz;
+  mgr->wake_hdl_added = false;
+  mgr->wake_count = 0;
+  mgr->nready = 0;
+  l_mutex_free(&mgr->wklk);
+  l_epoll_close(&mgr->ephl);
+  l_evfd_close(&mgr->wake_hdl);
+}
+
+L_EXTERN l_bool
+l_ioevmgr_wakeup(l_ioevmgr* thiz)
+{
+  l_epollmgr* mgr = (l_impl_epollmgr*)thiz;
+  l_mutex* wklk = &mgr->wklk;
+
+  /* if we use a flag like "wait_is_called" to indicate master called epoll_wait() or not,
+  and then write eventfd to signal master wakeup only "wait_is_called" is true, then master
+  may not be triggered to wakeup. because if this kind of check is performed just before
+  master call epoll_wait(), wakeup is not signaled but master will enter into wait state
+  next. so dont use this trick. */
+
+  /* here is the another trick to count the wakeup times.
+  this function can be called from any thread, the counter
+  need to be protected by a lock.*/
+  l_mutex_lock(wklk);
+  if (mgr->wake_count) {
+    l_mutex_unlock(wklk);
+    return true; /* already signaled to wakeup */
+  }
+  mgr->wake_count = 1;
+  l_mutex_unlock(wklk);
+
+  return l_evfd_write(&mgr->wake_hdl);
+}
+
+/** epoll - I/O event notification facility **
+The epoll API performs a similar task to poll(2): monitoring multiple file
+description to see if I/O is possible on any of them. The epoll API can be
+used either as an edge-triggered or a level-triggered and scales well to
+large numbers of watched file descriptions.
+The difference between the ET and LT can be described as follows. Suppose
+that a fd received 2KB data, a call to epoll_wait is done that will return
+fd as a ready file descriptor. And then 1KB data is read from fd, than a call
+to epoll_wait again. If the fd configured using ET then the call to epoll_wait
+will be blocked despite the available data still present in the buffer; meanwhile
+the remote peer might be expecting a response based on the data it alrady sent.
+If it is, the call to epoll_wait will blcok indefinitely due to ET mode only
+triggered when changes occur on the monitored file descritor.
+An application that employs the EF should use nonblocking fd to avoid having a
+blocking read or write starve a task that is handling multiple fds. The suggested
+way to use ET epoll with nonblocking fds and by waiting for an event only after
+read or write return EAGAIN.
+By contracst, when used as LT, epoll is simply a faster poll. Since even with
+ET epoll, multiple events can be generated upon receipt of multiple chunks of data,
+the caller has the option to specify EPOLLONESHOT flag, to tell epoll to disable
+the fd after the receipt of an event. It is the caller's responsibility to rearm
+the fd using epoll_ctl with EPOLL_CTL_MOD.
+If the system is in autosleep mode via /sys/power/autosleep and an event happens
+which wakes the device from sleep, the device driver will keep the device awake
+only until that event is queued. It is necessary to use the epoll_ctl EPOLLWAKEUP
+flag to keep the device awake until the event has been processed. In specifically,
+the system will be kept awake from the moment the event is queued, through the
+epoll_wait is returned and until the subsequence epoll_wait call. If the event
+should keep the system awake beyond that time, then a separate wake_lock should
+be taken before the second epoll_wait call.
+/proc/sys/fs/epoll/max_user_watchers (since Linux 2.6.28) specifies a limit on the
+total number of fd that a user can register across all epoll instances on the
+system. The limit is per real user ID. Each registered fd costs roughly 90 bytes
+on a 32-bit kernel, and roughtly 160 bytes on a 64-bit kernel. Currently, the
+default value for max_user_watchers is 1/25 (4%) of the available low memory,
+divided by the registration cost in bytes.
+The edge-triggered usage requires more clarification to avoid stalls in the
+application event loop.
+What happens if you register the same fd on an epoll instance twice? You will
+probably get EEXIST. However, it is possible to add a duplicate fd (dup(2),
+dup2(2), fcntl(2) F_DUPFD). This can be a useful technique for filtering events,
+if the duplicate fd are registered with different events masks.
+Can two epoll instances wait for the same fd? If so, are events reported to both
+epoll fd? Yes, and events would be reported to both. However, careful programming
+may be needed to do this correctly.
+Is the epoll file descriptor itself poll/epoll/selectable? Yes, If an epoll fd
+has events waiting, then it will indicate as being readable. What happens if one
+attempts to put an epoll fd into its own fd set? The epoll_ctl call will return
+EINVAL. However, you can add an epoll fd inside another epoll fd set.
+Will closing a fd cause it to be removed from all epoll sets automatically? Yes,
+but be aware of the following point. A fd is a reference to an open fd. Whether
+a fd is duplcated via dup(2), dup2(2), fcntl(2) F_DUPFD, or fork(2), a new fd
+refering to the same open fd is created. An open fd continues to exist until all
+fd refering to it have been closed. A fd is removed from an epoll set only after
+all the fds referring to the underlying open fd have been closed. This means that
+even after a fd that is part of an epoll set has been closed, events may be reported
+for that fd if other fds referring to the same underlying fd remain open.
+If more the one event occurs between epoll_wait calls, are they combined? They will
+be combined.
+Receiving an event from epoll_wait should suggest to you that such fd is ready for
+the requested I/O operation. You must consider it ready until the next (nonblocking)
+read/write yields EAGAIN. When and how you will use the fd is entirely up to you.
+For packet/token-orientied files (e.g., datagram socket, terminal in canonical mode),
+the only way to detect the end of the read/write I/O space is to continue to read/write
+until EAGAIN. For stream-oriented files (e.g., pipe, FIFO, stream socket), the
+condition that the read/write I/O sapce is exhausted can also be detected by checking
+the amount of data from/written to the target fd. For example, if you call read by asking
+to read a certain amount of data and read returns a lower number of bytes, you can be
+sure of having exhausted the read I/O space for the fd. The same is true when using write.
+If there is a large amount of I/O space, it is possible that by trying to drain it the
+other files will not get processed causing starvation. The solution is to maintain a
+ready list and mark the fd as ready in its associated data structure, thereby allowing
+the application to remember which files need to be processed but still round robin
+amongst all the ready files. This also supports ignoring subsequent events you receive
+for fds that are already ready.
+If you use an event cache or store all the fds returned from epoll_wait, then make sure
+to provide a way to mark its closure dynamically. Suppose you receive 100 events from
+epoll_wait, and in event #47 a condition causes event #13 to be closed. If you remove
+the structure and close the fd for event #13, then your event cached might still say
+there are events waiting for that fd causing confusion.
+On solution for this is to call, during the processing of event 47, epoll_ctl to delete
+fd 13 and close, then mark its associated data structure as removed and link it to a
+cleanup list. If you find another event for fd 13 in your batch processing, you will
+discover the fd had been previously removed and there will be no confustion.
+The epoll api is Linux-specific. Some other systems provided similar mechanisms, for
+example, FreeBSD has kqueue, and Solaris has /dev/poll.
+The set of fds that is being monitored via an epoll fd can be viewed the entry for the
+epoll fd in the process's /proc/[pid]/fdinfo directory. */
+
+static l_handle
+l_epoll_create()
+{
+  /** epoll_create **
+  #include <sys/epoll.h>
+  int epoll_create(int size);
+  int epoll_create1(int flags);
+  Since Linux 2.6.8, the size argument is ignored, but must be greater than zero.
+  The kernel used this size hint information to initially allocate internal data
+  structures describing events. Nowadays, this hint is no longer required (the
+  kernel dynamically sizes the required data structures without needing the hing),
+  The positive value of size is in order to ensure backward compatibility when
+  new applications run on older kernels.
+  epoll_create1() was added to the kernel in version 2.6.27 (epoll_create() is 2.6).
+  If flags is 0 then it is the same as epoll_create() with obsolete size argument
+  dropped. EPOLL_CLOEXEC can be included in flags to indicate closing fd when exec()
+  a new program. 默认情况下，程序中打开的所有文件描述符在exec()执行新程序的过程中保持
+  打开并有效。这通常很实用，因为文件描述符在新程序中自动有效，让新程序无需再去了解文件
+  名或重新打开。但一些情况下在执行exec()前确保关闭某些特定的文件描述符。尤其是在特权
+  进程中调用exec()来启动一个未知程序时，或启动程序并不需要这些已打开的文件描述符时，
+  从安全编程的角度出发，应当在加载新程序之前关闭那些不必要的文件描述符。为此，内核为
+  每个文件描述符提供了执行时关闭标志，如果设置了这一标志，如果调用exec()成功会自动关闭
+  该文件描述符，如果调用exec()失败则文件描述符会继续保持打开。
+  系统调用fork()允许一进程（父进程）创建一新进程（子进程），子进程几乎是父进程的翻版
+  （可认为父进程一分为二了），它获得了父进程的栈、数据段、堆和执行文本段的拷贝。执行
+  fork()时，子进程会获得父进程所有文件描述符的副本，这些副本的创建方式类似于dup()，
+  这也意味着父子进程中对应的描述符均指向相同的打开文件句柄。文件句柄包含了当前文件
+  偏移量以及文件状态标志，因此这些属性是在父子进程间共享的，例如子进程如果更新了文件
+  偏移量，那么这种改变也会影响到父进程中相应的描述符。
+  系统调用exec()用于执行一个新程序，它将新程序加载到当前进程中，浙江丢弃现存的程序段，
+  并为新程序重新创建栈、数据段以及堆。
+  EMFILE - The per-user limit on the number of epoll instances imposed by
+  /proc/sys/fs/epoll/max_user_instances was encountered.
+  ENFILE - The system-wide limit on the total number of open files has been reached.
+  ENOMEM - There was insufficient memory to create the kernel object. */
+  int epfd = epoll_create1(0);
+  if (epfd == -1) {
+    l_loge_1("epoll_create1 %s", lserror(errno));
+  }
+  return l_handle_from(epfd);
+}
+
+static void
+l_epoll_close(l_handle* hdl)
+{
+  if (hdl->unifd != -1) {
+    if (close(hdl->unifd) != 0) {
+      l_loge_1("close epoll %s", lserror(errno));
+    }
+    hdl->unifd = -1;
+  }
+}
+
+static l_bool
+l_epoll_ctl(l_handle* hdl, int op, int fd, struct epoll_event* ev)
+{
+  if (hdl->unifd == -1 || fd == -1 || hdl->unifd == fd) {
+    l_loge_s(LNUL, "l_epoll_ctl invalid argument");
+  }
+
+  /** epoll_event **
+  struct epoll_event {
+    uint32_t events; // epoll events
+    epoll_data_t data; // user data variable
+  };
+  typedef union epoll_data {
+    void* ptr;
+    int fd;
+    uint32_t u32;
+    uint64_t u64;
+  } epoll_data_t; */
+
+  ev->events |= EPOLLET; /* edge-triggered */
+
+  /** epoll_ctl **
+  #include <sys/epoll.h>
+  int epoll_ctl(int epfd, int op, int fd, struct epoll_event* event);
+  The epoll interface supports all fds that support poll(2).
+  On success, it returns zero. On error, it returns -1 and errno is set.
+  EBADF - epfd or fd is not a valid fd.
+  EEXIST - op was EPOLL_CTL_ADD, and the supplied fd is already registered.
+  EINVAL - epfd is not an epoll fd, or fd is the same as epfd, or the
+  requested operation op is not supported by this interface, or an invalid
+  event type was specified along with EPOLLEXCLUSIVE, or op was EPOLL_CTL_MOD
+  and events include EPOLLEXCLUSIVE, or op was EPOLL_CTL_MOD and the
+  EPOLLEXCLUSIVE has previously been applied to this epfd, fd pair; or
+  EPOLLEXCLUSIVE was specified in event and fd refers to an epoll instance.
+  ELOOP - fd refers to an epoll instance and this EPOLL_CTL_ADD would result
+  in a circular loop of epoll instances monitor one another.
+  ENOENT - op was EPOLL_CTL_MOD or EPOLL_CTL_DEL, and fd is not registered
+  registered with this epoll instance.
+  ENOMEM - there was insufficient memory to handle the requested op.
+  ENOSPC - the limit imposed by /proc/sys/fs/epoll/max_user_watches was
+  encountered while trying to register a new fd on an epoll instance.
+  EPERM - the target file fd does not support epoll. this can occur if fd
+  refers to, for example, a regular file or a directory. */
+
+  return epoll_ctl(hdl->unifd, op, fd, ev) == 0;
+}
+
+static l_bool
+l_epoll_add(l_handle* hdl, int fd, struct epoll_event* ev)
+{
+  if (l_epoll_ctl(hdl, EPOLL_CTL_ADD, fd, ev)) {
+    return true;
+  } else {
+    if (errno == EEXIST && l_epoll_ctl(hdl, EPOLL_CTL_MOD, fd, ev)) {
+      return true;
+    } else {
+      l_loge_1("l_epoll_add fail %s", lserror(errno));
+      return false;
+    }
+  }
+}
+
+static l_bool
+l_epoll_mod(l_handle* hdl, int fd, struct epoll_event* ev)
+{
+  if (l_epoll_ctl(hdl, EPOLL_CTL_MOD, fd, ev)) {
+    return true;
+  } else {
+    l_loge_1("l_epoll_mod fail %s", lserror(errno));
+    return false;
+  }
+}
+
+static l_bool
+l_epoll_del(l_handle* hdl, int fd)
+{
+  /* In kernel versions before 2.6.9, the EPOLL_CTL_DEL
+  operation required a non-null pointer in event, even
+  though this argument is ignored. Since Linux 2.6.9, event
+  can be specified as NULL when using EPOLL_CTL_DEL.
+  Applications that need to be portable to kernels before
+  2.6.9 should specify a non-null pointer in event. */
+  struct epoll_event ev;
+  l_zero_n(&ev, sizeof(struct epoll_event));
+  if (l_epoll_ctl(hdl, EPOLL_CTL_DEL, fd, &ev)) {
+    return true;
+  } else {
+    l_loge_1(LNUL, "l_epoll_del fail %s", lserror(errno));
+    return false;
+  }
+}
+
+static void
+l_epollmgr_wait(l_epollmgr* mgr, int ms)
+{
+  /** epoll_wait **
+  #include <sys/epoll.h>
+  int epoll_wait(int epfd, struct epoll_event* events, int maxevents, int timeout);
+  The timeout argument specifies the number of milliseconds that epoll_wait will block.
+  Time is measured against the CLOCK_MONOTONIC clock. The call will block until either:
+  * a fd delivers an event;
+  * the call is interrupted by a signal handler; or
+  * the timeout expires.
+  Note that the timeout interval will be rounded up to the system clock granularity,
+  and kernel scheduling delays mean that the blocking interval may overrun by a small
+  amount. Specifying a timeout of -1 causes epoll_wait() to block indefinitely, while
+  specifying a timeout of 0 causes epoll_wait() to return immediately, even if no events
+  are available.
+  In kernel before 2.6.37, a timeout larger than approximately LONG_MAX/HZ ms is treated
+  as -1 (i.e., infinity). Thus, for example, on a system where the sizeof(long) is 4 and
+  the kernel HZ value is 1000, this means that timeouts greater than 35.79 minutes are
+  treated as infinity.
+  ---
+  On success, it returns the number of fds ready for the requested I/O, or 0 if no fd became
+  ready during the requested timeout milliseconds. When an error occurs, epoll_wait() returns
+  -1 and errno is set appropriately.
+  EBADF - epfd is not a valid fd
+  EFAULT - the memory data pointed by events is not accessible with write permission.
+  EINTR - the call was interrupted by a signal handler before either any of the requested
+  events occured or the timeout expired.
+  EINVAL - epfd is not an epoll fd, or maxevents is less than or equal to 0.
+  ---
+  While one thread is blocked in a call to epoll_wait(), it is possible for another thread
+  to add a fd to the waited-upon epoll instance. If the new fd becomes ready, it will cause
+  the epoll_wait() call to unblock.
+  For a discussion of what may happen if a fd in an epoll instance being monitored by epoll_wait()
+  is closed in another thread, see select(2).
+  If a fd being monitered by select() is closed in another thread, the result is unspecified.
+  On some UNIX systems, select() unblocks and returns, with an indication that the fd is ready
+  (a subsequent I/O operation will likely fail with an error, unless another the fd reopened
+  between the time select() returned and the I/O operations was performed). On Linux (and some
+  other systems), closing the fd in another thread has no effect on select(). In summary, any
+  application that relies on a particular behavior in this scenario must be considered buggy.
+  Under Linux, select() may report a socket fd as "ready for reading", while nevertheless a
+  subsequent read blocks. This could for example happen when data has arrived but upon
+  examination has wrong checksum and is discarded. There may be other circumstances in which
+  a fd is spuriously reported as ready. Thus it may be safer to use O_NONBLOCK on sockets that
+  should not block. */
+  int n = epoll_wait(mgr->ephl.unifd, mgr->ready_arr, L_EPOLL_MAX_EVENTS, ms);
+  if (n == -1) {
+    if (errno == EINTR) { /* the call was interrupted by a signal handler */
+      l_epollmgr_wait(mgr, 0);
+    } else {
+      l_loge_1("epoll_wait %s", lserror(errno));
+    }
+    mgr->nready = 0;
+  } else {
+    mgr->nready = (n > 0 ? n : 0);
+  }
+}
+
+static uint32_t l_epoll_mask[] = {
+  /* 0x00 */ 0,
+  /* 0x01 */ EPOLLIN,    /* L_EVENT_IO_READ */
+  /* 0x02 */ EPOLLOUT,   /* L_EVENT_IO_WRITE */
+  /* 0x03 */ 0,
+  /* 0x04 */ EPOLLPRI,   /* L_EVENT_IO_PRI */
+  /* 0x05 */ 0,
+  /* 0x06 */ 0,
+  /* 0x07 */ 0,
+  /* 0x08 */ EPOLLRDHUP, /* L_EVENT_IO_RDH */
+  /* 0x09 */ 0
+};
+
+static l_umedit l_ioev_rd[] = {
+  0, L_EVENT_IO_READ
+};
+
+static l_umedit l_ioev_wr[] = {
+  0, L_EVENT_IO_WRITE
+};
+
+static l_umedit l_ioev_pri[] = {
+  0, L_EVENT_IO_PRI
+};
+
+static l_umedit l_ioev_rdh[] = {
+  0, L_EVENT_IO_RDH
+};
+
+static l_umedit l_ioev_hup[] = {
+  0, L_EVENT_IO_HUP
+};
+
+static l_umedit l_ioev_err[] = {
+  0, L_EVENT_IO_ERR
+};
+
+static uint32_t
+l_get_epoll_masks(l_umedit masks)
+{
+  return (l_epoll_mask[masks & L_EVENT_IO_READ] |
+          l_epoll_mask[masks & L_EVENT_IO_WRITE] |
+          l_epoll_mask[masks & L_EVENT_IO_PRI] |
+          l_epoll_mask[masks & L_EVENT_IO_RDH] |
+          EPOLLHUP | EPOLLERR);
+}
+
+static l_umedit
+l_get_ioev_masks(struct epoll_event* ev)
+{
+  uint32_t masks = ev->events;
+  return (l_ioev_rd[(masks & EPOLLIN) != 0] |
+          l_ioev_wr[(masks & EPOLLOUT) != 0] |
+          l_ioev_pri[(masks & EPOLLPRI) != 0] |
+          l_ioev_rdh[(masks & EPOLLRDHUP) != 0] |
+          l_ioev_hup[(masks & EPOLLHUP) != 0] |
+          l_ioev_err[(masks & EPOLLERR) != 0]);
+}
+
+L_EXTERN l_bool
+l_ioevmgr_add(l_ioevmgr* thiz, l_handle fd, l_ulong ud, l_umedit masks)
+{
+  /** event masks **
+  The bit masks can be composed using the following event types:
+  EPOLLIN - The associated file is available for read operations.
+  EPOLLOUT - The associated file is available for write operations.
+  EPOLLRDHUP (since Linux 2.6.17) - Stream socket peer closed
+  connection, or shut down writing half of connection. (This flag
+  is especially useful for wirting simple code to detect peer
+  shutdown when using Edge Triggered monitoring)
+  EPOLLPRI - There is urgent data available for read operations.
+  EPOLLERR - Error condition happened on the associated fd.
+  epoll_wait will always wait for this event; it is not necessary
+  to set it in events.
+  EPOLLHUP - Hang up happened on the associated fd. epoll_wait will
+  always wait for this event; it is not necessary to set it in
+  events. Not that when reading from a channel such as a pipe or a
+  stream socket, this event merely indicates that the peer closed
+  its end of the channel. Subsequent reads from the channel will
+  return 0 (end of file) only after all outstanding data in the
+  channel has been consumed.
+  EPOLLET - Sets the Edge Triggered behavior for the associated fd.
+  The default behavior for epoll is Level Triggered.
+  EPOLLONESHOT (since Linux 2.6.2) - Sets the one-shot behavior
+  for the associated fd. This means that after an event is pulled
+  out with epoll_wait the associated fd is internally disabled and
+  no other events will be reported by the epoll interface. The
+  user must call epoll_ctrl with EPOLL_CTL_MOD to rearm the fd
+  with a new event mask.
+  EPOLLWAKEUP (since Linux 3.5) - If EPOLLONESHOT and EPOLLET are
+  clear and the process has the CAP_BLOCK_SUSPEND capability, ensure
+  that the system does not enter "suspend" or "hibernate" while
+  this event is pending or being processed. The event is considered
+  as being "processed" from the time when it is returned by a call
+  to epoll_wait until the next call to epoll_wait on the same
+  epoll fd, the closure of that fd, the removal of the event fd
+  with EPOLL_CTL_DEL, or the clearing of EPOLLWAKEUP for the event
+  fd with EPOLL_CTL_MOD. If EPOLLWAKEUP is specified, but the caller
+  does not have the CAP_BLOCK_SUSPEND capability, then this flag is
+  silently ignored. A robust application should double check it has
+  the CAP_BLOCK_SUSPEND capability if attempting to use this flag.
+  EPOLLEXCLUSIVE (since Linux 4.5) - Sets an exclusive wakeup mode
+  for the epoll fd that is being attached to the target fd. When a
+  wakeup event occurs and multiple epoll fd are attached to the same
+  fd using EPOLLEXCLUSIVE, one or more of the epoll fds will receive
+  an event with epoll_wait. The default in this scenario (when
+  EPOLLEXCLUSIVE is not set) is for all epoll fds to receive an
+  event. EPOLLEXCLUSIVE is thus usefull for avoiding thundering
+  herd problems in certain scenarios.
+  If the same fd is in multiple epoll instances, some with the
+  EPOLLEXCLUSIVE, and others without, then events will be provided
+  to all epoll instances that did not specify EPOLLEXCLUSIVE, and
+  at least one of the the epoll instances that did specify
+  EPOLLEXCLUSIVE.
+  The following values may be specified in conjunction with
+  EPOLLEXCLUSIVE: EPOLLIN, EPOLLOUT, EPOLLWAKEUP, and EPOLLET.
+  EPOLLHUP and EPOLLERR can also be specified, but this is not
+  required: as usual, these events are always reported if they
+  cocur. Attempts to specify other values yield an error.
+  EPOLLEXCLUSIVE may be used only in an EPOLL_CTL_ADD operation;
+  attempts to employ it with EPOLL_CTL_MOD yield an error. A call
+  to epoll_ctl that specifies EPOLLEXCLUSIVE and specifies the target
+  fd as an epoll instance will likewise fail. The error in all of
+  these cases is EINVAL. */
+  l_epollmgr* mgr = (l_epollmgr*)thiz;
+  struct epoll_event ev;
+  ev.events = l_get_epoll_masks(masks);
+  ev.data.u64 = ud;
+  return l_epoll_add(&mgr->ephl, fd, &ev);
+}
+
+L_EXTERN l_bool
+l_ioevmgr_mod(l_ioevmgr* thiz, l_handle fd, l_ulong ud, l_umedit masks)
+{
+  l_epollmgr* mgr = (l_epollmgr*)thiz;
+  struct epoll_event ev;
+  ev.events = l_get_epoll_masks(masks);
+  ev.data.u64 = ud;
+  return l_epoll_mod(&mgr->ephl, fd.unifd, &ev);
+}
+
+L_EXTERN l_bool
+l_ioevmgr_del(l_ioevmgr* thiz, l_handle fd)
+{
+  l_epollmgr* mgr = (l_epollmgr*)thiz;
+  return l_epoll_del(&mgr->ephl, fd.unifd);
+}
+
+L_EXTERN int
+l_ioevmgr_timed_wait(l_ioevmgr* thiz, int ms, void (*cb)(l_ulong, l_umedit))
+{
+  l_epollmgr* mgr = (l_impl_ioevmgr*)thiz;
+  struct epoll_event* pcur = 0;
+  struct epoll_event* pend = 0;
+
+  if (ms < 0 && ms != -1) { /* timeout cannot be negative except infinity (-1) */
+    ms = 0;
+  }
+
+  if (ms > 30 * 60 * 1000) { /* Linux may treat the timeout greater than 35.79 minutes as infinity */
+    ms = 30 * 60 * 1000; /* 30min */
+  }
+
+  if (!mgr->wake_hdl_added) {
+    struct epoll_event e;
+    mgr->wake_hdl_added = true;
+    e.events = EPOLLERR | EPOOLIN;
+    e.data.u64 = mgr->wake_hdl.unifd;
+    if (!l_epoll_add(&mgr->ephl, mgr->wake_hdl.unifd, &e)) {
+      l_loge_s(LNUL, "epoll_wait add wake fd fail");
+    }
+  }
+
+  l_impl_epoll_wait(mgr, ms);
+  if (mgr->nready <= 0) {
+    return 0;
+  }
+
+  pcur = mgr->ready_arr;
+  pend = pcur + mgr->nready;
+
+  for (; pcur < pend; ++pcur) {
+    /* l_assert(sizeof(l_handle) == 4) && svid high 32 bit cannot be 0 */
+    if (pcur->data.u64 == mgr->wake_hdl.unifd) {
+      l_evfd_read(&mgr->wake_hdl); /* return > 0 success, -1 block, -2 error */
+      l_mutex_lock(&mgr->wklk);
+      mgr->wake_count = 0;
+      l_mutex_unlock(&mgr->wklk);
+    } else {
+      cb(pcur->data.u64, l_impl_epoll_masks(pcur));
+    }
+  }
+
+  return mgr->nready;
+}
+
+L_EXTERN int
+l_ioevmgr_wait(l_iovemgr* thiz, void (*cb)(l_ulong, l_umedit))
+{
+  return l_ioevmgr_timed_wait(thiz, -1, cb);
+}
+
+L_EXTERN int
+l_ioevmgr_try_wait(l_ioevmgr* thiz, void (*cb)(l_ulong, l_umedit))
+{
+  return l_ioevmgr_timed_wait(thiz, 0, cb);
+}

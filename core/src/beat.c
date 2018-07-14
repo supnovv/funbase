@@ -174,6 +174,8 @@ typedef struct {
 typedef struct l_service {
   l_smplnode node; /* chained in global q */
   l_squeue srvc_msgq;
+  l_handle file_desc;
+  l_umedit ioev_masks;
   l_umedit srvc_flags;
   l_ulong srvc_id; /* the highest bit is for remote service or note */
   l_corotable* coro_tabl; /* lua service if not null */
