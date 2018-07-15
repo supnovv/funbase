@@ -29,6 +29,8 @@ typedef struct {
   struct l_service* service;
   l_squeue bkmq; /* service backup message q */
   l_umedit slot_index; /* the lowest bit is for service alive or not */
+  l_umedit ioev_masks;
+  l_handle ioev_hdl;
 } l_srvcslot;
 
 typedef struct {
@@ -174,9 +176,7 @@ typedef struct {
 typedef struct l_service {
   l_smplnode node; /* chained in global q */
   l_squeue srvc_msgq;
-  l_handle file_desc;
-  l_umedit ioev_masks;
-  l_umedit srvc_flags;
+  l_ulong srvc_flags;
   l_ulong srvc_id; /* the highest bit is for remote service or note */
   l_corotable* coro_tabl; /* lua service if not null */
   l_service_callback* cb;
@@ -760,6 +760,8 @@ check_feeded_messages:
       l_squeue_push_queue(&rxmq, &work_node->mast_rxmq);
       l_mutex_unlock(&work_node->mast_rxlk);
     }
+
+    l_ioevmgr_try_wait(M->evmgr, l_master_dispatch_io_event);
 
     if (l_squeue_is_empty(&rxmq)) {
       l_rawapi_sleep(30);
