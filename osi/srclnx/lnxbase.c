@@ -2,6 +2,7 @@
 #include "osi/srclnx/lnxpref.h"
 #include "osi/base.h"
 
+#define l_filehdl_from(fd) (l_filehdl){fd}
 #define L_SOCKET_BACKLOG   (127)
 #define L_EPOLL_MAX_EVENTS (127)
 
@@ -107,9 +108,9 @@ dlerror() returned value is not NULL.
 #define l_dynhdl_logerr(tag) { \
   char* errmsg = 0; \
   if ((errmsg = dlerror())) { \
-    l_loge_1(tag " %s", ls(errmsg)); \
+    l_loge_1(LNUL, tag " %s", ls(errmsg)); \
   } else { \
-    l_loge_s(tag " fail"); \
+    l_loge_s(LNUL, tag " fail"); \
   }}
 
 L_EXTERN l_bool
@@ -133,7 +134,7 @@ l_empty_dynhdl()
 }
 
 static l_dynhdl
-l_rawapi_dynhdl_open(l_strn fullname)
+l_impl_dynhdl_open(l_strn fullname)
 {
   if (fullname.str && fullname.len > 0) {
     l_dynhdl hdl;
@@ -156,7 +157,7 @@ l_dynhdl_open(l_strn name)
   l_filename_init(&fn);
 
   if (l_filename_addname(&fn, name, l_const_strn(".so"))) {
-    return l_rawapi_dynhdl_open(l_filename_strn(&fn));
+    return l_impl_dynhdl_open(l_filename_strn(&fn));
   } else {
     return l_empty_dynhdl();
   }
@@ -177,7 +178,7 @@ l_dynhdl_open_from(l_strn path, l_strn lib_name)
   lookup in the folder specified. **/
 
   if (l_filename_addpath(&fn, path) && l_filename_addname(&fn, lib_name, l_const_strn(".so"))) {
-    return l_rawapi_dynhdl_open(l_strn_l(fn.s, fn.name_len));
+    return l_impl_dynhdl_open(l_strn_l(fn.s, fn.name_len));
   } else {
     return l_empty_dynhdl();
   }
@@ -192,7 +193,7 @@ l_dynhdl_load(l_dynhdl* hdl, l_strn sym_name)
     dlerror(); /* clear old error */
     sym = dlsym(hdl->impl, sym_name.str);
     if (sym == 0 && (errstr = dlerror())) {
-      l_loge_1("dlsym %s", ld(errstr));
+      l_loge_1(LNUL, "dlsym %s", ld(errstr));
     }
   }
   return sym;
@@ -213,7 +214,7 @@ L_EXTERN int
 l_thrhdl_create(l_thrhdl* thrhdl, void* (*start)(void*), void* para) {
   int n = pthread_create((pthread_t*)thrhdl, 0, start, para);
   if (n == 0) return true;
-  l_loge_1("pthread_create %s", lserror(n));
+  l_loge_1(LNUL, "pthread_create %s", lserror(n));
   return false;
 }
 
@@ -226,7 +227,7 @@ l_thrhdl_cancel(l_thrhdl* thrhdl) {
   error number */
   int n = pthread_cancel(*((pthread_t*)thrhdl));
   if (n == 0) return true;
-  l_loge_1("pthread_cancel %s", lserror(errno));
+  l_loge_1(LNUL, "pthread_cancel %s", lserror(errno));
   return false;
 }
 
@@ -245,7 +246,7 @@ l_thrhdl_join(l_thrhdl* thrhdl) {
   immediately. the thread needs to be joinable. join a alreay
   joined thread will results in undefined behavior. */
   if ((n = pthread_join(*((pthread_t*)thrhdl), &exitcode)) != 0) {
-    l_loge_1("pthread_join %s", lserror(n));
+    l_loge_1(LNUL, "pthread_join %s", lserror(n));
   }
   return (int)(l_int)exitcode;
 }
@@ -256,7 +257,7 @@ l_thrhdl_sleep(l_long us) {
   req.tv_sec = (time_t)(us / 1000000);
   req.tv_nsec = (long)(us % 1000000 * 1000);
   if (nanosleep(&req, 0) != 0) {
-    if (errno != EINTR) l_loge_1("nanosleep %s", lserror(errno));
+    if (errno != EINTR) l_loge_1(LNUL, "nanosleep %s", lserror(errno));
   }
 }
 
@@ -274,7 +275,7 @@ l_thrkey_init(l_thrkey* self) {
   shall return zero. Otherwise, an error number shall be returned to
   indicate the error. */
   int n = pthread_key_create((pthread_key_t*)self, 0);
-  if (n != 0) l_loge_1("pthread_key_create %s", lserror(n));
+  if (n != 0) l_loge_1(LNUL, "pthread_key_create %s", lserror(n));
 }
 
 L_EXTERN void
@@ -283,20 +284,20 @@ l_thrkey_free(l_thrkey* self) {
   #include <pthread.h>
   int pthread_key_delete(pthread_key_t key); */
   int n = pthread_key_delete(*(pthread_key_t*)self);
-  if (n != 0) l_loge_1("pthread_key_delete %s", lserror(n));
+  if (n != 0) l_loge_1(LNUL, "pthread_key_delete %s", lserror(n));
 }
 
 L_EXTERN void
-l_thrkey_setData(l_thrkey* self, const void* data) {
+l_thrkey_set_data(l_thrkey* self, const void* data) {
   /* different threads may bind different values to the same key, the value
   is typically a pointer to blocks of dynamically allocated memory that have
   been reserved for use by the calling thread. */
   int n = pthread_setspecific(*(pthread_key_t*)self, data);
-  if (n != 0) l_loge_1("pthread_setspecific %s", lserror(n));
+  if (n != 0) l_loge_1(LNUL, "pthread_setspecific %s", lserror(n));
 }
 
 L_EXTERN void*
-l_thrkey_getData(l_thrkey* self) {
+l_thrkey_get_data(l_thrkey* self) {
   /** thread-specific data management **
   #include <pthread.h>
   void* pthread_getspecific(pthread_key_t key);
@@ -310,20 +311,20 @@ l_thrkey_getData(l_thrkey* self) {
 L_EXTERN void
 l_mutex_init(l_mutex* self) {
   int n = pthread_mutex_init((pthread_mutex_t*)self, 0);
-  if (n != 0) l_loge_1("pthread_mutex_init %s", lserror(n));
+  if (n != 0) l_loge_1(LNUL, "pthread_mutex_init %s", lserror(n));
 }
 
 L_EXTERN void
 l_mutex_free(l_mutex* self) {
   int n = pthread_mutex_destroy((pthread_mutex_t*)self);
-  if (n != 0) l_loge_1("pthread_mutex_destroy %s", lserror(n));
+  if (n != 0) l_loge_1(LNUL, "pthread_mutex_destroy %s", lserror(n));
 }
 
 L_EXTERN int
 l_mutex_lock(l_mutex* self) {
   int n = pthread_mutex_lock((pthread_mutex_t*)self);
   if (n == 0) return true;
-  l_loge_1("pthread_mutex_lock %s", lserror(n));
+  l_loge_1(LNUL, "pthread_mutex_lock %s", lserror(n));
   return false;
 }
 
@@ -331,35 +332,35 @@ L_EXTERN int
 l_mutex_unlock(l_mutex* self) {
   int n = pthread_mutex_unlock((pthread_mutex_t*)self);
   if (n == 0) return true;
-  l_loge_1("pthread_mutex_unlock %s", lserror(n));
+  l_loge_1(LNUL, "pthread_mutex_unlock %s", lserror(n));
   return false;
 }
 
 L_EXTERN int
-l_mutex_tryLock(l_mutex* self) {
+l_mutex_try_lock(l_mutex* self) {
   int n = pthread_mutex_trylock((pthread_mutex_t*)self);
   if (n == 0) return true;
-  if (n != EBUSY) l_loge_1("pthread_mutex_trylock %s", lserror(n));
+  if (n != EBUSY) l_loge_1(LNUL, "pthread_mutex_trylock %s", lserror(n));
   return false;
 }
 
 L_EXTERN void
 l_rwlock_init(l_rwlock* self) {
   int n = pthread_rwlock_init((pthread_rwlock_t*)self, 0);
-  if (n != 0) l_loge_1("pthread_rwlock_init %s", lserror(n));
+  if (n != 0) l_loge_1(LNUL, "pthread_rwlock_init %s", lserror(n));
 }
 
 L_EXTERN void
 l_rwlock_free(l_rwlock* self) {
   int n = pthread_rwlock_destroy((pthread_rwlock_t*)self);
-  if (n != 0) l_loge_1("pthread_rwlock_destroy %s", lserror(n));
+  if (n != 0) l_loge_1(LNUL, "pthread_rwlock_destroy %s", lserror(n));
 }
 
 L_EXTERN int
 l_rwlock_rdlock(l_rwlock* self) {
   int n = pthread_rwlock_rdlock((pthread_rwlock_t*)self);
   if (n == 0) return true;
-  l_loge_1("pthread_rwlock_rdlock %s", lserror(n));
+  l_loge_1(LNUL, "pthread_rwlock_rdlock %s", lserror(n));
   return false;
 }
 
@@ -367,7 +368,7 @@ L_EXTERN int
 l_rwlock_wrlock(l_rwlock* self) {
   int n = pthread_rwlock_wrlock((pthread_rwlock_t*)self);
   if (n == 0) return true;
-  l_loge_1("pthread_rwlock_wrlock %s", lserror(n));
+  l_loge_1(LNUL, "pthread_rwlock_wrlock %s", lserror(n));
   return false;
 }
 
@@ -375,55 +376,55 @@ L_EXTERN int
 l_rwlock_unlock(l_rwlock* self) {
   int n = pthread_rwlock_unlock((pthread_rwlock_t*)self);
   if (n == 0) return true;
-  l_loge_1("pthread_rwlock_unlock %s", lserror(n));
+  l_loge_1(LNUL, "pthread_rwlock_unlock %s", lserror(n));
   return false;
 }
 
 L_EXTERN int
-l_rwlock_tryRead(l_rwlock* self) {
+l_rwlock_try_read(l_rwlock* self) {
   int n = pthread_rwlock_tryrdlock((pthread_rwlock_t*)self);
   if (n == 0) return true;
-  if (n != EBUSY) l_loge_1("pthread_rwlock_tryrdlock %s", lserror(n));
+  if (n != EBUSY) l_loge_1(LNUL, "pthread_rwlock_tryrdlock %s", lserror(n));
   return false;
 }
 
 L_EXTERN int
-l_rwlock_tryWrite(l_rwlock* self) {
+l_rwlock_try_write(l_rwlock* self) {
   int n = pthread_rwlock_trywrlock((pthread_rwlock_t*)self);
   if (n == 0) return true;
-  if (n != EBUSY) l_loge_1("pthread_rwlock_trywrlock %s", lserror(n));
+  if (n != EBUSY) l_loge_1(LNUL, "pthread_rwlock_trywrlock %s", lserror(n));
   return false;
 }
 
 L_EXTERN void
 l_condv_init(l_condv* self) {
   int n = pthread_cond_init((pthread_cond_t*)self, 0);
-  if (n != 0) l_loge_1("pthread_cond_init %s", lserror(n));
+  if (n != 0) l_loge_1(LNUL, "pthread_cond_init %s", lserror(n));
 }
 
 L_EXTERN void
 l_condv_free(l_condv* self) {
   int n = pthread_cond_destroy((pthread_cond_t*)self);
-  if (n != 0) l_loge_1("pthread_cond_destroy %s", lserror(n));
+  if (n != 0) l_loge_1(LNUL, "pthread_cond_destroy %s", lserror(n));
 }
 
 L_EXTERN int
 l_condv_wait(l_condv* self, l_mutex* mutex) {
   int n = pthread_cond_wait((pthread_cond_t*)self, (pthread_mutex_t*)mutex);
   if (n == 0) return true;
-  l_loge_1("pthread_cond_wait %s", lserror(n));
+  l_loge_1(LNUL, "pthread_cond_wait %s", lserror(n));
   return false;
 }
 
 L_EXTERN int
-l_condv_timedWait(l_condv* self, l_mutex* mutex, l_long ns) {
+l_condv_timed_wait(l_condv* self, l_mutex* mutex, l_long ns) {
   l_time curtime = l_system_time();
   struct timespec tm;
   int n = 0;
 
   /* caculate the absolute time */
   ns += curtime.nsec + curtime.sec *  L_NSEC_PERSEC;
-  if (ns < 0) { ns = 0; l_loge_s("l_condv_timedWait invalid timeout value"); }
+  if (ns < 0) { ns = 0; l_loge_s(LNUL, "l_condv_timedWait invalid timeout value"); }
   tm.tv_sec = (time_t)(ns / L_NSEC_PERSEC);
   tm.tv_nsec = (long)(ns - tm.tv_sec * L_NSEC_PERSEC);
 
@@ -431,7 +432,7 @@ l_condv_timedWait(l_condv* self, l_mutex* mutex, l_long ns) {
   pthread_mutex_t* mutex, const struct timespec* abstime); */
   n = pthread_cond_timedwait((pthread_cond_t*)self, (pthread_mutex_t*)mutex, &tm);
   if (n == 0 || n == ETIMEDOUT) return true;
-  l_loge_1("pthread_cond_timedwait %d", lserror(n));
+  l_loge_1(LNUL, "pthread_cond_timedwait %d", lserror(n));
   return false;
 }
 
@@ -450,7 +451,7 @@ l_condv_signal(l_condv* self) {
   a waiting thread by signaling from code running in a signal handler. */
   int n = pthread_cond_signal((pthread_cond_t*)self);
   if (n == 0) return true;
-  l_loge_1("pthread_cond_signal %s", lserror(n));
+  l_loge_1(LNUL, "pthread_cond_signal %s", lserror(n));
   return false;
 }
 
@@ -458,7 +459,7 @@ L_EXTERN int
 l_condv_broadcast(l_condv* self) {
   int n = pthread_cond_broadcast((pthread_cond_t*)self);
   if (n == 0) return true;
-  l_loge_1("pthread_cond_broadcast %s", lserror(n));
+  l_loge_1(LNUL, "pthread_cond_broadcast %s", lserror(n));
   return false;
 }
 
@@ -493,10 +494,6 @@ AT_SYMLINK_NOFOLLOW - if pathname is a symbolic link, do not dereference it;
 instead return information about the link itself.
 On success, zero is returned; on error, -1 is returned and errno is set.
 **********************************************************************/
-
-typedef struct {
-  int fd;
-} l_lnxfiledesc;
 
 L_EXTERN int
 l_file_isexist(const void* name) {
@@ -542,7 +539,7 @@ l_file_closefd(l_filedesc* self) {
   l_lnxfiledesc* p = (l_lnxfiledesc*)self;
   if (p->fd == -1) return;
   if (close(p->fd) != 0) {
-    l_loge_1("close %d", lserror(errno));
+    l_loge_1(LNUL, "close %d", lserror(errno));
   }
   p->fd = -1;
 }
@@ -596,7 +593,7 @@ L_EXTERN int
 l_dirstream_opendir(l_dirstream* self, const void* name) {
   l_lnxdirstream* d = (l_lnxdirstream*)self;
   if ((d->stream = opendir((const char*)name)) == 0) {
-    l_loge_1("opendir %s", lserror(errno));
+    l_loge_1(LNUL, "opendir %s", lserror(errno));
   }
   return (d->stream != 0);
 }
@@ -606,7 +603,7 @@ l_dirstream_close(l_dirstream* self) {
   l_lnxdirstream* d = (l_lnxdirstream*)self;
   if (d->stream == 0) return;
   if (closedir(d->stream) != 0) {
-    l_loge_1("closedir %s", lserror(errno));
+    l_loge_1(LNUL, "closedir %s", lserror(errno));
   }
   d->stream = 0;
 }
@@ -617,7 +614,7 @@ l_dirstream_read(l_dirstream* self) {
   struct dirent* entry = 0;
   errno = 0;
   if ((entry = readdir(d->stream)) == 0) {
-    if (errno != 0) l_loge_1("readdir %s", lserror(errno));
+    if (errno != 0) l_loge_1(LNUL, "readdir %s", lserror(errno));
     return 0;
   }
   return l_strz(entry->d_name);
@@ -630,7 +627,7 @@ l_dirstream_read2(l_dirstream* self, int* isdir) {
   if (isdir) *isdir = 0;
   errno = 0;
   if ((entry = readdir(d->stream)) == 0) {
-    if (errno != 0) l_loge_1("readdir %s", lserror(errno));
+    if (errno != 0) l_loge_1(LNUL, "readdir %s", lserror(errno));
     return 0;
   }
   if (isdir) {
@@ -639,7 +636,7 @@ l_dirstream_read2(l_dirstream* self, int* isdir) {
 #else
     struct stat st;
     if (lstat(entry->d_name, &st) != 0) {
-      l_loge_1("lstat %s", lserror(errno));
+      l_loge_1(LNUL, "lstat %s", lserror(errno));
       return 0;
     }
     isdir = S_ISDIR(st.st_mode);
@@ -725,7 +722,7 @@ l_sockaddr_local(l_socket* sock)
   socklen_t provided_len = sizeof(struct sockaddr_in6);
   sa->len = provided_len;
   if (getsockname(sock->unifd, &(sa->sa), &(sa->len)) != 0) {
-    l_loge_1("getsockname %s", lserror(errno));
+    l_loge_1(LNUL, "getsockname %s", lserror(errno));
     sa->len = 0;
     sa->sa.sa_family = 0;
   } else {
@@ -918,7 +915,7 @@ l_socket_create(int domain, int type, int protocol)
   l_socket sock;
   sock.unifd = socket(domain, type, protocol);
   if (unifd == -1) {
-    l_loge_1("socket %s", lserror(errno));
+    l_loge_1(LNUL, "socket %s", lserror(errno));
   } else {
     l_set_non_block(sock->unifd);
   }
@@ -984,7 +981,7 @@ l_socket_shutdown(l_socket* sock, l_byte r_w_a)
   default: l_loge_s(LNUL, "shutdone invalid argument"); break;
   }
   if (shutdown(sock->unifd, flag) != 0) {
-    l_loge_1("shutdown %s", lserror(errno));
+    l_loge_1(LNUL, "shutdown %s", lserror(errno));
   }
 }
 
@@ -1106,7 +1103,7 @@ l_impl_socket_listen(int sock, int backlog)
   在三次握手之后，但在服务器accept之前到达的数据应该有服务器TCP排队，最大数据量
   为相应已连接套接字的接收缓冲区大小。*/
   if (listen(sock, backlog) != 0) {
-    l_loge_1("listen %s", lserror(errno));
+    l_loge_1(LNUL, "listen %s", lserror(errno));
     return false;
   } else {
     return true;
@@ -1314,7 +1311,7 @@ l_impl_sigact(int sig, l_sigfunc func)
   #endif
   }
   if (sigaction(sig, &act, &oldact) != 0) {
-    l_loge_1("sigaction %s", lserror(errno));
+    l_loge_1(LNUL, "sigaction %s", lserror(errno));
     return SIG_ERR;
   }
   return oldact.sa_handler;
@@ -1410,7 +1407,7 @@ l_socket_accept(l_socket* skt, void (*cb)(void*, l_socketconn*), void* ud)
     sock = accept(skt->unifd, &(sa->sa), &(sa->len));
     if (sock != -1) {
       if (sa->len > provided_len) {
-        l_loge_s("accept address truncated");
+        l_loge_s(LNUL, "accept address truncated");
         sa->len = provided_len;
       }
       l_set_non_block(sock);
@@ -1432,7 +1429,7 @@ l_socket_accept(l_socket* skt, void (*cb)(void*, l_socketconn*), void* ud)
       /* current connection is interrupted, aborted or has protocol error,
       so skip this connection and continue to accept next connections
       in the kernel queue until it is empty */
-      l_logw_1("accept %s and continue", lserror(n));
+      l_logw_1(LNUL, "accept %s and continue", lserror(n));
       break;
     case EBADF: /* sockfd is not an open fd */
     case EFAULT: /* the addr is not in a writable part of the user address space */
@@ -1444,14 +1441,14 @@ l_socket_accept(l_socket* skt, void (*cb)(void*, l_socketconn*), void* ud)
     case ENOTSOCK: /* the sockfd does not refer to a socket */
     case EOPNOTSUPP: /* the referenced socket is not of type SOCK_STREAM */
     case EPERM: /* firewall rules forbid connection */
-      l_loge_1("accept %s", lserror(n));
+      l_loge_1(LNUL, "accept %s", lserror(n));
       return; /* unrecoverable error, return */
     default:
       /* in addition, network errors for the new socket and as defined for the protocol
       may be returned. various linux kernels can return other errors such as ENOSR,
       ESOCKTNOSUPPORT, EPROTONOSUPPORT, ETIMEOUT. the value ERESTARTSYS may be seen
       during a trace. */
-      l_loge_1("accept other error: %s", lserror(n));
+      l_loge_1(LNUL, "accept other error: %s", lserror(n));
       return;
     }
   }
@@ -1598,7 +1595,7 @@ l_impl_socket_connect(int sock, const l_sockaddr* addr)
   n = errno;
   switch (n) {
   case EISCONN:
-    l_logw_s("socket already connected");
+    l_logw_s(LNUL, "socket already connected");
     return true;
   case EINPROGRESS:
   case EALREADY:
@@ -1655,7 +1652,7 @@ l_impl_read(int fd, void* out, l_int count)
   ssize_t n = 0;
 
   if (count < 0 || count > L_MAX_RWSIZE) {
-    l_loge_s("read invalid argument");
+    l_loge_s(LNUL, "read invalid argument");
     return -2;
   }
 
@@ -1683,7 +1680,7 @@ l_impl_read(int fd, void* out, l_int count)
     break;
   }
 
-  l_loge_1("read %s", lserror(n));
+  l_loge_1(LNUL, "read %s", lserror(n));
   return -2;
 }
 
@@ -1754,7 +1751,7 @@ l_impl_write(int fd, const void* buf, l_int count)
   ssize_t n = 0;
 
   if (count < 0 || count > L_MAX_RWSIZE) {
-    l_loge_s("write invalid argument");
+    l_loge_s(LNUL, "write invalid argument");
     return -2;
   }
 
@@ -1782,7 +1779,7 @@ l_impl_write(int fd, const void* buf, l_int count)
     break;
   }
 
-  l_loge_1("write %s", lserror(n));
+  l_loge_1(LNUL, "write %s", lserror(n));
   return -2;
 }
 
@@ -1826,7 +1823,7 @@ l_socket_write(l_filedesc sock, const void* from, l_int count, l_int* status)
 
 /** io events management **/
 
-static l_handle
+static l_filehdl
 l_evfd_create()
 {
   /** eventfd - create a file descriptor for event notification **
@@ -1922,7 +1919,7 @@ l_evfd_create()
   if (hdl == -1) {
     l_loge_1(LNUL, "eventfd %s", lserror(errno));
   }
-  return l_handle_from(hdl);
+  return l_filehdl_from(hdl);
 }
 
 static void
@@ -1937,7 +1934,7 @@ l_evfd_close(l_hanlde* hdl)
 }
 
 static l_bool
-l_evfd_write(l_handle* hdl)
+l_evfd_write(l_filehdl* hdl)
 {
   l_ulong count = 1;
   int n = l_impl_write(hdl->unifd, &count, sizeof(l_ulong));
@@ -1950,7 +1947,7 @@ l_evfd_write(l_handle* hdl)
 }
 
 static l_bool
-l_evfd_read(l_handle* hdl)
+l_evfd_read(l_filehdl* hdl)
 {
   l_ulong count = 0;
   int n = l_impl_read(hdl->unifd, &count, sizeof(l_ulong));
@@ -1963,8 +1960,8 @@ l_evfd_read(l_handle* hdl)
 }
 
 typedef struct {
-  l_handle ephl;
-  l_handle wake_hdl;
+  l_filehdl ephl;
+  l_filehdl wake_hdl;
   int wake_hdl_added;
   int wake_count;
   int nready;
@@ -2109,7 +2106,7 @@ example, FreeBSD has kqueue, and Solaris has /dev/poll.
 The set of fds that is being monitored via an epoll fd can be viewed the entry for the
 epoll fd in the process's /proc/[pid]/fdinfo directory. */
 
-static l_handle
+static l_filehdl
 l_epoll_create()
 {
   /** epoll_create **
@@ -2146,24 +2143,24 @@ l_epoll_create()
   ENOMEM - There was insufficient memory to create the kernel object. */
   int epfd = epoll_create1(0);
   if (epfd == -1) {
-    l_loge_1("epoll_create1 %s", lserror(errno));
+    l_loge_1(LNUL, "epoll_create1 %s", lserror(errno));
   }
-  return l_handle_from(epfd);
+  return l_filehdl_from(epfd);
 }
 
 static void
-l_epoll_close(l_handle* hdl)
+l_epoll_close(l_filehdl* hdl)
 {
   if (hdl->unifd != -1) {
     if (close(hdl->unifd) != 0) {
-      l_loge_1("close epoll %s", lserror(errno));
+      l_loge_1(LNUL, "close epoll %s", lserror(errno));
     }
     hdl->unifd = -1;
   }
 }
 
 static l_bool
-l_epoll_ctl(l_handle* hdl, int op, int fd, struct epoll_event* ev)
+l_epoll_ctl(l_filehdl* hdl, int op, int fd, struct epoll_event* ev)
 {
   if (hdl->unifd == -1 || fd == -1 || hdl->unifd == fd) {
     l_loge_s(LNUL, "l_epoll_ctl invalid argument");
@@ -2210,7 +2207,7 @@ l_epoll_ctl(l_handle* hdl, int op, int fd, struct epoll_event* ev)
 }
 
 static l_bool
-l_epoll_add(l_handle* hdl, int fd, struct epoll_event* ev)
+l_epoll_add(l_filehdl* hdl, int fd, struct epoll_event* ev)
 {
   if (l_epoll_ctl(hdl, EPOLL_CTL_ADD, fd, ev)) {
     return true;
@@ -2218,25 +2215,25 @@ l_epoll_add(l_handle* hdl, int fd, struct epoll_event* ev)
     if (errno == EEXIST && l_epoll_ctl(hdl, EPOLL_CTL_MOD, fd, ev)) {
       return true;
     } else {
-      l_loge_1("l_epoll_add fail %s", lserror(errno));
+      l_loge_1(LNUL, "l_epoll_add fail %s", lserror(errno));
       return false;
     }
   }
 }
 
 static l_bool
-l_epoll_mod(l_handle* hdl, int fd, struct epoll_event* ev)
+l_epoll_mod(l_filehdl* hdl, int fd, struct epoll_event* ev)
 {
   if (l_epoll_ctl(hdl, EPOLL_CTL_MOD, fd, ev)) {
     return true;
   } else {
-    l_loge_1("l_epoll_mod fail %s", lserror(errno));
+    l_loge_1(LNUL, "l_epoll_mod fail %s", lserror(errno));
     return false;
   }
 }
 
 static l_bool
-l_epoll_del(l_handle* hdl, int fd)
+l_epoll_del(l_filehdl* hdl, int fd)
 {
   /* In kernel versions before 2.6.9, the EPOLL_CTL_DEL
   operation required a non-null pointer in event, even
@@ -2305,7 +2302,7 @@ l_epollmgr_wait(l_epollmgr* mgr, int ms)
     if (errno == EINTR) { /* the call was interrupted by a signal handler */
       l_epollmgr_wait(mgr, 0);
     } else {
-      l_loge_1("epoll_wait %s", lserror(errno));
+      l_loge_1(LNUL, "epoll_wait %s", lserror(errno));
     }
     mgr->nready = 0;
   } else {
@@ -2373,7 +2370,7 @@ l_get_ioev_masks(struct epoll_event* ev)
 }
 
 L_EXTERN l_bool
-l_ioevmgr_add(l_ioevmgr* thiz, l_handle fd, l_ulong ud, l_umedit masks)
+l_ioevmgr_add(l_ioevmgr* thiz, l_filehdl fd, l_ulong ud, l_umedit masks)
 {
   /** event masks **
   The bit masks can be composed using the following event types:
@@ -2445,7 +2442,7 @@ l_ioevmgr_add(l_ioevmgr* thiz, l_handle fd, l_ulong ud, l_umedit masks)
 }
 
 L_EXTERN l_bool
-l_ioevmgr_mod(l_ioevmgr* thiz, l_handle fd, l_ulong ud, l_umedit masks)
+l_ioevmgr_mod(l_ioevmgr* thiz, l_filehdl fd, l_ulong ud, l_umedit masks)
 {
   l_epollmgr* mgr = (l_epollmgr*)thiz;
   struct epoll_event ev;
@@ -2455,7 +2452,7 @@ l_ioevmgr_mod(l_ioevmgr* thiz, l_handle fd, l_ulong ud, l_umedit masks)
 }
 
 L_EXTERN l_bool
-l_ioevmgr_del(l_ioevmgr* thiz, l_handle fd)
+l_ioevmgr_del(l_ioevmgr* thiz, l_filehdl fd)
 {
   l_epollmgr* mgr = (l_epollmgr*)thiz;
   return l_epoll_del(&mgr->ephl, fd.unifd);
@@ -2495,7 +2492,7 @@ l_ioevmgr_timed_wait(l_ioevmgr* thiz, int ms, void (*cb)(l_ulong, l_umedit))
   pend = pcur + mgr->nready;
 
   for (; pcur < pend; ++pcur) {
-    /* l_assert(sizeof(l_handle) == 4) && svid high 32 bit cannot be 0 */
+    /* l_assert(sizeof(l_filehdl) == 4) && svid high 32 bit cannot be 0 */
     if (pcur->data.u64 == mgr->wake_hdl.unifd) {
       l_evfd_read(&mgr->wake_hdl); /* return > 0 success, -1 block, -2 error */
       l_mutex_lock(&mgr->wklk);

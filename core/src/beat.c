@@ -29,8 +29,9 @@ typedef struct {
   struct l_service* service;
   l_squeue bkmq; /* service backup message q */
   l_umedit slot_index; /* the lowest bit is for service alive or not */
+  l_umedit srvc_count;
   l_umedit ioev_masks;
-  l_handle ioev_hdl;
+  l_filehal ioev_hdl;
 } l_srvcslot;
 
 typedef struct {
@@ -51,6 +52,7 @@ typedef struct {
   l_thrhdl thrhdl;
   void (*start)(void);
   l_uint mast_flags;
+  l_srvctable* stbl;
   l_squeue mast_frsq; /* free service q */
   l_squeue mast_frmq; /* free message q */
   l_squeue mast_frct; /* free coro tables */
@@ -58,7 +60,7 @@ typedef struct {
   l_worknode* node_arr;
   l_umedit num_workers; /* size of work node array */
   l_umedit srvc_seed;
-  l_srvctable stbl;
+  l_srvctable srvc_tbl;
   lnlylib_env main_env;
 } l_master;
 
@@ -249,6 +251,9 @@ l_srvctable_init(l_srvctable* stbl, l_int init_size)
     slot = stbl->slot_arr + i;
     slot->service = 0;
     slot->slot_index = i << 1; /* the lowerest bit for service alive or not */
+    slot->srvc_count = 0;
+    slot->ioev_masks = 0;
+    slot->ioev_hdl = l_empty_filehdl();
     l_squeue_init(&slot->bkmq);
     /* insert the slot to free queue */
     if (i >= L_MIN_USER_SERVICE_ID) {
@@ -299,6 +304,9 @@ l_srvctable_alloc_slot(l_srvctable* stbl)
       slot = new_sarr + i;
       slot->service = 0;
       slot->slot_index = i << 1; /* the lowerest bit is for service alive or not */
+      slot->srvc_count = 0;
+      slot->ioev_masks = 0;
+      slot->ioev_hdl = l_empty_filehdl();
       l_squeue_init(&slot->bkmq);
       /* insert new slot to free queue */
       if (i >= L_MIN_USER_SERVICE_ID) {
@@ -386,7 +394,8 @@ l_master_init(void (*start)(void), int argc, char** argv)
     l_squeue_init(worker->mq + 3);
   }
 
-  l_srvctable_init(&M->stbl, C->min_stbl_size);
+  M->stbl = &M->srvc_tbl;
+  l_srvctable_init(M->stbl, C->min_stbl_size);
 
   main_env = &M->main_env;
   main_env->G = G;
@@ -603,6 +612,31 @@ l_master_insert_message(l_master* M, l_message* msg)
   }
 }
 
+static l_master* L_MASTER = 0;
+
+static void
+l_master_dispatch_io_event(l_ulong ud, l_umedit masks)
+{
+  l_master* M = L_MASTER;
+  l_srvctable* stbl = M->stbl;
+  l_squeue* temp_svcq = &M->temp_svcq;
+  l_service* S = 0;
+  l_srvcslot* slot = 0;
+  l_umedit svid = (l_umedit)(ud >> 32);
+  l_umedit count = (l_umedit)(ud & 0xffffffff);
+
+  slot = stbl->slot_arr + svid;
+  if (l_filehdl_is_empty(&slot->ioev_hdl) || slot->srvc_count != count) {
+    return;
+  }
+
+  S = slot->service;
+  if (S && (S->srvc_flags & L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ) == 0) {
+    S->srvc_flags |= L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ;
+    l_squeue_push(temp_svcq, &S->node);
+  }
+}
+
 static void
 l_master_deliver_messages(l_master* M, l_squeue* txmq)
 {
@@ -761,7 +795,11 @@ check_feeded_messages:
       l_mutex_unlock(&work_node->mast_rxlk);
     }
 
-    l_ioevmgr_try_wait(M->evmgr, l_master_dispatch_io_event);
+    for (i = 0; i < 3; ++i) {
+      if (l_ioevmgr_try_wait(M->evmgr, l_master_dispatch_io_event) <= 0) {
+        break;
+      }
+    }
 
     if (l_squeue_is_empty(&rxmq)) {
       l_rawapi_sleep(30);
@@ -808,6 +846,9 @@ check_feeded_messages:
 
     while ((S = (l_service*)l_squeue_pop(temp_svcq))) {
       srvc_slot = stbl->slot + S->svid;
+      if (l_filehdl_nt_empty(&srvc_slot->ioev_hdl) && (srvc_slot->ioev_masks != 0)) {
+        /* TODO: generate io event message and intert into S->srvc_msgq */
+      }
       if (l_squeue_is_empty(&S->srvc_msgq)) {
         l_assert(srvc_slot->service); /* keep the service docked */
       } else {
@@ -1072,6 +1113,8 @@ lnlylib_main(void (*start)(void), int argc, char** argv)
   l_worker* W = 0;
   l_int i = 0;
   int exit_code = 0;
+
+  L_MASTER = M;
 
   l_logm_s("master started");
 

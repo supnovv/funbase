@@ -174,6 +174,17 @@ int main(void)
     l_write_line(file, "#error pointer-size integer type not found");
   }
 
+#if defined(L_PLAT_WINDOWS)
+  l_write_line(file, "typedef struct { HANDLE winfd; } l_filehdl;");
+#elif defined(L_PLAT_LINUX)
+  l_write_line(file, "typedef struct { int unifd; } l_filehdl;");
+  l_write_line(file, "L_INLINE l_filehdl l_empty_filehdl() { return (l_filehdl){-1}; }");
+  l_write_line(file, "L_INLINE l_bool l_filehdl_is_empty(l_filehdl* hdl) { return hdl->unifd == -1; }");
+  l_write_line(file, "L_INLINE l_bool l_filehdl_nt_empty(l_filehdl* hdl) { return hdl->unifd != -1; }");
+#else
+  l_write_line(file, "#error l_filehdl not defined");
+#endif
+
   l_write_line(file, "%s/* char %d-bit */", L_NEWLINE, sizeof(char)*8);
   l_write_line(file, "/* short %d-bit */", sizeof(short)*8);
   l_write_line(file, "/* int %d-bit */", sizeof(int)*8);
