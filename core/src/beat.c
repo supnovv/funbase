@@ -639,7 +639,7 @@ l_master_dispatch_io_event(l_ulong ud, l_umedit masks)
   l_service* S = 0;
   l_srvcslot* slot = 0;
   l_umedit svid = (l_umedit)(ud >> 32);
-  l_umedit count = (l_umedit)(ud & 0xffffffff);
+  l_umedit seed = (l_umedit)(ud & 0xffffffff);
 
   slot = stbl->slot_arr + svid;
   if (l_filehdl_is_empty(&slot->iohdl) || slot->srvc_seed != seed) {
@@ -768,6 +768,8 @@ l_master_loop(lnlylib_env* main_env)
   l_message* MSG = 0;
   l_int global_q_is_empty = 0;
   l_int i = 0;
+  l_int events = 0;
+  l_umedit ioev_masks = 0;
 
   l_service* launcher = 0;
   l_message* on_create_msg = 0;
@@ -813,13 +815,12 @@ check_feeded_messages:
       l_mutex_unlock(&work_node->mast_rxlk);
     }
 
-    for (i = 0; i < 3; ++i) {
-      if (l_ioevmgr_try_wait(M->evmgr, l_master_dispatch_io_event) <= 0) {
-        break;
-      }
+    events = l_ioevmgr_try_wait(M->evmgr, l_master_dispatch_io_event);
+    if (events > 0) {
+      events += l_ioevmgr_try_wait(M->evmgr, l_master_dispatch_io_event);
     }
 
-    if (l_squeue_is_empty(&rxmq)) {
+    if (l_squeue_is_empty(&rxmq) && events == 0) {
       l_rawapi_sleep(30);
       goto check_feeded_messages;
     }
@@ -851,8 +852,8 @@ check_feeded_messages:
           l_master_destroy_service(M, S->srvc_id);
         }
 
-        l_master_deliver_messages(M, &feedback_ind->txmq);
-        l_master_handle_self_messages(M, &feedback_ind->txms);
+        l_master_deliver_messages(M, &feedback->txmq);
+        l_master_handle_self_messages(M, &feedback->txms);
         } break;
       default:
         l_loge_3("unrecognized master message %d", ld(MSG->mgid));
@@ -864,7 +865,8 @@ check_feeded_messages:
 
     while ((S = (l_service*)l_squeue_pop(temp_svcq))) {
       srvc_slot = stbl->slot + (S->srvc_id >> 32);
-      if (l_filehdl_nt_empty(&srvc_slot->iohdl) && (srvc_slot->masks & L_IO_EVENT_MASK)) {
+      ioev_masks = (srvc_slot->masks & L_IO_EVENT_MASK);
+      if (l_filehdl_nt_empty(&srvc_slot->iohdl) && ioev_masks) {
         /* TODO: generate io event message and intert into S->srvc_msgq */
       }
       if (l_squeue_is_empty(&S->srvc_msgq)) {

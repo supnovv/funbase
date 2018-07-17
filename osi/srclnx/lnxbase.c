@@ -2483,7 +2483,7 @@ l_ioevmgr_timed_wait(l_ioevmgr* thiz, int ms, void (*cb)(l_ulong, l_umedit))
     }
   }
 
-  l_impl_epoll_wait(mgr, ms);
+  l_epollmgr_wait(mgr, ms);
   if (mgr->nready <= 0) {
     return 0;
   }
