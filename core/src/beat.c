@@ -190,8 +190,11 @@ typedef struct {
 typedef struct l_service {
   l_smplnode node; /* chained in global q */
   l_squeue srvc_msgq;
-  l_ulong srvc_flags;
+  l_filehdl ioev_hdl;
+  l_umedit srvc_flags;
   l_ulong srvc_id; /* the highest bit is for remote service or note */
+  l_ulong upper_srvc;
+  l_ulong lower_svrc;
   l_corotable* coro_tabl; /* lua service if not null */
   l_service_callback* cb;
   void* ud;
@@ -208,23 +211,31 @@ l_tcp_server_proc(lnlylib_env* E)
 }
 
 typedef struct {
-  l_fildhdl fd;
   l_squeue wrmq;
   l_squeue rdmq;
   l_umedit wrid;
   l_umedit rdid;
-  l_ulong up_srvc;
 } l_data_service;
 
 static void
 l_socket_client_proc(lnlylib_env* E)
 {
-  /** messages from master **
-  L_MSG_CONNECT_RSP
-  L_MSG_CONNECT_HUP
-  L_MSG_SOCK_ERROR
-  L_MSG_DATA_READY_RX
-  L_MSG_DATA_READY_TX **/
+  /** message exchanges, RSP only send after REQ, NTF can send without REQ **
+  L_MSG_SOCK_CONNECT <=
+                     => L_MSG_SOCK_CONNDONE  =>  L_MSG_SOCK_CONN_IND
+                        L_MSG_SOCK_CONN_REQ  <=
+                                             =>  L_MSG_SOCK_CONN_NTF
+                        L_MSG_SOCK_DISC_REQ  <=
+                                             =>  L_MSG_SOCK_DISC_NTF (after disc, the data service is destroyed)
+                     => L_MSG_SOCK_DISCDONE  =>  L_MSG_SOCK_DISC_NTF
+                     => L_MSG_SOCK_ERROR     =>  L_MSG_SOCK_DISC_NTF
+                     => L_MSG_DATA_READY_RX  =>  L_MSG_READ_DATA_IND
+                        L_MSG_READ_DATA_REQ  <=
+                                             =>  L_MSG_READ_DATA_RSP
+                        L_MSG_WRITE_DATA_REQ <=
+                     => L_MSG_DATA_READY_TX  =>  L_MSG_WRITE_DATA_RSP
+  ********************************************************************/
+
   l_message* MSG = E->cmsg;
   l_service* S = E->csvc;
   l_data_service* svud = E->svud;
