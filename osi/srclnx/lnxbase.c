@@ -1610,7 +1610,7 @@ l_impl_socket_connect(int sock, const l_sockaddr* addr)
 }
 
 static l_int
-l_impl_read(int fd, void* out, l_int count)
+l_impl_read(int fd, void* out, l_int size)
 {
   /** read - read from a file descriptor **
   #include <unistd.h>
@@ -1650,42 +1650,39 @@ l_impl_read(int fd, void* out, l_int count)
   EISDIR - fd refers to a directory.
   Other errors may occurs, depending on the object connected to fd. */
   ssize_t n = 0;
+  int status = 0;
 
-  if (count < 0 || count > L_MAX_RWSIZE) {
-    l_loge_s(LNUL, "read invalid argument");
+  if (size < 0 || size > L_MAX_RWSIZE) {
+    l_loge_s(LNUL, "read - invalid argument");
     return -2;
   }
 
   for (; ;) {
-    if ((n = read(fd, out, (size_t)count)) >= 0) {
+    if ((n = read(fd, out, (size_t)size)) >= 0) {
       /* note that one case about read bytes n < count is:
       at least one byte is read and then interrupted by a
       signal, the call is returned success in this case. */
       return (l_int)n;
     }
 
-    n = errno;
-    if (n == EINTR) {
+    status = errno;
+    switch (status) {
+    case EINTR:
       /* interrupted by a signal before read any bytes,
       try to read again. */
       continue;
+    case EAGAIN:
+    case EWOULDBLOCK:
+      return -1; /* data is not available currently */
+    default:
+      l_loge_1(LNUL, "read %s", lserror(status));
+      return -2; /* error occurred */
     }
-
-    if (n == EAGAIN || n == EWOULDBLOCK) {
-      /* data is not available currently */
-      return -1;
-    }
-
-    /* error occurred */
-    break;
   }
-
-  l_loge_1(LNUL, "read %s", lserror(n));
-  return -2;
 }
 
 static l_int
-l_impl_write(int fd, const void* buf, l_int count)
+l_impl_write(int fd, const void* data, l_int size)
 {
   /** write - write to a file descriptor **
   #include <unistd.h>
@@ -1749,76 +1746,91 @@ l_impl_write(int fd, const void* buf, l_int count)
   or ignores this signal.)
   Other errors may occur, depending on the object connected to fd. */
   ssize_t n = 0;
+  int status = 0;
 
-  if (count < 0 || count > L_MAX_RWSIZE) {
-    l_loge_s(LNUL, "write invalid argument");
+  if (size < 0 || size > L_MAX_RWSIZE) {
+    l_loge_s(LNUL, "write - invalid argument");
     return -2;
   }
 
   for (; ;) {
-    if ((n = write(fd, buf, (size_t)count)) >= 0) {
+    if ((n = write(fd, data, (size_t)size)) >= 0) {
       /* note that one case about written bytes n < count is:
       at least one byte is written and then interrupted by a
       signal, the call is returned success in this case. */
       return (l_int)n;
     }
 
-    n = errno;
-    if (n == EINTR) {
+    status = errno;
+    switch (status) {
+    case EINTR:
       /* interrupted by a signal before written any bytes,
       try to read again. */
       continue;
+    case EAGAIN:
+    case EWOULDBLOCK:
+      return -1; /* cannot write currently */
+    default:
+      l_loge_1(LNUL, "write %s", lserror(status));
+      return -2; /* error occurred */
     }
-
-    if (n == EAGAIN || n == EWOULDBLOCK) {
-      /* cannot write currently */
-      return -1;
-    }
-
-    /* error occurred */
-    break;
   }
-
-  l_loge_1(LNUL, "write %s", lserror(n));
-  return -2;
 }
 
-L_EXTERN l_int /* *status >=0 success, <0 L_ERROR */
-l_socket_read(l_filedesc sock, void* out, l_int count, l_int* status)
+L_EXTERN l_int
+l_data_read(l_filehdl hdl, void* out, l_int size)
 {
-  l_byte* buf = (l_byte*)out;
-  l_int n = 0, sum = 0;
-  while ((n = l_impl_read(sock.unifd, buf, count)) > 0) {
-    sum += n;
-    buf += n;
-    count -= n;
-    if (count == 0) {
-      break;
-    }
+  l_int n = 0;
+  l_int done = 0;
+  l_int left = 0;
+  l_byte* buff = 0;
+
+continue_to_read:
+
+  buff = l_strc(out) + done;
+  left = size - done;
+
+  if (left <= 0) {
+    return done;
   }
-  if (status) {
-    *status = (count == 0 ? 0 : (n == -2 ? L_ERROR : count));
+
+  n = l_impl_read(hdl.unifd, buff, left);
+
+  if (n > 0) {
+    done += n;
+    goto continue_to_read;
+  } else {
+    /* 0, -1 - cannot read right now, < -1 - error happened */
+    return done;
   }
-  return sum;
 }
 
-L_EXTERN l_int /* *status >=0 success, <0 L_STATUS_ERROR */
-l_socket_write(l_filedesc sock, const void* from, l_int count, l_int* status)
+L_EXTERN l_int
+l_data_write(l_filehdl hdl, const void* from, l_int size)
 {
-  l_int n = 0, sum = 0;
-  const l_byte* buf = (const l_byte*)from;
-  while ((n = ll_write(sock.unifd, buf, count)) > 0) {
-    sum += n;
-    buf += n;
-    count -= n;
-    if (count == 0) {
-      break;
-    }
+  l_int n = 0;
+  l_int done = 0;
+  l_int left = 0;
+  const l_byte* data = 0;
+
+continue_to_write:
+
+  data = l_strc(from) + done;
+  left = size - done;
+
+  if (left <= 0) {
+    return done;
   }
-  if (status) {
-    *status = (count == 0 ? 0 : (n == -2 ? L_ERROR : count));
+
+  n = l_impl_write(hdl.unifd, data, left);
+
+  if (n > 0) {
+    done += n;
+    goto continue_to_write;
+  } else {
+    /* 0, -1 - cannot write right now, < -1 - error happened */
+    return done;
   }
-  return sum;
 }
 
 /** io events management **/

@@ -197,6 +197,96 @@ typedef struct l_service {
   void* ud;
 } l_service;
 
+static void*
+l_tcp_server_proc(lnlylib_env* E)
+{
+  /** messages from master **
+   L_MSG_TCP_CONNECT_IND
+   L_MSG_READY_TO_READ
+   L_MSG_READY_TO_WRITE
+   **/
+}
+
+typedef struct {
+  l_fildhdl fd;
+  l_squeue wrmq;
+  l_squeue rdmq;
+  l_umedit wrid;
+  l_umedit rdid;
+  l_ulong up_srvc;
+} l_data_service;
+
+static void
+l_socket_client_proc(lnlylib_env* E)
+{
+  /** messages from master **
+  L_MSG_CONNECT_RSP
+  L_MSG_CONNECT_HUP
+  L_MSG_SOCK_ERROR
+  L_MSG_DATA_READY_RX
+  L_MSG_DATA_READY_TX **/
+  l_message* MSG = E->cmsg;
+  l_service* S = E->csvc;
+  l_data_service* svud = E->svud;
+
+  l_message* msg = 0;
+  l_byte* data = 0;
+  l_umedit size = 0;
+  l_umedit done = 0;
+
+  switch (MSG->mssg_id) {
+  case L_MSG_WRITE_DATA_REQ:
+    if (msg->data_size && msg->mssg_data) {
+      msg->mssg_flags |= L_MSSG_FLAG_DONT_FREE;
+      msg->mgid_cust = 0; /* use mgid_cust to record how many data already written */
+      l_squeue_push(&svud->wrmq, &msg->node);
+    }
+    break;
+  case L_MSG_READ_DATA_REQ:
+    if (msg->data_size && msg->mssg_data) {
+      msg->mssg_flags |= L_MSSG_FLAG_DONT_FREE;
+      msg->mgid_cust = 0; /* use mgid_cust to record how many data alrady read */
+      l_squeue_push(&svud->rdmq, &msg->node);
+    }
+    break;
+  case L_MSG_DATA_READY_TX:
+    if ((msg = l_squeue_top(&svud->wrmq))) {
+      data = msg->mssg_data + msg->mgid_cust;
+      size = msg->data_size - msg->mgid_cust;
+      done = l_data_write(svud->fd, data, size);
+      if (done == size) {
+        l_squeue_pop(&svud->wrmq);
+        l_message_free_data(msg);
+        l_message_init(msg, S->srvc_id, svud->up_srvc, L_MSG_WRITE_DATA_DONE, 0);
+        msg->extra.a = ++svud->wrid;
+        l_send_message_impl(E, msg);
+      } else {
+        msg->mgid_cust += done;
+      }
+    }
+    break;
+  case L_MSG_DATA_READY_RX:
+    if ((msg = l_squeue_top(&svud->rdmq))) {
+      data = msg->mssg_data + msg->mgid_cust;
+      size = msg->data_size - msg->mgid_cust;
+      done = l_data_read(svud->fd, data, size);
+      if (done == size) {
+        l_squeue_pop(&svud->wrmq);
+        /* TODO */
+      } else {
+        msg->mgid_cust += done;
+      }
+    }
+    break;
+  case L_MSG_SOCK_ERROR:
+    break;
+  case L_MSG_CONNECT_HUP:
+    break;
+  default:
+    break;
+  }
+}
+
 typedef struct {
   l_service* service;
   l_squeue txmq;
@@ -215,7 +305,7 @@ typedef struct {
   l_umedit a, b, c, d;
   l_ulong l, m, n, o;
   l_uint u, v, w, x;
-  void* extra;
+  void *p, *q, *r, *s;
 } l_msgdata;
 
 typedef struct l_message {
@@ -224,11 +314,28 @@ typedef struct l_message {
   l_ulong dest_coro;
   l_ulong from_srvc;
   l_ulong from_coro;
-  l_ulong mgid; /* high 32-bit is id, lower 32-bit's behavior is user defined */
+  l_umedit mssg_id; /* high 32-bit is id, lower 32-bit's behavior is user defined */
+  l_umedit mgid_cust; /* lower 32-bit's behavior is user defined */
   l_umedit mssg_flags;
   l_umedit data_size;
-  l_msgdata mssg_data;
+  void* mssg_data;
+  l_msgdata extra;
 } l_message;
+
+/* l_send_message() copy data */
+/* l_send_message_with_data_moved() move allocated data */
+
+static void
+l_message_free_data(lnlylib_env* E, l_message* msg)
+{
+  if (msg->mssg_data == 0 || msg->mssg_data == &msg->extra) {
+    return;
+  }
+
+  if (msg->mssg_flags & L_MSSG_FLAG_FREE_DATA) {
+    l_rawapi_mfree(E, msg->mssg_data);
+  }
+}
 
 typedef struct l_worker {
   l_thrhdl thrhdl;

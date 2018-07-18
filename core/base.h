@@ -209,6 +209,16 @@ l_squeue_is_empty(l_squeue* self)
 }
 
 L_INLINE l_smplnode*
+l_squeue_top(l_squeue* self)
+{
+  if (l_squeue_is_empty(self)) {
+    return 0;
+  } else {
+    return self->head.next;
+  }
+}
+
+L_INLINE l_smplnode*
 l_squeue_pop(l_squeue* self)
 {
   l_smplnode* node = 0;
