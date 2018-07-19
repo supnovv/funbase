@@ -1033,13 +1033,12 @@ l_impl_socket_bind(int sock, const l_sockaddr* addr)
   if (sa->len == 0 || sock == -1) {
     l_loge_2(LNUL, "bind invalid argument %d %d", ld(sa->len), ld(sock));
     return false;
+  }
+  if (bind(sock, &(sa->sa), sa->len) != 0) {
+    l_loge_1(LNUL, "bind %s", lserror(errno));
+    return false;
   } else {
-    if (bind(sock, &(sa->sa), sa->len) != 0) {
-      l_loge_1(LNUL, "bind %s", lserror(errno));
-      return false;
-    } else {
-      return true;
-    }
+    return true;
   }
 }
 
@@ -1111,7 +1110,7 @@ l_impl_socket_listen(int sock, int backlog)
 }
 
 L_EXTERN l_socket
-l_socket_listen(const l_sockaddr* addr, int backlog)
+l_socket_tcp_listen(const l_sockaddr* addr, int backlog)
 {
   l_socket sock;
   const l_impl_sockaddr* sa = 0;

@@ -11,6 +11,8 @@
 #define L_IO_EVENT_ERR    0x20
 #define L_IO_EVENT_MASK 0xffff
 
+typedef l_filehdl l_socket;
+
 typedef union {
   void* impl;
   l_uint uhdl;

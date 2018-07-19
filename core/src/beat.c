@@ -2,7 +2,9 @@
 #include "core/beat.h"
 #include "osi/base.h"
 
-#define L_SERVICE_ALIVE 0x01000000
+#define L_SERVICE_ALIVE     0x00010000
+#define L_SOCK_FLAG_LISTEN  0x00020000
+#define L_SOCK_FLAG_CONNECT 0x00040000
 #define L_MIN_USER_SERVICE_ID 256
 #define L_MIN_SRVC_TABLE_SIZE 1024
 #define L_SERVICE_LAUNCHER 0x01
@@ -28,10 +30,10 @@ typedef struct {
   l_smplnode node; /* chained to free q */
   struct l_service* service;
   l_squeue bkmq; /* service backup message q */
-  l_umedit slot_index;
+  l_umedit srvc_index;
   l_umedit srvc_seed;
   l_umedit masks;
-  l_filehal iohdl;
+  l_filehdl iohdl;
 } l_srvcslot;
 
 static void
@@ -39,7 +41,7 @@ l_srvcslot_init(l_srvcslot* slot, l_umedit i)
 {
   slot->service = 0;
   l_squeue_init(&slot->bkmq);
-  slot->slot_index = i;
+  slot->srvc_index = i;
   slot->srvc_seed = 0;
   slot->masks = 0;
   slot->iohdl = l_empty_filehdl();
@@ -58,6 +60,20 @@ typedef struct {
   l_squeue mast_rxmq;
   l_mutex mast_rxlk;
 } l_worknode;
+
+typedef struct lnlylib_env {
+  struct l_global* G;
+  struct l_worker* W;
+  struct l_service* S;
+  void* svud;
+
+  struct l_message* MSG;
+  l_string* STR;
+  l_stdfile* LOG;
+
+  lua_State* L;
+  lua_State* co;
+} lnlylib_env;
 
 typedef struct {
   l_thrhdl thrhdl;
@@ -148,8 +164,8 @@ l_filename_addpath(l_filename* fn, l_strn path)
 typedef struct {
   l_umedit num_workers;
   l_umedit init_stbl_size;
-  l_filename log_file_name;
   l_string start_script;
+  l_filename log_file_name;
 } l_config;
 
 typedef struct {
@@ -221,10 +237,9 @@ static void
 l_socket_client_proc(lnlylib_env* E)
 {
   /** message exchanges, RSP only send after REQ, NTF can send without REQ **
+  L_MSG_SOCK_CONNIND => 
   L_MSG_SOCK_CONNECT <=
-                     => L_MSG_SOCK_CONNDONE  =>  L_MSG_SOCK_CONN_IND
-                        L_MSG_SOCK_CONN_REQ  <=
-                                             =>  L_MSG_SOCK_CONN_NTF
+                     => L_MSG_SOCK_CONNDONE  =>  L_MSG_SOCK_CONN_NTF
                         L_MSG_SOCK_DISC_REQ  <=
                                              =>  L_MSG_SOCK_DISC_NTF (after disc, the data service is destroyed)
                      => L_MSG_SOCK_DISCDONE  =>  L_MSG_SOCK_DISC_NTF
@@ -305,12 +320,43 @@ typedef struct {
 } l_worker_feedback_data;
 
 typedef struct {
-  l_uint flags;
-  union {
-  l_strn module_name;
+  l_bool enable;
+  l_bool listen;
+  l_filehdl hdl;
+  const char* ip;
+  l_ushort port;
+} l_srvc_ioev_data;
+
+L_EXTERN l_srvc_ioev_data
+L_LISTEN(const char* ip, l_ushort port)
+{
+  return (l_srvc_ioev_data){true, true, L_EMPTY_HDL, ip, port};
+}
+
+L_EXTERN l_srvc_ioev_data
+L_CONNECT(const char* ip, l_ushort port)
+{
+  return (l_srvc_ioev_data){true, false, L_EMPTY_HDL, ip, port};
+}
+
+L_EXTERN l_srvc_ioev_data
+L_USEHDL(l_filehdl hdl)
+{
+  return (l_srvc_ioev_data){true, false, hdl, 0, 0};
+}
+
+L_EXTERN l_srvc_ioev_data
+L_NODATA()
+{
+  return (l_srvc_ioev_data){flase, false, L_EMPTY_HDL, 0, 0};
+}
+
+typedef struct {
+  const char* module;
   l_service_callback* cb;
-  };
-} l_create_service_req;
+  l_srvc_ioev_data ioev;
+  void* param;
+} l_create_service_data;
 
 typedef struct {
   l_umedit a, b, c, d;
@@ -321,10 +367,8 @@ typedef struct {
 
 typedef struct l_message {
   l_smplnode node;
-  l_ulong dest_srvc;
-  l_ulong dest_coro;
-  l_ulong from_srvc;
-  l_ulong from_coro;
+  l_ulong mssg_dest;
+  l_ulong mssg_from;
   l_umedit mssg_id; /* high 32-bit is id, lower 32-bit's behavior is user defined */
   l_umedit mgid_cust; /* lower 32-bit's behavior is user defined */
   l_umedit mssg_flags;
@@ -359,7 +403,7 @@ typedef struct l_worker {
   l_uint work_flags;
   l_mutex* mast_rxlk;
   l_squeue* mast_rxmq;
-  l_stanfile logfile;
+  l_stdfile logfile;
   l_string thrstr;
   l_squeue mq[4];
   lnlylib_env ENV;
@@ -586,6 +630,59 @@ l_master_create_reserved_service(l_master* M, l_umedit svid, l_service_callback*
 }
 
 static l_service*
+l_master_create_service(l_master* M, l_create_service_data* req)
+{
+  l_service* S = 0;
+  l_srvcslot* slot = 0;
+  l_srvctable* stbl = 0;
+  l_service_callback* cb = 0;
+  l_fildhdl ioev_hdl = L_EMPTY_HDL;
+
+  if (req->module) {
+    cb = l_master_load_service_module(req->module);
+  } else {
+    cb = req->cb;
+  }
+
+  if (cb == 0) {
+    l_loge_s("service create fail due to null cb");
+    return 0;
+  }
+
+  if (req->ioev.enable) {
+    if (l_fildhdl_is_empty(req->ioev.hdl)) {
+      if (req->ioev.ip && req->ioev.port) {
+        if (req->ioev.listen) {
+          l_sockaddr sa;
+          if (l_sockaddr_init(&sa, l_strn_c(req->ioev.ip), req->ioev.port)) {
+            l_socket sock = l_socket_tcp_listen(&sa, 0);
+            if (l_socket_is_empty(&sock)) {
+              l_loge_s("service create fail due to listen fail");
+              return 0;
+            } else {
+              ioev_hdl = sock;
+            }
+          } else {
+            l_loge_s("service create fail due to invalid address");
+            return 0;
+          }
+        } else {
+          /* l_socket_tcp_connect */
+        }
+      } else {
+        l_loge_s("service create fail due to empty ip or port");
+        return 0;
+      }
+    } else {
+      ioev_hdl = req->ioev.hdl;
+    }
+  }
+
+  stbl = M->stbl;
+
+}
+
+static l_service*
 l_master_create_service(l_master* M, l_service_callback* cb, l_umedit flags)
 {
   l_service* S = 0;
@@ -603,7 +700,7 @@ l_master_create_service(l_master* M, l_service_callback* cb, l_umedit flags)
   }
 
   slot->srvc_seed = l_get_srvc_seed(M);
-  l_service_init(S, slot->slot_index, slot->srvc_seed, cb, flags);
+  l_service_init(S, slot->srvc_index, slot->srvc_seed, cb, flags);
   slot->service = service; /* dock the service to the table */
   slot->masks |= L_SERVICE_ALIVE;
   return service;
@@ -698,7 +795,7 @@ l_master_create_message(l_master* M, l_umedit mgid, l_ulong dest_svid, l_umedit 
 
   msg->mgid = (((l_ulong)mgid) << 32);
   msg->mssg_flags = flags;
-  msg->from_srvc = 0;
+  msg->mssg_from = 0;
   msg->from_coro = 0;
 
   /* TODO: consider flags */
@@ -712,7 +809,7 @@ l_master_create_message(l_master* M, l_umedit mgid, l_ulong dest_svid, l_umedit 
   }
 
   l_assert(l_service_nt_remote(dest_svid));
-  msg->dest_srvc = dest_svid;
+  msg->mssg_dest = dest_svid;
   msg->dest_coro = 0;
   return msg;
 }
@@ -835,16 +932,16 @@ l_master_handle_self_messages(l_master* M, l_squeue* txms)
     switch (msg->mgid >> 32) {
     case L_MSG_CREATE_SERVICE_REQ: {
       l_service* S = 0;
-      l_message* create_req = 0;
+      l_create_service_data* create_data = 0;
       l_message* on_create_msg = 0;
-      create_req = (l_create_service_req*)&msg->msgdata;
+      create_data = (l_create_service_data*)msg->mssg_data;
       /* create the service according to the request */
-      if (create_req->flags & L_SRVC_FLAG_CREATE_FROM_MODULE) {
-        S = l_master_create_service_from_module(M, create_req->module_name, create_req->flags);
-      } else if (create_req->flags & L_SRVC_FLAG_CREATE_LUA_SERVICE) {
+      if (create_data->flags & L_SRVC_FLAG_CREATE_FROM_MODULE) {
+        S = l_master_create_service_from_module(M, create_data->module_name, create_data->flags);
+      } else if (create_data->flags & L_SRVC_FLAG_CREATE_LUA_SERVICE) {
         /* TODO: how to create lua service */
       } else {
-        S = l_master_create_service(M, create_req->cb, create_req->flags);
+        S = l_master_create_service(M, create_data->cb, create_data->flags);
       }
       if (S == 0) { break; }
       // S->parent_svid = msg->mssg_from;
@@ -1018,7 +1115,7 @@ l_create_message(lnlylib_env* E, l_umedit mgid, l_umedit mgid_cust, l_ulong dest
 
   msg->mgid = (((l_ulong)mgid) << 32) | mgid_cust;
   msg->mssg_flags = flags;
-  msg->from_srvc = S->srvc_id;
+  msg->mssg_from = S->srvc_id;
   msg->from_coro = E->coro ? E->coro->coid : 0;
 
   /* TODO: consider flags */
@@ -1037,7 +1134,7 @@ l_create_message(lnlylib_env* E, l_umedit mgid, l_umedit mgid_cust, l_ulong dest
     /* TODO */
   } else {
     msg->mssg_flags &= (~L_MSSG_FLAG_REMOTE_MSG);
-    msg->dest_srvc = dest_svid;
+    msg->mssg_dest = dest_svid;
     msg->dest_coro = 0;
   }
   return msg;
@@ -1054,7 +1151,7 @@ l_send_message_impl(lnlylib_env* E, l_message* msg)
 
   if (msg->mssg_flags & L_MSSG_FLAG_REMOTE_MSG) {
     /* TODO */
-  } else if (msg->dest_srvc == msg->from_srvc) {
+  } else if (msg->mssg_dest == msg->mssg_from) {
     l_squeue_push(W->work_txme, &msg->node);
   } else {
     l_squeue_push(W->work_txmq, &msg->node);
@@ -1078,12 +1175,12 @@ l_send_master_message(lnlylib_env* E, l_umedit mgid, l_ulong dest_svid, l_umedit
 }
 
 static void /* lua message has dest coroutine need to be specified */
-l_send_lua_message(lnlylib_env* E, l_umedit mgid, l_umedit mgid_cust, l_ulong dest_srvc, l_ulong dest_coro, l_umedit flags, void* data, l_umedit size)
+l_send_lua_message(lnlylib_env* E, l_umedit mgid, l_umedit mgid_cust, l_ulong mssg_dest, l_ulong dest_coro, l_umedit flags, void* data, l_umedit size)
 {
   if (mgid < L_MIN_USER_MSG_ID) {
     l_loge_1("invalid message id %d", ld(mgid));
   } else {
-    l_message* msg = l_create_message(E, mgid, mgid_cust, dest_srvc, flags, data, size);
+    l_message* msg = l_create_message(E, mgid, mgid_cust, mssg_dest, flags, data, size);
     if (msg) {
       msg->dest_coro = dest_coro;
       l_send_message_impl(E, msg);
@@ -1101,24 +1198,36 @@ l_send_message(lnlylib_env* E, l_umedit mgid, l_umedit mgid_cust, l_ulong dest_s
   }
 }
 
+L_EXTERN l_bool
+l_create_service(lnlylib_env* E, l_create_service_data* data)
+{}
+
 L_EXTERN void
 l_create_service(lnlylib_env* E, l_service_callback* cb, l_uint flags)
 {
-  l_create_service_req create_service_req;
+  l_create_service_data create_service_req;
   flags &= ~(L_SRVC_FLAG_CREATE_FROM_MODULE | L_SRVC_FLAG_CREATE_LUA_SERVICE);
   create_service_req.flags = flags;
   create_service_req.cb = cb;
-  l_send_master_message(E, L_MSG_CREATE_SERVICE_REQ, 0, 0, &create_service_req, sizeof(l_create_service_req));
+  l_send_master_message(E, L_MSG_CREATE_SERVICE_REQ, 0, 0, &create_service_req, sizeof(l_create_service_data));
 }
+
+L_EXTERN l_ulong
+l_create_listen_service(lnlylib_env* E, l_strn ip, l_ushort port, l_service_callback* accept_service_cb)
+{}
+
+L_EXTERN l_ulong
+l_create_connect_service(lnlylib_env* E, l_strn ip, l_ushort port, l_service_callback* connect_service_cb)
+{}
 
 L_EXTERN void
 l_create_service_from_module(lnlylib_env* E, l_strn module_name, l_uint flags)
 {
-  l_create_service_req create_service_req;
+  l_create_service_data create_service_req;
   flags &= ~(L_SRVC_FLAG_CREATE_LUA_SERVICE);
   create_service_req.flags = flags | L_SRVC_FLAG_CREATE_FROM_MODULE;
   create_service_req.module_name = module_name;
-  l_send_master_message(E, L_MSG_CREATE_SERVICE_REQ, 0, 0, &create_service_req, sizeof(l_create_service_req));
+  l_send_master_message(E, L_MSG_CREATE_SERVICE_REQ, 0, 0, &create_service_req, sizeof(l_create_service_data));
 }
 
 L_EXTERN void
@@ -1425,7 +1534,7 @@ ll_send_msg(lua_State* co)
 
 local heart = lnlylib_heartbeat
 msg = heart.wait_message(msgid) -- the msg content is moved to stack by c layer
-send_msg(mgid, dest_srvc, flags, data)
+send_msg(mgid, mssg_dest, flags, data)
 send_rsp(msg, mgid, flags, data)
 
 static int

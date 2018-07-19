@@ -1,10 +1,10 @@
 #define LNLYLIB_API_IMPL
 #include "core/fsys.h"
 
-static l_stanfile
-ll_stanfile_open(const void* name, const char* mode)
+static l_stdfile
+l_impl_stdfile_open(const void* name, const char* mode)
 {
-  l_stanfile s = {0};
+  l_stdfile s = {0};
   if (name && mode) {
     s.file = fopen((const char*)name, mode);
     if (s.file == 0) {
@@ -16,10 +16,10 @@ ll_stanfile_open(const void* name, const char* mode)
   return s;
 }
 
-static l_stanfile
-ll_stanfile_open_nobuf(const void* name, const char* mode)
+static l_stdfile
+l_impl_stdfile_open_nobuf(const void* name, const char* mode)
 {
-  l_stanfile s = ll_stanfile_open(name, "wb");
+  l_stdfile s = l_impl_stdfile_open(name, "wb");
   if (s.file) {
     setbuf((FILE*)s.file, 0);
   }
@@ -27,7 +27,7 @@ ll_stanfile_open_nobuf(const void* name, const char* mode)
 }
 
 static void
-ll_stanfile_reopen(FILE* file, const void* name, const char* mode)
+l_impl_stdfile_reopen(FILE* file, const void* name, const char* mode)
 {
   if (name && mode) {
     if (freopen((const char*)name, mode, file) == 0) {
@@ -38,50 +38,50 @@ ll_stanfile_reopen(FILE* file, const void* name, const char* mode)
   }
 }
 
-L_EXTERN l_stanfile
-l_stanfile_open_read(const void* name)
+L_EXTERN l_stdfile
+l_stdfile_open_read(const void* name)
 {
-  return ll_stanfile_open(name, "rb");
+  return l_impl_stdfile_open(name, "rb");
 }
 
-L_EXTERN l_stanfile
-l_stanfile_open_read_nobuf(const void* name)
+L_EXTERN l_stdfile
+l_stdfile_open_read_nobuf(const void* name)
 {
-  return ll_stanfile_open_nobuf(name, "rb");
+  return l_impl_stdfile_open_nobuf(name, "rb");
 }
 
-L_EXTERN l_stanfile
-l_stanfile_open_write(const void* name)
+L_EXTERN l_stdfile
+l_stdfile_open_write(const void* name)
 {
-  return ll_stanfile_open(name, "wb");
+  return l_impl_stdfile_open(name, "wb");
 }
 
-L_EXTERN l_stanfile
-l_stanfile_open_write_nobuf(const void* name)
+L_EXTERN l_stdfile
+l_stdfile_open_write_nobuf(const void* name)
 {
-  return ll_stanfile_open_nobuf(name, "wb");
+  return l_impl_stdfile_open_nobuf(name, "wb");
 }
 
-L_EXTERN l_stanfile
-l_stanfile_open_append(const void* name)
+L_EXTERN l_stdfile
+l_stdfile_open_append(const void* name)
 {
-  return ll_stanfile_open(name, "ab");
+  return l_impl_stdfile_open(name, "ab");
 }
 
-L_EXTERN l_stanfile
-l_stanfile_open_append_nobuf(const void* name)
+L_EXTERN l_stdfile
+l_stdfile_open_append_nobuf(const void* name)
 {
-  return ll_stanfile_open_nobuf(name, "ab");
+  return l_impl_stdfile_open_nobuf(name, "ab");
 }
 
-L_EXTERN l_stanfile
-l_stanfile_open_read_write(const void* name)
+L_EXTERN l_stdfile
+l_stdfile_open_read_write(const void* name)
 {
-  return ll_stanfile_open(name, "rb+");
+  return l_impl_stdfile_open(name, "rb+");
 }
 
 L_EXTERN void
-l_stanfile_close(l_stanfile* s)
+l_stdfile_close(l_stdfile* s)
 {
   if (s->file == 0) {
     return;
@@ -93,13 +93,13 @@ l_stanfile_close(l_stanfile* s)
 }
 
 L_EXTERN void
-l_stanfile_clearerr(l_stanfile* s)
+l_stdfile_clearerr(l_stdfile* s)
 {
   clearerr((FILE*)s->file);
 }
 
 L_EXTERN l_bool
-l_stanfile_flush(l_stanfile* s)
+l_stdfile_flush(l_stdfile* s)
 {
   if (s->file == 0) {
     return false;
@@ -113,7 +113,7 @@ l_stanfile_flush(l_stanfile* s)
 }
 
 L_EXTERN l_bool
-l_stanfile_rewind(l_stanfile* s)
+l_stdfile_rewind(l_stdfile* s)
 {
   if (s->file == 0) {
     return false;
@@ -127,7 +127,7 @@ l_stanfile_rewind(l_stanfile* s)
 }
 
 L_EXTERN l_bool
-l_stanfile_seekto(l_stanfile* s, l_int pos)
+l_stdfile_seekto(l_stdfile* s, l_int pos)
 {
   if (s->file == 0 || pos < 0 || pos > L_MAX_INT_IO) {
     l_loge_1("invalid parameter %d", ld(pos));
@@ -142,7 +142,7 @@ l_stanfile_seekto(l_stanfile* s, l_int pos)
 }
 
 L_EXTERN l_bool
-l_stanfile_forword(l_stanfile* s, l_int offset)
+l_stdfile_forword(l_stdfile* s, l_int offset)
 {
   if (s->file == 0 || offset < 0 || offset > L_MAX_INT_IO) {
     l_loge_1("invalid parameter %d", ld(offset));
@@ -157,7 +157,7 @@ l_stanfile_forword(l_stanfile* s, l_int offset)
 }
 
 L_EXTERN l_bool
-l_stanfile_backward(l_stanfile* s, l_int offset)
+l_stdfile_backward(l_stdfile* s, l_int offset)
 {
   if (s->file == 0 || offset < 0 || offset > L_MAX_INT_IO) {
     l_loge_1("invalid parameter %d", ld(offset));
@@ -172,7 +172,7 @@ l_stanfile_backward(l_stanfile* s, l_int offset)
 }
 
 L_EXTERN l_int
-l_stanfile_read(l_stanfile* s, void* out, l_int size)
+l_stdfile_read(l_stdfile* s, void* out, l_int size)
 {
   if (s->file == 0 || out == 0 || size < 0 || size > L_MAX_INT_IO) {
     l_loge_1("invalid parameter %d", ld(size));
@@ -197,7 +197,7 @@ l_stanfile_read(l_stanfile* s, void* out, l_int size)
 }
 
 L_EXTERN l_int
-l_stanfile_write(l_stanfile* s, const void* p, l_int len)
+l_stdfile_write(l_stdfile* s, const void* p, l_int len)
 {
   if (s->file == 0 || p == 0 || len < 0 || len > L_MAX_INT_IO) {
     l_loge_1("invalid parameter %d", ld(len));
@@ -219,12 +219,12 @@ l_stanfile_write(l_stanfile* s, const void* p, l_int len)
 }
 
 L_EXTERN l_int
-l_stanfile_write_strn(l_stanfile* out, l_strn s) {
-  return l_stanfile_write(out, s.start, s.len);
+l_stdfile_write_strn(l_stdfile* out, l_strn s) {
+  return l_stdfile_write(out, s.start, s.len);
 }
 
 L_EXTERN l_int
-l_stanfile_put(l_stanfile* s, l_byte ch)
+l_stdfile_put(l_stdfile* s, l_byte ch)
 {
   if (s->file == 0) {
     return 0;
@@ -237,7 +237,7 @@ l_stanfile_put(l_stanfile* s, l_byte ch)
 }
 
 L_EXTERN l_int
-l_stanfile_get(l_stanfile* s, l_byte* ch)
+l_stdfile_get(l_stdfile* s, l_byte* ch)
 {
   if (s->file == 0) {
     return 0;
@@ -252,7 +252,7 @@ l_stanfile_get(l_stanfile* s, l_byte* ch)
 }
 
 L_EXTERN l_bool
-l_stanfile_remove(const void* name)
+l_stdfile_remove(const void* name)
 {
   if (name) {
     if (remove((const char*)name) == 0) {
@@ -268,7 +268,7 @@ l_stanfile_remove(const void* name)
 }
 
 L_EXTERN l_bool
-l_stanfile_rename(const void* from, const void* to)
+l_stdfile_rename(const void* from, const void* to)
 {
   /* int rename(const char* oldname, const char* newname);
    * Changes the name of the file or directory specified by oldname
@@ -293,20 +293,20 @@ l_stanfile_rename(const void* from, const void* to)
 }
 
 L_EXTERN void
-l_stanfile_redirect_stdout(const void* name)
+l_stdfile_redirect_stdout(const void* name)
 {
-  ll_stanfile_reopen(stdout, name, "wb");
+  l_impl_stdfile_reopen(stdout, name, "wb");
 }
 
 L_EXTERN void
-l_stanfile_redirect_stderr(const void* name)
+l_stdfile_redirect_stderr(const void* name)
 {
-  ll_stanfile_reopen(stderr, name, "wb");
+  l_impl_stdfile_reopen(stderr, name, "wb");
 }
 
 L_EXTERN void
-l_stanfile_redirect_stdin(const void* name)
+l_stdfile_redirect_stdin(const void* name)
 {
-  ll_stanfile_reopen(stdin, name, "rb");
+  l_impl_stdfile_reopen(stdin, name, "rb");
 }
 
