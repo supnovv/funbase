@@ -2,9 +2,9 @@
 #include "core/beat.h"
 #include "osi/base.h"
 
-#define L_SERVICE_ALIVE     0x00010000
-#define L_SOCK_FLAG_LISTEN  0x00020000
-#define L_SOCK_FLAG_CONNECT 0x00040000
+#define L_SERVICE_ALIVE    0x00010000
+#define L_SOCK_FLAG_LISTEN 0x00020000
+#define L_SOCK_FLAG_CONN_ONGOING 0x00040000
 #define L_MIN_USER_SERVICE_ID 256
 #define L_MIN_SRVC_TABLE_SIZE 1024
 #define L_SERVICE_LAUNCHER 0x01
@@ -637,6 +637,7 @@ l_master_create_service(l_master* M, l_create_service_data* req)
   l_srvctable* stbl = 0;
   l_service_callback* cb = 0;
   l_fildhdl ioev_hdl = L_EMPTY_HDL;
+  l_umedit flags = 0;
 
   if (req->module) {
     cb = l_master_load_service_module(req->module);
@@ -651,27 +652,36 @@ l_master_create_service(l_master* M, l_create_service_data* req)
 
   if (req->ioev.enable) {
     if (l_fildhdl_is_empty(req->ioev.hdl)) {
-      if (req->ioev.ip && req->ioev.port) {
-        if (req->ioev.listen) {
-          l_sockaddr sa;
-          if (l_sockaddr_init(&sa, l_strn_c(req->ioev.ip), req->ioev.port)) {
-            l_socket sock = l_socket_tcp_listen(&sa, 0);
-            if (l_socket_is_empty(&sock)) {
-              l_loge_s("service create fail due to listen fail");
-              return 0;
-            } else {
-              ioev_hdl = sock;
-            }
-          } else {
-            l_loge_s("service create fail due to invalid address");
-            return 0;
-          }
-        } else {
-          /* l_socket_tcp_connect */
-        }
-      } else {
+      l_sockaddr sa;
+      if (!req->ioev.ip || !req->ioev.poart) {
         l_loge_s("service create fail due to empty ip or port");
         return 0;
+      }
+      if (!l_sockaddr_init(&sa, l_strn_c(req->ioev.ip), req->ioev.port)) {
+        l_loge_s("service create fail due to invalid address");
+        return 0;
+      }
+      if (req->ioev.listen) {
+        l_socket sock;
+        sock = l_socket_tcp_listen(&sa, 0);
+        if (l_socket_is_empty(&sock)) {
+          l_loge_s("service create fail due to listen fail");
+          return 0;
+        }
+        ioev_hdl = sock;
+        flags |= L_SOCK_FLAG_LISTEN;
+      } else {
+        l_socket sock;
+        l_bool done = false;
+        sock = l_socket_tcp_connect(&sa, &done);
+        if (l_socket_is_empty(&sock)) {
+          l_loge_s("service create fail due to connect fail");
+          return 0;
+        }
+        ioev_hdl = sock;
+        if (!done) {
+          flags |= L_SOCK_FLAG_CONN_ONGOING;
+        }
       }
     } else {
       ioev_hdl = req->ioev.hdl;

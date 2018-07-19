@@ -1429,7 +1429,7 @@ l_socket_accept(l_socket* skt, void (*cb)(void*, l_socketconn*), void* ud)
       so skip this connection and continue to accept next connections
       in the kernel queue until it is empty */
       l_logw_1(LNUL, "accept %s and continue", lserror(n));
-      break;
+      break; /* continue the for loop */
     case EBADF: /* sockfd is not an open fd */
     case EFAULT: /* the addr is not in a writable part of the user address space */
     case EINVAL: /* sockfd is not listening for connections, or addrlen is invalid */
@@ -1482,8 +1482,8 @@ SIGKILL信号（该信号不能被捕获）。这么做留给所有运行进程�
 如5.12节所讨论的一样，我们必须在客户中使用select或poll函数，以防TCP断连时客户阻塞在
 其他的函数中而不能快速知道TCP已经断连了。*/
 
-static l_bool
-l_impl_socket_connect(int sock, const l_sockaddr* addr)
+static int
+l_impl_socket_connect(int sock, const l_impl_sockaddr* sa)
 {
   /** connect - initiate a conneciton on a socket **
   #include <sys/types.h>
@@ -1586,26 +1586,80 @@ l_impl_socket_connect(int sock, const l_sockaddr* addr)
 　断的套接字没有被内核自动重启，那么它会返回EINTR，此时不能再次调用connect等待未完成的连接，
 　这样做将导致返回EADDRINUSE错误，我们只能调用select，就像对于非阻塞connect所做的那样，
 　连接建立成功时返回套接字可写条件，连接建立失败时select返回套接字既可读也可写条件。*/
-  int n = 0;
-  const llsockaddr* sa = (const llsockaddr*)addr;
-  if (connect(sock, &(sa->sa), sa->len) == 0) {
-    return true;
+  int status = 0;
+
+  for (; ;) {
+    if (connect(sock, &(sa->sa), sa->len) == 0) {
+      return 0;
+    }
+
+    status = errno;
+    l_logd_1(LNUL, "connect %s", lserror(status));
+
+    switch (status) {
+    case EINTR: /* the system call was interrupted by a singal that was caught */
+      break; /* continue to for loop */
+    case EISCONN: /* the socket is already connected */
+      return 0;
+    case EALREADY: /* the socket is nonblocking and a previous connection attempt has not yet been completed */
+    case EINPROGRESS: /* the socket is nonblocking and the connection cannot be completed immediately */
+      return -1; /* not compeleted yet */
+    default:
+      l_loge_1(LNUL, "connect %s", lserror(status));
+      return -2;
+    }
   }
-  n = errno;
-  switch (n) {
-  case EISCONN:
-    l_logw_s(LNUL, "socket already connected");
-    return true;
-  case EINPROGRESS:
-  case EALREADY:
-  case EINTR:
-    errno = EINPROGRESS; /* the connection doesn't complete yet */
-    break;
-  default:
-    l_loge_1(LNUL, "connect %s", lserror(n));
-    break;
+}
+
+L_EXTERN l_socket
+l_socket_tcp_connect(const l_sockaddr* addr, l_bool* done)
+{
+  /** If connect() fails, consider the state of the socket as unspecified.
+  Protable appliations should close the socket and create a new one for
+  reconnecting. **/
+
+  l_socket sock;
+  const l_impl_sockaddr* sa = 0;
+  int domain = 0;
+  int status = 0;
+
+  sa = (const l_impl_sockaddr*)addr;
+  domain = sa->sa.sa_family;
+
+  if (domain != AF_INET && domain != AF_INET6) {
+    l_loge_s(LNUL, "listen wrong address family");
+    return l_empty_socket();
   }
-  return false;
+
+  sock = l_socket_create(domain, SOCK_STREAM, IPPROTO_TCP);
+  if (l_socket_is_empty(&sock)) {
+    return sock;
+  }
+
+  status = l_impl_socket_connect(sock.unifd, sa);
+  if (status == 0) {
+    *done = true;
+    return sock;
+  } else if (status == -1) {
+    *done = false;
+    return sock;
+  } else {
+    *done = false;
+    l_socket_close(&sock);
+    return l_empty_socket();
+  }
+}
+
+L_EXTERN l_bool
+l_socket_cmpl_connect(l_socket sock)
+{
+  /** It is possible to select(2) or poll(2)
+  for completion by selecting the socket for writing.  After
+  select(2) indicates writability, use getsockopt(2) to read the
+  SO_ERROR option at level SOL_SOCKET to determine whether
+  connect() completed successfully (SO_ERROR is zero) or
+  unsuccessfully (SO_ERROR is one of the usual error codes
+  listed here, explaining the reason for the failure). **/
 }
 
 static l_int
@@ -1669,7 +1723,7 @@ l_impl_read(int fd, void* out, l_int size)
     case EINTR:
       /* interrupted by a signal before read any bytes,
       try to read again. */
-      continue;
+      break; /* continue the for loop */
     case EAGAIN:
     case EWOULDBLOCK:
       return -1; /* data is not available currently */
@@ -1765,7 +1819,7 @@ l_impl_write(int fd, const void* data, l_int size)
     case EINTR:
       /* interrupted by a signal before written any bytes,
       try to read again. */
-      continue;
+      break; /* continue the for loop */
     case EAGAIN:
     case EWOULDBLOCK:
       return -1; /* cannot write currently */
