@@ -203,6 +203,8 @@ typedef struct {
   l_umedit mgid_cust;
 } l_coroutine;
 
+/* lua_State need alloc about 5K memory
+each coroutine need alloc about 1K memory */
 typedef struct l_service {
   l_smplnode node; /* chained in global q */
   l_squeue srvc_msgq;
@@ -368,7 +370,9 @@ typedef struct {
 typedef struct l_message {
   l_smplnode node;
   l_ulong mssg_dest;
+  l_ulong sess_dest;
   l_ulong mssg_from;
+  l_ulong sess_from;
   l_umedit mssg_id; /* high 32-bit is id, lower 32-bit's behavior is user defined */
   l_umedit mgid_cust; /* lower 32-bit's behavior is user defined */
   l_umedit mssg_flags;
