@@ -2388,27 +2388,27 @@ static uint32_t l_epoll_mask[] = {
   /* 0x09 */ 0
 };
 
-static l_umedit l_ioev_rd[] = {
+static l_ushort l_ioev_rd[] = {
   0, L_EVENT_IO_READ
 };
 
-static l_umedit l_ioev_wr[] = {
+static l_ushort l_ioev_wr[] = {
   0, L_EVENT_IO_WRITE
 };
 
-static l_umedit l_ioev_pri[] = {
+static l_ushort l_ioev_pri[] = {
   0, L_EVENT_IO_PRI
 };
 
-static l_umedit l_ioev_rdh[] = {
+static l_ushort l_ioev_rdh[] = {
   0, L_EVENT_IO_RDH
 };
 
-static l_umedit l_ioev_hup[] = {
+static l_ushort l_ioev_hup[] = {
   0, L_EVENT_IO_HUP
 };
 
-static l_umedit l_ioev_err[] = {
+static l_ushort l_ioev_err[] = {
   0, L_EVENT_IO_ERR
 };
 
@@ -2422,7 +2422,7 @@ l_get_epoll_masks(l_umedit masks)
           EPOLLHUP | EPOLLERR);
 }
 
-static l_umedit
+static l_ushort
 l_get_ioev_masks(struct epoll_event* ev)
 {
   uint32_t masks = ev->events;
@@ -2435,7 +2435,7 @@ l_get_ioev_masks(struct epoll_event* ev)
 }
 
 L_EXTERN l_bool
-l_ioevmgr_add(l_ioevmgr* thiz, l_filehdl fd, l_ulong ud, l_umedit masks)
+l_ioevmgr_add(l_ioevmgr* thiz, l_filehdl fd, l_ulong ud, l_ushort masks)
 {
   /** event masks **
   The bit masks can be composed using the following event types:
@@ -2507,7 +2507,7 @@ l_ioevmgr_add(l_ioevmgr* thiz, l_filehdl fd, l_ulong ud, l_umedit masks)
 }
 
 L_EXTERN l_bool
-l_ioevmgr_mod(l_ioevmgr* thiz, l_filehdl fd, l_ulong ud, l_umedit masks)
+l_ioevmgr_mod(l_ioevmgr* thiz, l_filehdl fd, l_ulong ud, l_ushort masks)
 {
   l_epollmgr* mgr = (l_epollmgr*)thiz;
   struct epoll_event ev;

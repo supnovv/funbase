@@ -174,6 +174,9 @@ int main(void)
     l_write_line(file, "#error pointer-size integer type not found");
   }
 
+  l_write_line(file, "undef L_EMPTY_HDL");
+  l_write_line(file, "#define L_EMPTY_HDL l_empty_filehdl()");
+
 #if defined(L_PLAT_WINDOWS)
   l_write_line(file, "typedef struct { HANDLE winfd; } l_filehdl;");
 #elif defined(L_PLAT_LINUX)

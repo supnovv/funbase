@@ -2,18 +2,19 @@
 #include "core/beat.h"
 #include "osi/base.h"
 
-#define L_SERVICE_ALIVE    0x00010000
-#define L_SOCK_FLAG_LISTEN 0x00020000
-#define L_SOCK_FLAG_CONN_ONGOING 0x00040000
+#define L_SERVICE_ALIVE 0x01
+#define L_SOCK_FLAG_LISTEN 0x02
+#define L_SOCK_FLAG_CONNECT 0x04
+#define L_SOCK_FLAG_INPROGRESS 0x08
 #define L_MIN_USER_SERVICE_ID 256
 #define L_MIN_SRVC_TABLE_SIZE 1024
 #define L_SERVICE_LAUNCHER 0x01
 
-#define L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ 0x01
-#define L_SRVC_FLAG_STOP_SERVICE 0x02
-#define L_SRVC_FLAG_CREATE_FROM_MODULE 0x04
-#define L_SRVC_FLAG_CREATE_LUA_SERVICE 0x08
-#define L_SRVC_FLAG_DESTROY_SERVICE 0x04
+#define L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ 0x02
+#define L_SRVC_FLAG_STOP_SERVICE 0x04
+#define L_SRVC_FLAG_CREATE_FROM_MODULE 0x08
+#define L_SRVC_FLAG_CREATE_LUA_SERVICE 0x10
+#define L_SRVC_FLAG_DESTROY_SERVICE 0x20
 #define L_MSSG_FLAG_FREE_EXTRA_DATA 0x01
 #define L_WORK_FLAG_QUIT 0x01
 #define L_MAST_FLAG_QUIT 0x01
@@ -32,7 +33,8 @@ typedef struct {
   l_squeue bkmq; /* service backup message q */
   l_umedit srvc_index;
   l_umedit srvc_seed;
-  l_umedit masks;
+  l_ushort flags;
+  l_ushort events;
   l_filehdl iohdl;
 } l_srvcslot;
 
@@ -43,8 +45,9 @@ l_srvcslot_init(l_srvcslot* slot, l_umedit i)
   l_squeue_init(&slot->bkmq);
   slot->srvc_index = i;
   slot->srvc_seed = 0;
-  slot->masks = 0;
-  slot->iohdl = l_empty_filehdl();
+  slot->flags = 0;
+  slot->events = 0;
+  slot->iohdl = L_EMPTY_HDL;
 }
 
 typedef struct {
@@ -357,7 +360,7 @@ typedef struct {
   const char* module;
   l_service_callback* cb;
   l_srvc_ioev_data ioev;
-  void* param;
+  void* svud;
 } l_create_service_data;
 
 typedef struct {
@@ -591,6 +594,7 @@ static void
 l_service_init(l_service* S, l_umedit svid, l_umedit seed, l_service_callback* cb, l_umedit flags)
 {
   l_squeue_init(&S->srvc_msgq);
+  S->ioev_hdl = L_EMPTY_HDL;
   S->srvc_flags = flags;
   S->srvc_id = (((l_ulong)svid) << 32) | seed;
   S->coro_tabl = 0;
@@ -603,45 +607,163 @@ l_service_free_co(l_service* S)
 {
 }
 
-static l_service*
-l_master_create_reserved_service(l_master* M, l_umedit svid, l_service_callback* cb, l_umedit flags)
+static l_service_callback*
+l_master_load_service_module(const char* module)
 {
-  l_service* S = 0;
-  l_srvcslot* slot = 0;
-  l_srvctable* stbl = &M->stbl;
+  l_service_callback* cb = 0;
+  l_dynlib hdl = l_empty_dynlib();
 
-  if (svid >= L_MIN_USER_SERVICE_ID || svid >= stbl->capacity) {
-    l_loge_1("invalid reserved service id %d", ld(svid));
+  hdl = l_dynlib_open2(l_const_strn(LNLYLIB_CLIB_DIR), module_name); /* TODO: 1. do module cache? 2. multiple service can exist in one module */
+  if (l_dynlib_is_empty(&hdl)) {
+    l_loge_1("open library %strn failed", lstrn(&module_name));
     return 0;
   }
 
-  slot = stbl->slot_arr + svid;
-  if (slot->service || (slot->masks & L_SERVICE_ALIVE)) {
-    l_loge_1("reserved service %d already created", ld(svid));
+#if 0
+  cb.service_proc = (void (*)(lnlylib_env*))l_dynlib_sym2(&hdl, module_name, l_const_strn("service_proc"));
+  if (cb.service_proc == 0) {
+    l_loge_1("load %strn_service_proc failed", l_strn(&module_name));
     return 0;
   }
 
-  S = (l_service*)l_squeue_pop(&M->mast_frsq);
-  if (S == 0) {
-    S = L_MALLOC(l_service);
+  cb.service_on_create = (void* (*)(lnlylib_env*))l_dynlib_sym2(&hdl, module_name, l_const_strn("service_on_create"));
+  cb.service_on_destroy = (void (*)(lnlylib_env*))l_dynlib_sym2(&hdl, module_name, l_const_strn("service_on_destroy"));
+#endif
+
+  cb = (l_service_callback*)l_dynlib_sym2(&hdl, module_name, l_const_strn("callback"));
+  if (cb->service_proc == 0) {
+    l_loge_1("load %strn_service_proc failed", l_strn(&module_name));
+    return 0;
   }
 
-  slot->srvc_seed = l_get_srvc_seed(M);
-  l_service_init(S, svid, slot->srvc_seed, cb, flags);
-  slot->service = service; /* dock the service to the table */
-  slot->masks |= L_SERVICE_ALIVE;
-  return service;
+  return cb;
 }
 
+typedef struct {
+  l_sockaddr local;
+  l_umedit conns;
+  l_dqueue connq;
+  l_dqueue freeq;
+} l_socket_listen_service_data;
+
+static void*
+l_socket_listen_service_on_create(lnlylib_env* E)
+{
+  l_socket_listen_service_data* data = 0;
+  data = L_MALLOC_FUNC(E, l_socket_listen_service_data);
+  data->conss = 0;
+  l_dqueue_init(&data->connq);
+  l_dqueue_init(&data->freeq);
+  retrun data;
+}
+
+static void
+l_socket_listen_service_on_destroy(lnlylib_env* E)
+{
+  l_socket_listen_service_data* data = 0;
+
+  data = (l_socket_listen_service_data*)E->svud;
+  if (data) {
+    L_MFREE_FUNC(E, data);
+  }
+
+  E->svud = 0;
+}
+
+static void
+l_socket_listen_service_accept_connection(void* ud, l_sockconn* conn)
+{
+  lnlylib_env* E = (lnlylib_env*)ud;
+  l_socket_listen_service_data* data = 0;
+  l_socket_incoming_conn_service_data* conn_srvc_data = 0; 
+  l_sockaddr* remote = 0;
+
+  data = (l_socket_listen_service_data*)E->svud;
+  conn_srvc_data = (l_socket_incoming_conn_service_data*)l_dqueue_pop(&data->freeq);
+  if (conn_srvc_data == 0) {
+    conn_srvc_data = L_MALLOC_FUNC(E, l_socket_incoming_conn_service_data);
+  }
+
+  remote = &conn->remote;
+  conn_srvc_data.listen_service = E->S->srvc_id;
+  conn_srvc_data.rmt_port = l_sockaddr_port(remote);
+  l_socketaddr_ipstr(remote, &conn_srvc_data.rmt_ip, sizeof(l_ipaddr));
+
+  l_create_service(E, (l_create_service_data){
+    l_socket_incoming_conn_service_cb, 0,
+    L_USEHDL(conn->sock),
+    conn_srvc_data
+  });
+}
+
+static void
+l_socket_listen_service_proc(lnlylib_env* E)
+{
+  l_umedit mgid = 0;
+  l_service* S = E->S;
+  l_socket_listen_service_data* data = 0;
+
+  mgid = E->MSG->mssg_id;
+  data = (l_socket_listen_service_data*)E->svud;
+
+  switch (mgid) {
+  /* messages from master */
+  case L_MSG_SOCK_ACCEPT_IND:
+    l_socket_accept(&S->ioev_hdl, l_socket_listen_service_accept_connection, E);
+    break;
+  case L_MSG_SOCK_ERROR:
+    break;
+  case L_MSG_CONN_SRVC_CREATED:
+    break;
+  /* messages from accepted connection services */
+  case L_MSG_SOCK_DISC_NTF:
+    break;
+  default:
+    break;
+  }
+}
+
+typedef struct {
+  l_linknode node;
+  l_ulong listen_service;
+  l_ipaddr rmt_ip;
+  l_ushort rmt_port;
+} l_socket_incoming_conn_service_data;
+
+static void
+l_socket_incoming_conn_service_proc(lnlylib_env* E)
+{
+  l_message* MSG = E->MSG;
+
+  switch (MSG->mssg_id) {
+  case L_MSG_SOCK_CONN_IND:
+    break;
+  case L_MSG_SOCK_DISC_IND:
+    break;
+  case L_MSG_SOCK_ERROR:
+    break;
+  case L_MSG_DATA_READY_RX:
+    break;
+  case L_MSG_DATA_READY_TX:
+
+}
+
+typedef struct {
+  l_sockaddr local;
+  l_ipaddr rmt_ip;
+  l_ushort rmt_port;
+} l_socket_outgoing_connection_service_data;
+
 static l_service*
-l_master_create_service(l_master* M, l_create_service_data* req)
+l_master_create_service(l_master* M, l_create_service_data* req, l_umedit svid)
 {
   l_service* S = 0;
   l_srvcslot* slot = 0;
   l_srvctable* stbl = 0;
   l_service_callback* cb = 0;
   l_fildhdl ioev_hdl = L_EMPTY_HDL;
-  l_umedit flags = 0;
+  l_ushort flags = 0;
+  l_ushort events = 0;
 
   if (req->module) {
     cb = l_master_load_service_module(req->module);
@@ -674,6 +796,7 @@ l_master_create_service(l_master* M, l_create_service_data* req)
         }
         ioev_hdl = sock;
         flags |= L_SOCK_FLAG_LISTEN;
+        events |= L_IO_EVENT_READ | L_IO_EVENT_ERR;
       } else {
         l_socket sock;
         l_bool done = false;
@@ -683,9 +806,9 @@ l_master_create_service(l_master* M, l_create_service_data* req)
           return 0;
         }
         ioev_hdl = sock;
-        if (!done) {
-          flags |= L_SOCK_FLAG_CONN_ONGOING;
-        }
+        flags |= L_SOCK_FLAG_CONNECT;
+        if (!done) flags |= L_SOCK_FLAG_INPROGRESS;
+        events |= L_IO_EVENT_RDWR | L_IO_EVENT_ERR | L_IO_EVENT_HUP | L_IO_EVENT_RHP;
       }
     } else {
       ioev_hdl = req->ioev.hdl;
@@ -694,18 +817,23 @@ l_master_create_service(l_master* M, l_create_service_data* req)
 
   stbl = M->stbl;
 
-}
+  if (svid != 0) {
+    if (svid >= L_MIN_USER_SERVICE_ID || svid >= stbl->capacity) {
+      l_loge_1("invalid reserved service id %d", ld(svid));
+      return 0;
+    }
 
-static l_service*
-l_master_create_service(l_master* M, l_service_callback* cb, l_umedit flags)
-{
-  l_service* S = 0;
-  l_srvcslot* slot = 0;
-  l_srvctable* stbl = &M->stbl;
-
-  slot = l_srvctable_alloc_slot(stbl);
-  if (slot == 0) {
-    return 0;
+    slot = stbl->slot_arr + svid;
+    if (slot->service || (slot->flags & L_SERVICE_ALIVE)) {
+      l_loge_1("reserved service %d already created", ld(svid));
+      return 0;
+    }
+  } else {
+    slot = l_srvctable_alloc_slot(stbl);
+    if (slot == 0) {
+      l_loge_s("service create fail due to slot alloc");
+      return 0;
+    }
   }
 
   S = (l_service*)l_squeue_pop(&M->mast_frsq);
@@ -713,42 +841,26 @@ l_master_create_service(l_master* M, l_service_callback* cb, l_umedit flags)
     S = L_MALLOC(l_service);
   }
 
+  if (S == 0) {
+    l_loge_s("service create fail due to malloc");
+    return 0;
+  }
+
   slot->srvc_seed = l_get_srvc_seed(M);
-  l_service_init(S, slot->srvc_index, slot->srvc_seed, cb, flags);
+  l_service_init(S, slot->srvc_index, slot->srvc_seed, cb, 0);
+  S->ioev_hdl = ioev_hel;
+
   slot->service = service; /* dock the service to the table */
-  slot->masks |= L_SERVICE_ALIVE;
+  slot->flags |= L_SERVICE_ALIVE | flags;
+  slot->events |= events;
+  slot->iohdl = ioev_hdl;
+
+  if (l_filehdl_nt_empty(&ioev_hdl)) { /* manager this hdl's events */
+    l_ioevmgr_add(&M->evmgr, ioev_hdl, S->srvc_id, slot->events);
+    slot->events = 0; /* clear events to prepare receive incoming events */
+  }
+
   return service;
-}
-
-static l_service*
-l_master_create_service_from_module(l_master* M, l_strn module_name, l_umedit flags)
-{
-  l_service_callback* cb = 0;
-  l_dynlib hdl = l_empty_dynlib();
-
-  hdl = l_dynlib_open2(l_const_strn(LNLYLIB_CLIB_DIR), module_name); /* TODO: 1. do module cache? 2. multiple service can exist in one module */
-  if (l_dynlib_is_empty(&hdl)) {
-    l_loge_1("open library %strn failed", lstrn(&module_name));
-    return 0;
-  }
-
-#if 0
-  cb.service_proc = (void (*)(lnlylib_env*))l_dynlib_sym2(&hdl, module_name, l_const_strn("service_proc"));
-  if (cb.service_proc == 0) {
-    l_loge_1("load %strn_service_proc failed", l_strn(&module_name));
-    return 0;
-  }
-
-  cb.service_on_create = (void* (*)(lnlylib_env*))l_dynlib_sym2(&hdl, module_name, l_const_strn("service_on_create"));
-  cb.service_on_destroy = (void (*)(lnlylib_env*))l_dynlib_sym2(&hdl, module_name, l_const_strn("service_on_destroy"));
-#endif
-
-  cb = (l_service_callback*)l_dynlib_sym2(&hdl, module_name, l_const_strn("callback"));
-  if (cb->service_proc == 0) {
-    l_loge_1("load %strn_service_proc failed", l_strn(&module_name));
-    return 0;
-  }
-  return l_master_create_service(M, cb, flags);
 }
 
 L_EXTERN void
@@ -817,9 +929,15 @@ l_master_create_message(l_master* M, l_umedit mgid, l_ulong dest_svid, l_umedit 
   if (data && size > 0) {
     msg->data_size = size;
     l_assert(size <= sizeof(l_msgdata);
-    l_copy_n(&msg->mssg_data, data, size);
+    l_copy_n(&msg->extra, data, size);
+    msg->mssg_data = &msg->extra;
+  } else if (size) {
+    msg->data_size = 4;
+    msg->extra.a = size; /* size as a 4-byte data */
+    msg->mssg_data = &msg->extra;
   } else {
     msg->data_size = 0;
+    msg->mssg_data = 0;
   }
 
   l_assert(l_service_nt_remote(dest_svid));
@@ -836,7 +954,7 @@ l_master_insert_message(l_master* M, l_message* msg)
   l_srvcslot* srvc_slot = 0;
 
   srvc_slot = stbl->slot_arr + mssg_dest;
-  if (mssg_dest >= stbl->capacity || (srvc_slot->masks & L_SERVICE_ALIVE) == 0) {
+  if (mssg_dest >= stbl->capacity || (srvc_slot->flags & L_SERVICE_ALIVE) == 0) {
     /* invalid message, just insert into free q. TODO: how to free msgdata */
     l_loge_3("invalid message %d from %d to %d", ld(msg->mgid), ld(msg->mssg_from), ld(mssg_dest));
     l_squeue_push(&M->mast_frmq, &msg->node);
@@ -860,7 +978,50 @@ l_master_insert_message(l_master* M, l_message* msg)
 static l_master* L_MASTER = 0;
 
 static void
-l_master_dispatch_io_event(l_ulong ud, l_umedit masks)
+l_master_generate_io_messages(l_service* S, l_srvcslot* slot)
+{
+  l_master* M = L_MASTER;
+  l_squeue* msgq = S->srvc_msgq;
+  l_ushort events = 0;
+  l_message* msg = 0;
+
+  events = slot->events;
+  slot->events = 0;
+
+  if (events & L_IO_EVENT_WRITE) { /* send L_MSG_SOCK_CONN_IND or L_MSG_DATA_READY_TX message */
+    if (slot->flags & L_SOCK_FLAG_CONNECT) {
+      msg = l_master_create_message(M, L_MSG_SOCK_CONN_IND, S->srvc_id, 0, 0, slog->flags & L_SOCK_FLAG_INPROGRESS);
+      if (msg) l_squeue_push(&S->srvc_msgq, &msg->node);
+      slot->flags &= ~(L_SOCK_FLAG_CONNECT | L_SOCK_FLAG_INPROGRESS);
+    } else {
+      msg = l_master_create_message(M, L_MSG_DATA_READY_TX, S->srvc_id, 0, 0, 0);
+      if (msg) l_squeue_push(&S->srvc_msgq, &msg->node);
+    }
+  }
+
+  if (events & L_IO_EVENT_READ) { /* send L_MSG_SOCK_ACCEPT_IND or L_MSG_DATA_READY_RX message */
+    if (slot->flags & L_SOCK_FLAG_LISTEN) {
+      msg = l_master_create_message(M, L_MSG_SOCK_ACCEPT_IND, S->srvc_id, 0, 0, 0);
+      if (msg) l_squeue_push(&S->srvc_msgq, &msg->node);
+    } else {
+      msg = l_master_create_message(M, L_MSG_DATA_READY_RX, S->srvc_id, 0, 0, 0);
+      if (msg) l_squeue_push(&S->srvc_msgq, &msg->node);
+    }
+  }
+
+  if (events & (L_IO_EVENT_HUP | L_IO_EVENT_RHP)) { /* send L_MSG_SOCK_DISC_IND message */
+    msg = l_master_create_message(M, L_MSG_SOCK_DISC_IND, S->srvc_id, 0, 0, events & L_IO_EVENT_RHP);
+    if (msg) l_squeue_push(&S->srvc_msgq, &msg->node);
+  }
+
+  if (events & L_IO_EVENT_ERR) { /* send L_MSG_SOCK_ERROR message */
+    msg = l_master_create_message(M, L_MSG_SOCK_ERROR, S->srvc_id, 0, 0, 0);
+    if (msg) l_squeue_push(&S->srvc_msgq, &msg->node);
+  }
+}
+
+static void
+l_master_dispatch_io_event(l_ulong ud, l_ushort events)
 {
   l_master* M = L_MASTER;
   l_srvctable* stbl = M->stbl;
@@ -871,12 +1032,20 @@ l_master_dispatch_io_event(l_ulong ud, l_umedit masks)
   l_umedit seed = (l_umedit)(ud & 0xffffffff);
 
   slot = stbl->slot_arr + svid;
-  if (l_filehdl_is_empty(&slot->iohdl) || slot->srvc_seed != seed) {
+  if (events == 0 || l_filehdl_is_empty(&slot->iohdl) || slot->srvc_seed != seed) {
     return;
   }
 
+  slot->events |= events;
+
   S = slot->service;
-  if (S && (S->srvc_flags & L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ) == 0) {
+  if (S == 0) { /* currently the service is waiting for handle or is hanlding, */
+    return 0;   /* the events are handle when the service finish the current handle */
+  }
+
+  l_master_generate_io_messages(S, slot);
+
+  if ((S->srvc_flags & L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ) == 0) {
     S->srvc_flags |= L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ;
     l_squeue_push(temp_svcq, &S->node);
   }
@@ -899,7 +1068,7 @@ l_master_stop_service(l_master* M, l_ulong srvc_id)
   l_umedit svid = srvc_id >> 32;
 
   srvc_slot = stbl->slot_arr + svid;
-  if (svid >= stbl->capacity || (srvc_slot->masks & L_SERVICE_ALIVE) == 0) {
+  if (svid >= stbl->capacity || (srvc_slot->flags & L_SERVICE_ALIVE) == 0) {
     l_loge_1("try to stop invalid service %d", ld(svid));
   } else {
     l_message* on_destroy_msg = 0;
@@ -918,13 +1087,13 @@ l_master_destroy_service(l_master* M, l_ulong srvc_id)
   l_umedit svid = srvc_id >> 32;
 
   srvc_slot = stbl->slot_arr + svid;
-  if (svid >= stbl->capacity || (srvc_slot->masks & L_SERVICE_ALIVE) == 0) {
+  if (svid >= stbl->capacity || (srvc_slot->flags & L_SERVICE_ALIVE) == 0) {
     l_loge_1("try to destroy invalid service %d", ld(svid));
   } else {
     l_assert(srvc_slot->service); /* the service must docked when destroy */
     S = srvc_slot->service;
     srvc_slot->service = 0;
-    srvc_slot->masks &= (~L_SERVICE_ALIVE);
+    srvc_slot->flags &= (~L_SERVICE_ALIVE);
     if (l_squeue_nt_empty(&S->srvc_msgq)) {
       l_loge_1("service %d destroyed with unhandled messages", ld(svid));
       while ((srvc_msg = (l_message*)l_squeue_pop(&S->srvc_msgq))) {
@@ -957,14 +1126,20 @@ l_master_handle_self_messages(l_master* M, l_squeue* txms)
       } else {
         S = l_master_create_service(M, create_data->cb, create_data->flags);
       }
-      if (S == 0) { break; }
-      // S->parent_svid = msg->mssg_from;
-      /* make service's first message *ON_CREATE* */
-      on_create_msg = l_master_create_message(M, L_MSG_SERVICE_ON_CREATE, S->srvc_id, 0, 0, 0);
-      l_squeue_push(&S->srvc_msgq, &on_create_msg->node);
-      /* insert the service to tempq to handle */
-      l_master_insert_message(M, on_create_msg);
-      } break;
+
+      /*TODO: need response the service that send L_MSG_CREATE_SERVICE_REQ
+      no matter the service created success or not */
+
+      if (S == 0) {
+      } else {
+        // S->parent_svid = msg->mssg_from;
+        /* make service's first message *ON_CREATE* */
+        on_create_msg = l_master_create_message(M, L_MSG_SERVICE_ON_CREATE, S->srvc_id, 0, 0, 0);
+        l_squeue_push(&S->srvc_msgq, &on_create_msg->node);
+        /* insert the service to tempq to handle */
+        l_master_insert_message(M, on_create_msg);
+      }}
+      break;
     case L_MSG_STOP_SERVICE_REQ:
       l_master_stop_service(M, msg->mssg_dest);
       break;
@@ -998,7 +1173,6 @@ l_master_loop(lnlylib_env* main_env)
   l_int global_q_is_empty = 0;
   l_int i = 0;
   l_int events = 0;
-  l_umedit ioev_masks = 0;
 
   l_service* launcher = 0;
   l_message* on_create_msg = 0;
@@ -1069,6 +1243,11 @@ check_feeded_messages:
         l_assert((S->srvc_flags & L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ) == 0);
         S->srvc_flags |= L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ;
 
+        /* handle io events if any pending */
+        if (l_filhdl_nt_empty(&srvc_slot->iohdl) && srvc_slot->events) {
+          l_master_generate_io_messages(S, srvc_slot);
+        }
+
         /* check stop service flag */
         if (S->srvc_flags & L_SRVC_FLAG_STOP_SERVICE) {
           S->srvc_flags &= (~L_SRVC_FLAG_STOP_SERVICE);
@@ -1094,16 +1273,14 @@ check_feeded_messages:
 
     while ((S = (l_service*)l_squeue_pop(temp_svcq))) {
       srvc_slot = stbl->slot + (S->srvc_id >> 32);
-      ioev_masks = (srvc_slot->masks & L_IO_EVENT_MASK);
-      if (l_filehdl_nt_empty(&srvc_slot->iohdl) && ioev_masks) {
-        /* TODO: generate io event message and intert into S->srvc_msgq */
-      }
+
       if (l_squeue_is_empty(&S->srvc_msgq)) {
         l_assert(srvc_slot->service); /* keep the service docked */
       } else {
         srvc_slot->service = 0; /* detach the service that wait to handle */
         l_squeue_push(&svcq, &S->node);
       }
+
       S->srvc_flags &= ~L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ;
     }
 
@@ -1328,10 +1505,12 @@ l_worker_loop(l_svcenv* env)
       switch (msg->mgid >> 32) {
       case L_MSG_SERVICE_ON_CREATE:
         if (S->cb.service_on_create) {
-          S->ud = S->cb.service_on_create(ENV);
-          ENV->svud = S->ud;
-        } else {
-          ENV->svud = S->ud = 0;
+          if (S->ud == 0) {
+            S->ud = S->cb.service_on_create(ENV);
+            ENV->svud = S->ud;
+          } else {
+            l_loge_1("the srvc %d user data already assigned", ld(S->srvc_id));
+          }
         }
         break;
       case L_MSG_SERVICE_ON_DESTROY:
