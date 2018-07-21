@@ -22,9 +22,10 @@
 #define L_MIN_USER_MSG_ID 0x0100
 #define L_MSG_WORKER_FEEDBACK     0x01
 #define L_MSG_CREATE_SERVICE_REQ  0x02
-#define L_MSG_STOP_SERVICE_REQ    0x03
-#define L_MSG_SERVICE_ON_CREATE   0x04
-#define L_MSG_SERVICE_ON_DESTROY  0x05
+#define L_MSG_SUB_SERVICE_CREATED 0x03
+#define L_MSG_STOP_SERVICE_REQ    0x04
+#define L_MSG_SERVICE_ON_CREATE   0x05
+#define L_MSG_SERVICE_ON_DESTROY  0x06
 
 struct l_service;
 typedef struct {
@@ -631,11 +632,6 @@ l_master_load_service_module(const char* module)
 #endif
 
   cb = (l_service_callback*)l_dynlib_sym2(&hdl, module_name, l_const_strn("callback"));
-  if (cb->service_proc == 0) {
-    l_loge_1("load %strn_service_proc failed", l_strn(&module_name));
-    return 0;
-  }
-
   return cb;
 }
 
@@ -707,13 +703,17 @@ l_socket_listen_service_proc(lnlylib_env* E)
   data = (l_socket_listen_service_data*)E->svud;
 
   switch (mgid) {
+  case L_MSG_SERVICE_STOP_REQ:
+    break;
+  case L_MSG_SERVICE_RESTART:
+    break;
   /* messages from master */
   case L_MSG_SOCK_ACCEPT_IND:
     l_socket_accept(&S->ioev_hdl, l_socket_listen_service_accept_connection, E);
     break;
   case L_MSG_SOCK_ERROR:
     break;
-  case L_MSG_CONN_SRVC_CREATED:
+  case L_MSG_SUB_SERVICE_CREATED:
     break;
   /* messages from accepted connection services */
   case L_MSG_SOCK_DISC_NTF:
@@ -904,6 +904,7 @@ l_launcher_service_proc(lnlylib_env* E)
 
 static l_service_callback
 l_launcher_service_cb = {
+  "LAUNCHER",
   l_launcher_on_create,
   l_launcher_on_destroy,
   l_launcher_service_proc
@@ -1505,10 +1506,10 @@ l_worker_loop(l_svcenv* env)
       switch (msg->mgid >> 32) {
       case L_MSG_SERVICE_ON_CREATE:
         if (S->cb.service_on_create) {
+          void* svud = S->cb.service_on_create(ENV);
           if (S->ud == 0) {
-            S->ud = S->cb.service_on_create(ENV);
-            ENV->svud = S->ud;
-          } else {
+            ENV->svud = S->ud = svud;
+          } else if (svud != 0) {
             l_loge_1("the srvc %d user data already assigned", ld(S->srvc_id));
           }
         }
@@ -1520,8 +1521,9 @@ l_worker_loop(l_svcenv* env)
         S->srvc_flags |= L_SRVC_FLAG_DESTROY_SERVICE;
         break;
       default:
-        /* service's procedure shall be not empty */
-        S->cb.service_proc(ENV);
+        if (S->cb.service_proc) {
+          S->cb.service_proc(ENV);
+        }
         break;
       }
       l_squeue_push(W->work_frmq, &msg->node); /* TODO: how to free msgdata */

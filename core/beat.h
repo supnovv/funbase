@@ -224,6 +224,7 @@ struct l_service;
 struct l_message;
 
 typedef struct {
+  const char* service_name;
   void* (*service_on_create)(struct lnlylib_env*);
   void (*service_on_destroy)(struct lnlylib_env*);
   void (*service_proc)(struct lnlylib_env*);
