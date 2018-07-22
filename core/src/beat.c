@@ -215,8 +215,6 @@ typedef struct l_service {
   l_filehdl ioev_hdl;
   l_umedit srvc_flags;
   l_ulong srvc_id; /* the highest bit is for remote service or note */
-  l_ulong upper_srvc;
-  l_ulong lower_svrc;
   l_corotable* coro_tabl; /* lua service if not null */
   l_service_callback* cb;
   void* ud;
@@ -230,93 +228,6 @@ l_tcp_server_proc(lnlylib_env* E)
    L_MSG_READY_TO_READ
    L_MSG_READY_TO_WRITE
    **/
-}
-
-typedef struct {
-  l_squeue wrmq;
-  l_squeue rdmq;
-  l_umedit wrid;
-  l_umedit rdid;
-} l_data_service;
-
-static void
-l_socket_client_proc(lnlylib_env* E)
-{
-  /** message exchanges, RSP only send after REQ, NTF can send without REQ **
-  L_MSG_SOCK_CONNIND => 
-  L_MSG_SOCK_CONNECT <=
-                     => L_MSG_SOCK_CONNDONE  =>  L_MSG_SOCK_CONN_NTF
-                        L_MSG_SOCK_DISC_REQ  <=
-                                             =>  L_MSG_SOCK_DISC_NTF (after disc, the data service is destroyed)
-                     => L_MSG_SOCK_DISCDONE  =>  L_MSG_SOCK_DISC_NTF
-                     => L_MSG_SOCK_ERROR     =>  L_MSG_SOCK_DISC_NTF
-                     => L_MSG_DATA_READY_RX  =>  L_MSG_READ_DATA_IND
-                        L_MSG_READ_DATA_REQ  <=
-                                             =>  L_MSG_READ_DATA_RSP
-                        L_MSG_WRITE_DATA_REQ <=
-                     => L_MSG_DATA_READY_TX  =>  L_MSG_WRITE_DATA_RSP
-  ********************************************************************/
-
-  l_message* MSG = E->cmsg;
-  l_service* S = E->csvc;
-  l_data_service* svud = E->svud;
-
-  l_message* msg = 0;
-  l_byte* data = 0;
-  l_umedit size = 0;
-  l_umedit done = 0;
-
-  switch (MSG->mssg_id) {
-  case L_MSG_WRITE_DATA_REQ:
-    if (msg->data_size && msg->mssg_data) {
-      msg->mssg_flags |= L_MSSG_FLAG_DONT_FREE;
-      msg->mgid_cust = 0; /* use mgid_cust to record how many data already written */
-      l_squeue_push(&svud->wrmq, &msg->node);
-    }
-    break;
-  case L_MSG_READ_DATA_REQ:
-    if (msg->data_size && msg->mssg_data) {
-      msg->mssg_flags |= L_MSSG_FLAG_DONT_FREE;
-      msg->mgid_cust = 0; /* use mgid_cust to record how many data alrady read */
-      l_squeue_push(&svud->rdmq, &msg->node);
-    }
-    break;
-  case L_MSG_DATA_READY_TX:
-    if ((msg = l_squeue_top(&svud->wrmq))) {
-      data = msg->mssg_data + msg->mgid_cust;
-      size = msg->data_size - msg->mgid_cust;
-      done = l_data_write(svud->fd, data, size);
-      if (done == size) {
-        l_squeue_pop(&svud->wrmq);
-        l_message_free_data(msg);
-        l_message_init(msg, S->srvc_id, svud->up_srvc, L_MSG_WRITE_DATA_DONE, 0);
-        msg->extra.a = ++svud->wrid;
-        l_send_message_impl(E, msg);
-      } else {
-        msg->mgid_cust += done;
-      }
-    }
-    break;
-  case L_MSG_DATA_READY_RX:
-    if ((msg = l_squeue_top(&svud->rdmq))) {
-      data = msg->mssg_data + msg->mgid_cust;
-      size = msg->data_size - msg->mgid_cust;
-      done = l_data_read(svud->fd, data, size);
-      if (done == size) {
-        l_squeue_pop(&svud->wrmq);
-        /* TODO */
-      } else {
-        msg->mgid_cust += done;
-      }
-    }
-    break;
-  case L_MSG_SOCK_ERROR:
-    break;
-  case L_MSG_CONNECT_HUP:
-    break;
-  default:
-    break;
-  }
 }
 
 typedef struct {
@@ -637,6 +548,7 @@ l_master_load_service_module(const char* module)
 
 typedef struct {
   l_sockaddr local;
+  l_service_callback* rxcb;
   l_umedit conns;
   l_dqueue connq;
   l_dqueue freeq;
@@ -650,7 +562,7 @@ l_socket_listen_service_on_create(lnlylib_env* E)
   data->conss = 0;
   l_dqueue_init(&data->connq);
   l_dqueue_init(&data->freeq);
-  retrun data;
+  return data;
 }
 
 static void
@@ -681,7 +593,9 @@ l_socket_listen_service_accept_connection(void* ud, l_sockconn* conn)
   }
 
   remote = &conn->remote;
-  conn_srvc_data.listen_service = E->S->srvc_id;
+  conn_srvc_data.listen_srvc_data = data;
+  conn_srvc_data.listen_svid = E->S->srvc_id;
+  conn_srvc_data.upper_svid = 0;
   conn_srvc_data.rmt_port = l_sockaddr_port(remote);
   l_socketaddr_ipstr(remote, &conn_srvc_data.rmt_ip, sizeof(l_ipaddr));
 
@@ -725,17 +639,53 @@ l_socket_listen_service_proc(lnlylib_env* E)
 
 typedef struct {
   l_linknode node;
-  l_ulong listen_service;
+  l_socket_listen_service_data* listen_srvc_data;
+  l_ulong listen_svid;
+  l_ulong upper_svid;
   l_ipaddr rmt_ip;
   l_ushort rmt_port;
+  l_squeue wrmq;
+  l_squeue rdmq;
+  l_umedit wrid;
+  l_umedit rdid;
 } l_socket_incoming_conn_service_data;
+
+static void*
+l_socket_incoming_conn_service_on_create(lnlylib_env* E)
+{
+  l_socket_incoming_conn_service_data* svud = 0;
+  svud = (l_socket_incoming_conn_service_data*)E->svud;
+  l_create_service(E, (l_create_service_data){
+    0, svud->listen_srvc_data->rxcb,
+    L_NODATA(),
+    0});
+  return 0;
+}
+
+typedef struct {
+  l_ulong svid;
+  void* svud;
+  l_bool succ;
+} l_sub_service_created_data;
 
 static void
 l_socket_incoming_conn_service_proc(lnlylib_env* E)
 {
   l_message* MSG = E->MSG;
+  l_socket_incoming_conn_service_data* svud = 0;
+  svud = (l_socket_incoming_conn_service_data*)E->svud;
 
   switch (MSG->mssg_id) {
+  case L_MSG_SUB_SERVICE_CREATED: {
+      l_sub_service_created_data* sscd = 0;
+      sscd = (l_sub_service_created*)MSG->mssg_data;
+      if (data->succ) {
+        svud->upper_svid = sscd->svid;
+      } else {
+        /* TODO: disc the socket and stop the service */
+      }
+    }
+    break;
   case L_MSG_SOCK_CONN_IND:
     break;
   case L_MSG_SOCK_DISC_IND:
@@ -745,7 +695,85 @@ l_socket_incoming_conn_service_proc(lnlylib_env* E)
   case L_MSG_DATA_READY_RX:
     break;
   case L_MSG_DATA_READY_TX:
+    break;
+  default:
+    break;
+  }
+  /** message exchanges, RSP only send after REQ, NTF can send without REQ **
+  L_MSG_SOCK_CONNIND => 
+  L_MSG_SOCK_CONNECT <=
+                     => L_MSG_SOCK_CONNDONE  =>  L_MSG_SOCK_CONN_NTF
+                        L_MSG_SOCK_DISC_REQ  <=
+                                             =>  L_MSG_SOCK_DISC_NTF (after disc, the data service is destroyed)
+                     => L_MSG_SOCK_DISCDONE  =>  L_MSG_SOCK_DISC_NTF
+                     => L_MSG_SOCK_ERROR     =>  L_MSG_SOCK_DISC_NTF
+                     => L_MSG_DATA_READY_RX  =>  L_MSG_READ_DATA_IND
+                        L_MSG_READ_DATA_REQ  <=
+                                             =>  L_MSG_READ_DATA_RSP
+                        L_MSG_WRITE_DATA_REQ <=
+                     => L_MSG_DATA_READY_TX  =>  L_MSG_WRITE_DATA_RSP
+  ********************************************************************/
 
+  l_message* MSG = E->cmsg;
+  l_service* S = E->csvc;
+  l_data_service* svud = E->svud;
+
+  l_message* msg = 0;
+  l_byte* data = 0;
+  l_umedit size = 0;
+  l_umedit done = 0;
+
+  switch (MSG->mssg_id) {
+  case L_MSG_WRITE_DATA_REQ:
+    if (msg->data_size && msg->mssg_data) {
+      msg->mssg_flags |= L_MSSG_FLAG_DONT_FREE;
+      msg->mgid_cust = 0; /* use mgid_cust to record how many data already written */
+      l_squeue_push(&svud->wrmq, &msg->node);
+    }
+    break;
+  case L_MSG_READ_DATA_REQ:
+    if (msg->data_size && msg->mssg_data) {
+      msg->mssg_flags |= L_MSSG_FLAG_DONT_FREE;
+      msg->mgid_cust = 0; /* use mgid_cust to record how many data alrady read */
+      l_squeue_push(&svud->rdmq, &msg->node);
+    }
+    break;
+  case L_MSG_DATA_READY_TX:
+    if ((msg = l_squeue_top(&svud->wrmq))) {
+      data = msg->mssg_data + msg->mgid_cust;
+      size = msg->data_size - msg->mgid_cust;
+      done = l_data_write(svud->fd, data, size);
+      if (done == size) {
+        l_squeue_pop(&svud->wrmq);
+        l_message_free_data(msg);
+        l_message_init(msg, S->srvc_id, svud->up_srvc, L_MSG_WRITE_DATA_DONE, 0);
+        msg->extra.a = ++svud->wrid;
+        l_send_message_impl(E, msg);
+      } else {
+        msg->mgid_cust += done;
+      }
+    }
+    break;
+  case L_MSG_DATA_READY_RX:
+    if ((msg = l_squeue_top(&svud->rdmq))) {
+      data = msg->mssg_data + msg->mgid_cust;
+      size = msg->data_size - msg->mgid_cust;
+      done = l_data_read(svud->fd, data, size);
+      if (done == size) {
+        l_squeue_pop(&svud->wrmq);
+        /* TODO */
+      } else {
+        msg->mgid_cust += done;
+      }
+    }
+    break;
+  case L_MSG_SOCK_ERROR:
+    break;
+  case L_MSG_CONNECT_HUP:
+    break;
+  default:
+    break;
+  }
 }
 
 typedef struct {
@@ -855,9 +883,9 @@ l_master_create_service(l_master* M, l_create_service_data* req, l_umedit svid)
   slot->events |= events;
   slot->iohdl = ioev_hdl;
 
-  if (l_filehdl_nt_empty(&ioev_hdl)) { /* manager this hdl's events */
+  if (l_filehdl_nt_empty(&ioev_hdl)) { /* add this hdl to receive events */
     l_ioevmgr_add(&M->evmgr, ioev_hdl, S->srvc_id, slot->events);
-    slot->events = 0; /* clear events to prepare receive incoming events */
+    slot->events = 0; /* clear and prepare to receive incoming events */
   }
 
   return service;
