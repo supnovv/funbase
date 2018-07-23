@@ -20,12 +20,12 @@
 #define L_MAST_FLAG_QUIT 0x01
 
 #define L_MIN_USER_MSG_ID 0x0100
-#define L_MSG_WORKER_FEEDBACK     0x01
-#define L_MSG_CREATE_SERVICE_REQ  0x02
-#define L_MSG_SUB_SERVICE_CREATED 0x03
-#define L_MSG_STOP_SERVICE_REQ    0x04
-#define L_MSG_SERVICE_ON_CREATE   0x05
-#define L_MSG_SERVICE_ON_DESTROY  0x06
+#define L_MSG_WORKER_FEEDBACK    0x01
+#define L_MSG_SERVICE_CREATE_REQ 0x02
+#define L_MSG_SUBSRVC_CREATE_RSP 0x03
+#define L_MSG_SERVICE_STOP_REQ   0x04
+#define L_MSG_SERVICE_ON_CREATE  0x05
+#define L_MSG_SERVICE_ON_DESTROY 0x06
 
 struct l_service;
 typedef struct {
@@ -220,16 +220,6 @@ typedef struct l_service {
   void* ud;
 } l_service;
 
-static void*
-l_tcp_server_proc(lnlylib_env* E)
-{
-  /** messages from master **
-   L_MSG_TCP_CONNECT_IND
-   L_MSG_READY_TO_READ
-   L_MSG_READY_TO_WRITE
-   **/
-}
-
 typedef struct {
   l_service* service;
   l_squeue txmq;
@@ -273,7 +263,7 @@ typedef struct {
   l_service_callback* cb;
   l_srvc_ioev_data ioev;
   void* svud;
-} l_create_service_data;
+} l_service_create_req;
 
 typedef struct {
   l_umedit a, b, c, d;
@@ -599,7 +589,7 @@ l_socket_listen_service_accept_conn(void* ud, l_sockconn* conn)
   inconn_svud.rmt_port = l_sockaddr_port(remote);
   l_socketaddr_ipstr(remote, &inconn_svud.rmt_ip, sizeof(l_ipaddr));
 
-  l_create_service(E, (l_create_service_data){
+  l_create_service(E, (l_service_create_req){
     l_socket_inconn_service_callback, 0,
     L_USEHDL(conn->sock),
     inconn_svud
@@ -665,7 +655,7 @@ l_socket_inconn_service_on_create(lnlylib_env* E)
 {
   l_socket_inconn_svud* svud = 0;
   svud = (l_socket_inconn_svud*)E->svud;
-  l_create_service(E, (l_create_service_data){
+  l_create_service(E, (l_service_create_req){
     0, svud->listen_svud->inconn_cb,
     L_NODATA(),
     0});
@@ -782,8 +772,31 @@ typedef struct {
   l_ushort rmt_port;
 } l_socket_outconn_svud;
 
+static void
+l_socket_outconn_service_proc(lnlylib_env* E)
+{
+  l_umedit mgid = E->MSG->mssg_id;
+  l_service* S = E->S;
+  l_socket_outconn_svud* outconn = 0;
+
+  outconn = (l_socket_outconn_svud*)E->svud;
+
+  switch (mgid) {
+  case L_MSG_SOCK_CONNECT_IND:
+    if (l_socket_cmpl_connect(slot->iohdl)) {
+      /* socket connected success */
+      l_send_message(E, L_MSG_DATA_READY_TX, 0, S->srvc_id, 0, 0, 0);
+    } else {
+      l_send_message(E, L_MSG_SOCK_DISCONNECTED, 0, S->srvc_id, 0, 0, 0);
+    }
+    break;
+  default:
+    break;
+  }
+}
+
 static l_service*
-l_master_create_service(l_master* M, l_create_service_data* req, l_umedit svid)
+l_master_create_service(l_master* M, l_service_create_req* req, l_umedit svid)
 {
   l_service* S = 0;
   l_srvcslot* slot = 0;
@@ -1019,8 +1032,15 @@ l_master_generate_io_messages(l_service* S, l_srvcslot* slot)
 
   if (events & L_IO_EVENT_WRITE) { /* send L_MSG_SOCK_CONN_IND or L_MSG_DATA_READY_TX message */
     if (slot->flags & L_SOCK_FLAG_CONNECT) {
-      msg = l_master_create_message(M, L_MSG_SOCK_CONN_IND, S->srvc_id, 0, 0, slog->flags & L_SOCK_FLAG_INPROGRESS);
-      if (msg) l_squeue_push(&S->srvc_msgq, &msg->node);
+      if (l_socket_cmpl_connect(slot->iohdl)) {
+        msg = l_master_create_message(M, L_MSG_SOCK_CONNECTED, S->srvc_id, 0, 0, slot->flags & L_SOCK_FLAG_INPROGRESS);
+        if (msg) l_squeue_push(&S->srvc_msgq, &msg->node);
+        msg = l_master_create_message(M, L_MSG_DATA_READY_TX, S->srvc_id, 0, 0, 0);
+        if (msg) l_squeue_push(&S->srvc_msgq, &msg->node);
+      } else {
+        msg = l_master_create_message(M,L_MSG_SOCK_DISCONNECTED, S->srvc_id, 0, 0, 0);
+        if (msg) l_squeue_push(&S->srvc_msgq, &msg->node);
+      }
       slot->flags &= ~(L_SOCK_FLAG_CONNECT | L_SOCK_FLAG_INPROGRESS);
     } else {
       msg = l_master_create_message(M, L_MSG_DATA_READY_TX, S->srvc_id, 0, 0, 0);
@@ -1038,8 +1058,8 @@ l_master_generate_io_messages(l_service* S, l_srvcslot* slot)
     }
   }
 
-  if (events & (L_IO_EVENT_HUP | L_IO_EVENT_RHP)) { /* send L_MSG_SOCK_DISC_IND message */
-    msg = l_master_create_message(M, L_MSG_SOCK_DISC_IND, S->srvc_id, 0, 0, events & L_IO_EVENT_RHP);
+  if (events & (L_IO_EVENT_HUP | L_IO_EVENT_RHP)) { /* send L_MSG_SOCK_DISCONNECTED message */
+    msg = l_master_create_message(M, L_MSG_SOCK_DISCONNECTED, S->srvc_id, 0, 0, events & L_IO_EVENT_RHP);
     if (msg) l_squeue_push(&S->srvc_msgq, &msg->node);
   }
 
@@ -1144,9 +1164,9 @@ l_master_handle_self_messages(l_master* M, l_squeue* txms)
     switch (msg->mgid >> 32) {
     case L_MSG_CREATE_SERVICE_REQ: {
       l_service* S = 0;
-      l_create_service_data* create_data = 0;
+      l_service_create_req* create_data = 0;
       l_message* on_create_msg = 0;
-      create_data = (l_create_service_data*)msg->mssg_data;
+      create_data = (l_service_create_req*)msg->mssg_data;
       /* create the service according to the request */
       if (create_data->flags & L_SRVC_FLAG_CREATE_FROM_MODULE) {
         S = l_master_create_service_from_module(M, create_data->module_name, create_data->flags);
@@ -1411,17 +1431,17 @@ l_send_message(lnlylib_env* E, l_umedit mgid, l_umedit mgid_cust, l_ulong dest_s
 }
 
 L_EXTERN l_bool
-l_create_service(lnlylib_env* E, l_create_service_data* data)
+l_create_service(lnlylib_env* E, l_service_create_req* data)
 {}
 
 L_EXTERN void
 l_create_service(lnlylib_env* E, l_service_callback* cb, l_uint flags)
 {
-  l_create_service_data create_service_req;
+  l_service_create_req create_service_req;
   flags &= ~(L_SRVC_FLAG_CREATE_FROM_MODULE | L_SRVC_FLAG_CREATE_LUA_SERVICE);
   create_service_req.flags = flags;
   create_service_req.cb = cb;
-  l_send_master_message(E, L_MSG_CREATE_SERVICE_REQ, 0, 0, &create_service_req, sizeof(l_create_service_data));
+  l_send_master_message(E, L_MSG_CREATE_SERVICE_REQ, 0, 0, &create_service_req, sizeof(l_service_create_req));
 }
 
 L_EXTERN l_ulong
@@ -1435,11 +1455,11 @@ l_create_connect_service(lnlylib_env* E, l_strn ip, l_ushort port, l_service_cal
 L_EXTERN void
 l_create_service_from_module(lnlylib_env* E, l_strn module_name, l_uint flags)
 {
-  l_create_service_data create_service_req;
+  l_service_create_req create_service_req;
   flags &= ~(L_SRVC_FLAG_CREATE_LUA_SERVICE);
   create_service_req.flags = flags | L_SRVC_FLAG_CREATE_FROM_MODULE;
   create_service_req.module_name = module_name;
-  l_send_master_message(E, L_MSG_CREATE_SERVICE_REQ, 0, 0, &create_service_req, sizeof(l_create_service_data));
+  l_send_master_message(E, L_MSG_CREATE_SERVICE_REQ, 0, 0, &create_service_req, sizeof(l_service_create_req));
 }
 
 L_EXTERN void
