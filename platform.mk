@@ -108,9 +108,6 @@ none:
 
 echo:
 	@echo "PLAT= $(PLAT)"
-	@echo "DEBUG= $(DEBUG)"
-	@echo "CC= $(CC89)"
-	@echo "CFLAGS= $(CFLAGS)"
 
 clean:
 	$(RM) $(OUTDIR) autoconf.h
@@ -118,12 +115,12 @@ clean:
 .PHONY: default none echo clean LNLYLIB
 
 $(OUTDIR)/%$(OBJ): %.c
-	@echo "$@ <- $? $(CMPL)"
+	@echo "$@ <- $? | $(CMPL)"
 	$(CMPL) $<
 
 $(AUTOCONF): $(AUTOOBJS) $(AUTOINCS)
 	$(RM) autoconf.h
-	@echo "$@ <- $(AUTOOBJS) $(LINK)"
+	@echo "$@ <- $(AUTOOBJS) | $(LINK)"
 	$(LINK) $(AUTOOBJS)
 	./$@
 
