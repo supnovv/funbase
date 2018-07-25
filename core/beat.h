@@ -230,10 +230,26 @@ typedef struct {
   void (*service_proc)(struct lnlylib_env*);
 } l_service_callback;
 
-L_EXTERN void l_send_message(struct lnlylib_env* E, l_uint dest_svid, l_uint mgid, l_umedit flags, void* data, l_umedit size);
-L_EXTERN void l_create_service(struct lnlylib_env* E, l_service_callback cb, l_uint flags);
-L_EXTERN void l_create_service_from_module(struct lnlylib_env* E, l_strn module_name, l_uint flags);
-L_EXTERN void l_stop_service_specific(struct lnlylib_env* E, l_uint svid);
+L_EXTERN struct l_message* l_get_message(struct lnlylib_env* E);
+L_EXTERN struct l_service* l_get_service(struct lnlylib_env* E);
+L_EXTERN struct l_worker* l_get_worker(struct lnlylib_env* E);
+
+L_EXTERN l_umedit l_message_id(struct message* msg);
+L_EXTERN l_umedit l_message_cust(struct message* msg);
+L_EXTERN l_strn l_message_data(struct message* msg);
+
+L_EXTERN l_umedit l_get_mssg_id(struct lnlylib_env* E);
+L_EXTERN l_umedit l_get_mgid_cust(struct lnlylib_env* E);
+L_EXTERN l_strn l_get_mssg_data(struct lnlylib_env* E);
+
+L_EXTERN l_ulong l_service_id(struct l_service* srvc);
+L_EXTERN void* l_service_data(struct l_service* srvc);
+L_EXTERN l_ulong l_get_srvc_id(struct lnlylib_env* E);
+L_EXTERN void* l_get_srvc_data(struct lnlylib_env* E);
+
+L_EXTERN void l_send_message(struct lnlylib_env* E, l_umedit mgid, l_umedit mgid_cust, l_ulong srvc_id, void* data, l_umedit size);
+L_EXTERN void l_send_data_moved_message(struct lnlylib_env* E, l_umedit mgid, l_umedit mgid_cust, l_ulong srvc_id, void* data, l_umedit size);
+L_EXTERN void l_stop_service_specific(struct lnlylib_env* E, l_ulong svrc_id);
 L_EXTERN void l_stop_service(struct lnlylib_env* E);
 
 L_EXTERN int lnlylib_main(void (*start)(void), int argc, char** argv);

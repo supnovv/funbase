@@ -2,7 +2,7 @@
 #include "core/beat.h"
 #include "osi/base.h"
 
-#define L_SERVICE_ALIVE 0x01
+#define L_SRVC_FLAG_ALIVE 0x01
 #define L_SOCK_FLAG_LISTEN 0x02
 #define L_SOCK_FLAG_CONNECT 0x04
 #define L_SOCK_FLAG_INPROGRESS 0x08
@@ -15,7 +15,11 @@
 #define L_SRVC_FLAG_CREATE_FROM_MODULE 0x08
 #define L_SRVC_FLAG_CREATE_LUA_SERVICE 0x10
 #define L_SRVC_FLAG_DESTROY_SERVICE 0x20
-#define L_MSSG_FLAG_FREE_EXTRA_DATA 0x01
+
+#define L_MSSG_FLAG_DONT_FREE 0x01 /* dont free message automatically */
+#define L_MSSG_FLAG_FREE_DATA 0x02 /* free msgdata also when free message */
+#define L_MSSG_FLAG_REMOTE_MSG 0x04
+
 #define L_WORK_FLAG_QUIT 0x01
 #define L_MAST_FLAG_QUIT 0x01
 
@@ -865,7 +869,7 @@ l_master_create_service(l_master* M, l_service_create_req* req, l_umedit svid)
     }
 
     slot = stbl->slot_arr + svid;
-    if (slot->service || (slot->flags & L_SERVICE_ALIVE)) {
+    if (slot->service || (slot->flags & L_SRVC_FLAG_ALIVE)) {
       l_loge_1("reserved service %d already created", ld(svid));
       return 0;
     }
@@ -892,7 +896,7 @@ l_master_create_service(l_master* M, l_service_create_req* req, l_umedit svid)
   S->ioev_hdl = ioev_hel;
 
   slot->service = service; /* dock the service to the table */
-  slot->flags |= L_SERVICE_ALIVE | flags;
+  slot->flags |= L_SRVC_FLAG_ALIVE | flags;
   slot->events |= events;
   slot->iohdl = ioev_hdl;
 
@@ -996,7 +1000,7 @@ l_master_insert_message(l_master* M, l_message* msg)
   l_srvcslot* srvc_slot = 0;
 
   srvc_slot = stbl->slot_arr + mssg_dest;
-  if (mssg_dest >= stbl->capacity || (srvc_slot->flags & L_SERVICE_ALIVE) == 0) {
+  if (mssg_dest >= stbl->capacity || (srvc_slot->flags & L_SRVC_FLAG_ALIVE) == 0) {
     /* invalid message, just insert into free q. TODO: how to free msgdata */
     l_loge_3("invalid message %d from %d to %d", ld(msg->mgid), ld(msg->mssg_from), ld(mssg_dest));
     l_squeue_push(&M->mast_frmq, &msg->node);
@@ -1117,7 +1121,7 @@ l_master_stop_service(l_master* M, l_ulong srvc_id)
   l_umedit svid = srvc_id >> 32;
 
   srvc_slot = stbl->slot_arr + svid;
-  if (svid >= stbl->capacity || (srvc_slot->flags & L_SERVICE_ALIVE) == 0) {
+  if (svid >= stbl->capacity || (srvc_slot->flags & L_SRVC_FLAG_ALIVE) == 0) {
     l_loge_1("try to stop invalid service %d", ld(svid));
   } else {
     l_message* on_destroy_msg = 0;
@@ -1136,13 +1140,13 @@ l_master_destroy_service(l_master* M, l_ulong srvc_id)
   l_umedit svid = srvc_id >> 32;
 
   srvc_slot = stbl->slot_arr + svid;
-  if (svid >= stbl->capacity || (srvc_slot->flags & L_SERVICE_ALIVE) == 0) {
+  if (svid >= stbl->capacity || (srvc_slot->flags & L_SRVC_FLAG_ALIVE) == 0) {
     l_loge_1("try to destroy invalid service %d", ld(svid));
   } else {
     l_assert(srvc_slot->service); /* the service must docked when destroy */
     S = srvc_slot->service;
     srvc_slot->service = 0;
-    srvc_slot->flags &= (~L_SERVICE_ALIVE);
+    srvc_slot->flags &= (~L_SRVC_FLAG_ALIVE);
     if (l_squeue_nt_empty(&S->srvc_msgq)) {
       l_loge_1("service %d destroyed with unhandled messages", ld(svid));
       while ((srvc_msg = (l_message*)l_squeue_pop(&S->srvc_msgq))) {

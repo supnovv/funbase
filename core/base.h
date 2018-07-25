@@ -67,8 +67,8 @@ typedef union {
 } l_eightbyte;
 
 typedef struct {
-  const l_byte* str;
-  l_int len;
+  const l_byte* p;
+  l_int n;
 } l_strn;
 
 #undef l_strc
