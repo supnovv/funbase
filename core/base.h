@@ -71,32 +71,29 @@ typedef struct {
   l_int n;
 } l_strn;
 
-#undef l_strc
+#undef l_cstr
+#undef l_strn_c
 #undef l_empty_strn
 #undef l_const_strn
 
-#define l_strc(s) ((l_byte*)(s)) /* zero terminated c string */
+#define l_cstr(s) ((l_byte*)(s)) /* zero terminated c string */
+#define l_strn_c(s) ((l_strn){l_cstr(s), (s) ? strlen((char*)(s)) : 0}
 #define l_empty_strn() l_const_strn("")
-#define l_const_strn(s) ((l_strn){l_strc("" s), sizeof(s) - 1})
+#define l_const_strn(s) ((l_strn){l_cstr("" s), sizeof(s) - 1})
 
 L_INLINE l_strn
 l_strn_l(const void* s, l_int len) {
-  return (l_strn){l_strc(s), len > 0 ? len : 0};
-}
-
-L_INLINE l_strn
-l_strn_c(const void* s) { /* include <string.h> first before use it to make "strlen" visible */
-  return (l_strn){l_strc(s), s ? strlen((char*)s) : 0};
+  return (l_strn){l_cstr(s), len > 0 ? len : 0};
 }
 
 L_INLINE l_strn
 l_strn_p(const void* s, const void* e) {
-  return l_strn_l(s, l_strc(e) - l_strc(s));
+  return l_strn_l(s, l_cstr(e) - l_cstr(s));
 }
 
 L_INLINE l_strn
 l_strn_s(const void* s, l_int m, l_int n) {
-  return l_strn_l(l_strc(s) + m, n - m);
+  return l_strn_l(l_cstr(s) + m, n - m);
 }
 
 /** simple link list */
@@ -174,6 +171,18 @@ l_squeue_init(l_squeue* self)
   self->tail = &self->head;
 }
 
+L_INLINE l_bool
+l_squeue_is_empty(l_squeue* self)
+{
+  return (self->head.next == &self->head);
+}
+
+L_INLINE l_bool
+l_squeue_nt_empty(l_squeue* self)
+{
+  return (self->head.next != &self->head);
+}
+
 L_INLINE void
 l_squeue_push(l_squeue* self, l_smplnode* newnode)
 {
@@ -200,12 +209,6 @@ l_squeue_move(l_squeue* q)
   l_squeue_init(&newq);
   l_squeue_push_queue(&newq, q);
   return newq;
-}
-
-L_INLINE l_bool
-l_squeue_is_empty(l_squeue* self)
-{
-  return (self->head.next == &self->head);
 }
 
 L_INLINE l_smplnode*
@@ -244,6 +247,18 @@ l_dqueue_init(l_dqueue* self)
   l_linknode_init(&self->head);
 }
 
+L_INLINE l_bool
+l_dqueue_is_empty(l_dqueue* self)
+{
+  return self->head.next == &self->head;
+}
+
+L_INLINE l_bool
+l_dqueue_nt_empty(l_dqueue* self)
+{
+  return self->head.next != &self->head;
+}
+
 L_INLINE void
 l_dqueue_push(l_dqueue* self, l_linknode* newnode)
 {
@@ -274,12 +289,6 @@ l_dqueue_move(l_dqueue* q)
   l_dqueue_init(&newq);
   l_dqueue_push_queue(&newq, q);
   return newq;
-}
-
-L_INLINE l_bool
-l_dqueue_is_empty(l_dqueue* self)
-{
-  return l_linknode_is_empty(&self->head);
 }
 
 L_INLINE l_linknode*

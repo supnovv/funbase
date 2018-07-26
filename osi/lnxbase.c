@@ -136,11 +136,11 @@ l_empty_dynhdl()
 static l_dynhdl
 l_impl_dynhdl_open(l_strn fullname)
 {
-  if (fullname.str && fullname.len > 0) {
+  if (fullname.p && fullname.n > 0) {
     l_dynhdl hdl;
     char* errmsg = 0;
     dlerror(); /* clear old error */
-    hdl.impl = dlopen(fullname.str, RTLD_NOW);
+    hdl.impl = dlopen(fullname.p, RTLD_NOW);
     if (hdl.impl == 0 && (errmsg = dlerror())) { /* if the library file is not exist, it is no error just return 0 */
       l_loge_1(LNUL, "dlopen %s", ls(errmsg));
     }
@@ -188,10 +188,10 @@ L_EXTERN void*
 l_dynhdl_load(l_dynhdl* hdl, l_strn sym_name)
 {
   void* sym = 0;
-  if (sym_name.str && sym_name.len > 0) {
+  if (sym_name.p && sym_name.n > 0) {
     char* errstr = 0;
     dlerror(); /* clear old error */
-    sym = dlsym(hdl->impl, sym_name.str);
+    sym = dlsym(hdl->impl, sym_name.p);
     if (sym == 0 && (errstr = dlerror())) {
       l_loge_1(LNUL, "dlsym %s", ld(errstr));
     }
@@ -681,7 +681,7 @@ l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port)
     int retn = 0;
     l_impl_sockaddr* sa = sockaddr;
     if (l_strn_contains(&ip, ':')) {
-      retn = inet_pton(AF_INET6, (const char*)ip.str, &(sa->in6.sin6_addr));
+      retn = inet_pton(AF_INET6, (const char*)ip.p, &(sa->in6.sin6_addr));
       if (retn == 1) {
         sa->len = sizeof(struct sockaddr_in6);
         sa->in6.sin6_family = AF_INET6;
@@ -689,7 +689,7 @@ l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port)
         return true;
       }
     } else {
-      retn = inet_pton(AF_INET, (const char*)ip.str, &(sa->in6.sin6_addr));
+      retn = inet_pton(AF_INET, (const char*)ip.p, &(sa->in6.sin6_addr));
       if (retn == 1) {
         sa->len = sizeof(struct sockaddr_in);
         sa->in.sin_family = AF_INET;
@@ -1840,7 +1840,7 @@ l_data_read(l_filehdl hdl, void* out, l_int size)
 
 continue_to_read:
 
-  buff = l_strc(out) + done;
+  buff = l_cstr(out) + done;
   left = size - done;
 
   if (left <= 0) {
@@ -1868,7 +1868,7 @@ l_data_write(l_filehdl hdl, const void* from, l_int size)
 
 continue_to_write:
 
-  data = l_strc(from) + done;
+  data = l_cstr(from) + done;
   left = size - done;
 
   if (left <= 0) {

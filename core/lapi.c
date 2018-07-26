@@ -170,8 +170,8 @@ ll_new_strv(lua_State* L, int n, ...)
   va_start(vl, n);
   while (n-- > 0) {
     s = va_arg(vl, l_strn);
-    if (s.str && s.len > 0) {
-      luaL_addlstring(&B, (const char*)s.str, (size_t)s.len);
+    if (s.p && s.n > 0) {
+      luaL_addlstring(&B, (const char*)s.p, (size_t)s.n);
     }
   }
   va_end(vl);

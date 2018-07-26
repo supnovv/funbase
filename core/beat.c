@@ -116,10 +116,10 @@ l_filename_init(l_filename* fn)
 static l_bool
 l_filename_append(l_filename* fn, l_strn s)
 {
-  if (s.len > 0 && fn->name_len + s.len < fn->buff_len) {
-    const l_byte* pend = s.str + s.len;
-    while (s.str < pend) {
-      fn->s[fn->name_len++] = *s.str++;
+  if (s.n > 0 && fn->name_len + s.n < fn->buff_len) {
+    const l_byte* pend = s.p + s.n;
+    while (s.p < pend) {
+      fn->s[fn->name_len++] = *s.p++;
     }
     fn->s[fn->name_len] = 0;
     return true;
@@ -143,21 +143,21 @@ l_filename_addname_combine(l_filename* fn, l_strn part1, l_strn part2, l_strn se
 static l_bool
 l_filename_addpath(l_filename* fn, l_strn path)
 {
-  if (path.len > 0 && fn->name_len + path.len < fn->buff_len) {
-    const l_byte* pend = path.str + path.len;
+  if (path.n > 0 && fn->name_len + path.n < fn->buff_len) {
+    const l_byte* pend = path.p + path.n;
     if (fn->name_len > 0) {
       if (fn->s[fn->name_len - 1] == '/') {
-        if (*path.str == '/') {
-          path.str += 1;
+        if (*path.p == '/') {
+          path.p += 1;
         }
       } else {
-        if (*path.str != '/') {
+        if (*path.p != '/') {
           fn->s[fn->name_len++] = '/';
         }
       }
     }
-    while (path.str < pend) {
-      fn->s[fn->name_len++] = *path.str++;
+    while (path.p < pend) {
+      fn->s[fn->name_len++] = *path.p++;
     }
     if (fn->s[fn->name_len - 1] != '/') {
       fn->s[fn->name_len++] = '/';
@@ -1639,8 +1639,8 @@ l_start_logging(lnlylib_env* E, const l_byte* tag)
 extern void
 l_impl_logger_func(lnlylib_env* E, const void* tag, const void* fmt, ...)
 {
-  int level = l_strc(tag)[0] - '0';
-  int nargs = l_strc(tag)[1];
+  int level = l_cstr(tag)[0] - '0';
+  int nargs = l_cstr(tag)[1];
   l_ostream* out = 0;
   va_list vl;
 
@@ -1648,7 +1648,7 @@ l_impl_logger_func(lnlylib_env* E, const void* tag, const void* fmt, ...)
     return;
   }
 
-  out = l_start_logging(E, l_strc(tag) + 2);
+  out = l_start_logging(E, l_cstr(tag) + 2);
 
   if (nargs == 'n') {
     va_start(vl, fmt);
@@ -1657,7 +1657,7 @@ l_impl_logger_func(lnlylib_env* E, const void* tag, const void* fmt, ...)
     va_end(vl);
   } else {
     va_start(vl, fmt);
-    l_ostream_format_v_impl(out, l_strc(fmt), nargs - '0', vl);
+    l_ostream_format_v_impl(out, l_cstr(fmt), nargs - '0', vl);
     va_end(vl);
   }
 

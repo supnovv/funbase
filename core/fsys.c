@@ -220,7 +220,7 @@ l_stdfile_write(l_stdfile* s, const void* p, l_int len)
 
 L_EXTERN l_int
 l_stdfile_write_strn(l_stdfile* out, l_strn s) {
-  return l_stdfile_write(out, s.start, s.len);
+  return l_stdfile_write(out, s.p, s.n);
 }
 
 L_EXTERN l_int

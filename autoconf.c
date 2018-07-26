@@ -1,3 +1,14 @@
+#define LNLYLIB_AUTOCONF
+#include "core/prefix.h"
+
+#if defined(L_PLAT_LINUX)
+#include "osi/lnxpref.h"
+#elif defined(L_PLAT_WINDOWS)
+#include "osi/winpref.h"
+#else
+#error "unsupported platform"
+#endif
+
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
@@ -7,8 +18,6 @@
 #include <stddef.h>
 #include <float.h>
 
-#define LNLYLIB_AUTOCONF
-#include "core/prefix.h"
 #define l_byte unsigned char
 
 static void l_log_e(const void* fmt, ...) {
@@ -39,7 +48,7 @@ static int l_write_line(FILE* self, const void* fmt, ...) {
   return sz;
 }
 
-static int l_write_current_dir(FILE* self, const void* fmt) {
+static int l_write_cdir(FILE* self, const void* fmt) {
   /** getcwd, get_current_dir_name - get current working directory
   #include <unistd.h>
   char *get_current_dir_name(void);
@@ -47,7 +56,7 @@ static int l_write_current_dir(FILE* self, const void* fmt) {
   working directory. if the environment variable PWD is set, and its value is correct,
   then that value will be returned. the caller should free(3) the returned buffer. */
 #if defined(L_PLAT_WINDOWS)
-  #error "undefined l_write_current_dir"
+  #error "[windows] undefined l_write_curdir"
 #else
   char* curdir = get_current_dir_name();
   int count = 0;
@@ -68,7 +77,7 @@ typedef union {
 
 int main(void)
 {
-  l_byteorder data_of_bytes;
+  l_byteorder bytes;
   FILE* file = 0;
 
   file = fopen("autoconf.h", "wb");
@@ -84,9 +93,9 @@ int main(void)
   l_write_line(file, "#undef LNLYLIB_HOME_DIR");
   l_write_line(file, "#undef LNLYLIB_CLIB_DIR");
   l_write_line(file, "#undef LNLYLIB_LUALIB_DIR");
-  l_write_cdir(file, "#define LNLYLIB_HOME_DIR \"%s%s\"" L_NEWLINE);
-  l_write_line(file, "#define LNLYLIB_CLIB_DIR LNLYLIB_HOME_DIR \"/lib/\"");
-  l_write_line(file, "#define LNLYLIB_LUALIB_DIR LNLYLIB_HOME_DIR \"/lib/lua/\"");
+  l_write_cdir(file, "#define LNLYLIB_HOME_DIR \"%s\"");
+  l_write_line(file, "#define LNLYLIB_CLIB_DIR LNLYLIB_HOME_DIR \"lib/\"");
+  l_write_line(file, "#define LNLYLIB_LUALIB_DIR LNLYLIB_HOME_DIR \"lib/lua/\"%s", L_NEWLINE);
 
   l_write_line(file, "#undef L_MACH_32_BIT");
   l_write_line(file, "#undef L_MACH_64_BIT");
@@ -101,22 +110,22 @@ int main(void)
   if (sizeof(long) < 4) {
     l_write_line(file, "#error \"long int size is less than 4-byte\"");
   }
-  l_write_line(file, "#undef L_LIT_ENDIAN /* lower byte at lower address */");
+  l_write_line(file, "%s#undef L_LIT_ENDIAN /* lower byte at lower address */", L_NEWLINE);
   l_write_line(file, "#undef L_BIG_ENDIAN /* higher byte at lower address */");
-  data_of_bytes.i = 0xabcdef; 
-  if (data_of_byte.a[0] == 0xef) {
+  bytes.i = 0xabcdef;
+  if (bytes.a[0] == 0xef) {
     l_write_line(file, "#define L_LIT_ENDIAN");
-    if (data_of_bytes.a[1] != 0xcd || data_of_bytes.a[2] != 0xab || data_of_bytes.a[3] != 0x00) {
+    if (bytes.a[1] != 0xcd || bytes.a[2] != 0xab || bytes.a[3] != 0x00) {
       l_write_line(file, "#error \"little endian test fail\"");
     }
   } else {
     l_write_line(file, "#define L_BIG_ENDIAN");
-    if (data_of_bytes.a[0] != 0x00 || data_of_bytes.a[1] != 0xab || data_of_bytes.a[2] != 0xcd || data_of_bytes.a[3] != 0xef) {
+    if (bytes.a[0] != 0x00 || bytes.a[1] != 0xab || bytes.a[2] != 0xcd || bytes.a[3] != 0xef) {
       l_write_line(file, "#error \"big endian test fail\"");
     }
   }
 
-  l_write_line(file, "#undef false%s#undef true%s#undef l_bool", L_NEWLINE, L_NEWLINE);
+  l_write_line(file, "%s#undef false%s#undef true%s#undef l_bool", L_NEWLINE, L_NEWLINE, L_NEWLINE);
   l_write_line(file, "#undef l_byte%s#undef l_sbyte", L_NEWLINE);
   l_write_line(file, "#define false 0%s#define true 1", L_NEWLINE);
   if (sizeof(char) == 1) {
@@ -127,7 +136,7 @@ int main(void)
     l_write_line(file, "#error \"char size shall be 1-byte\"");
   }
 
-  l_write_line(file, "#undef l_short%s#undef l_ushort", L_NEWLINE);
+  l_write_line(file, "%s#undef l_short%s#undef l_ushort", L_NEWLINE, L_NEWLINE);
   if (sizeof(short) == 2) {
     l_write_line(file, "#define l_short short");
     l_write_line(file, "#define l_ushort unsigned short");
@@ -135,7 +144,7 @@ int main(void)
     l_write_line(file, "#error \"short int size shall be 2-byte\"");
   }
 
-  l_write_line(file, "#undef l_medit%s#undef l_umedit", L_NEWLINE);
+  l_write_line(file, "%s#undef l_medit%s#undef l_umedit", L_NEWLINE, L_NEWLINE);
   if (sizeof(int) == 4) {
     l_write_line(file, "#define l_medit int");
     l_write_line(file, "#define l_umedit unsigned int");
@@ -146,7 +155,7 @@ int main(void)
     l_write_line(file, "#error \"32-bit integer type not found\"");
   }
 
-  l_write_line(file, "#undef l_long%s#undef l_ulong", L_NEWLINE);
+  l_write_line(file, "%s#undef l_long%s#undef l_ulong", L_NEWLINE, L_NEWLINE);
   if (sizeof(long) == 8) {
     l_write_line(file, "#define l_long long");
     l_write_line(file, "#define l_ulong unsigned long");
@@ -157,7 +166,7 @@ int main(void)
     l_write_line(file, "#error \"64-bit integer type not found\"");
   }
 
-  l_write_line(file, "#undef l_int /* pointer-size integer type */%s#undef l_uint", L_NEWLINE);
+  l_write_line(file, "%s#undef l_int /* pointer-size integer type */%s#undef l_uint", L_NEWLINE, L_NEWLINE);
   if (sizeof(short) == sizeof(void*)) {
     l_write_line(file, "#define l_int short");
     l_write_line(file, "#define l_uint unsigned short");
@@ -174,16 +183,16 @@ int main(void)
     l_write_line(file, "#error pointer-size integer type not found");
   }
 
-  l_write_line(file, "undef L_EMPTY_HDL");
+  l_write_line(file, "%s#undef L_EMPTY_HDL", L_NEWLINE);
   l_write_line(file, "#define L_EMPTY_HDL l_empty_filehdl()");
 
 #if defined(L_PLAT_WINDOWS)
   l_write_line(file, "typedef struct { HANDLE winfd; } l_filehdl;");
 #elif defined(L_PLAT_LINUX)
   l_write_line(file, "typedef struct { int unifd; } l_filehdl;");
-  l_write_line(file, "L_INLINE l_filehdl l_empty_filehdl() { return (l_filehdl){-1}; }");
-  l_write_line(file, "L_INLINE l_bool l_filehdl_is_empty(l_filehdl* hdl) { return hdl->unifd == -1; }");
-  l_write_line(file, "L_INLINE l_bool l_filehdl_nt_empty(l_filehdl* hdl) { return hdl->unifd != -1; }");
+  l_write_line(file, "static l_filehdl l_empty_filehdl() { return (l_filehdl){-1}; }");
+  l_write_line(file, "static l_bool l_filehdl_is_empty(l_filehdl* hdl) { return hdl->unifd == -1; }");
+  l_write_line(file, "static l_bool l_filehdl_nt_empty(l_filehdl* hdl) { return hdl->unifd != -1; }");
 #else
   l_write_line(file, "#error l_filehdl not defined");
 #endif

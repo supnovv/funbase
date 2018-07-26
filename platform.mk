@@ -46,7 +46,8 @@ LDSHARED = -Wl,-Bdynamic
 
 LDFLAGS =
 LDPATH = -L./lib
-LDLIBS = -lm -ldl -lpthread -llua  # left library is more basic
+LDLIBS = -lm -ldl -lpthread  # left library is more basic
+LDLIBLUA = -llua
 
 ifeq ($(PLAT), linux)
 SHARED = $(POSINDEPCODE) -shared -Wl,-E -ldl
@@ -78,8 +79,7 @@ AUTOCONF = $(OUTDIR)/autoconf$(EXE)
 AUTOOBJS = $(OUTDIR)/autoconf$(OBJ)
 AUTOINCS = core/prefix.h
 
-COREOBJS = $(OUTDIR)/core/time$(OBJ) \
-           $(OUTDIR)/core/fsys$(OBJ) \
+COREOBJS = $(OUTDIR)/core/fsys$(OBJ) \
            $(OUTDIR)/core/lapi$(OBJ) \
            $(OUTDIR)/core/beat$(OBJ)
 
@@ -100,7 +100,7 @@ OSIINCS = $(COREINCS) \
 ifeq ($(PLAT), none)
 default: none
 else
-default: echo $(AUTOCONF) LNLYLIB
+default: echo MAKEDIR $(AUTOCONF) LNLYLIB
 endif
 
 none:
@@ -116,12 +116,16 @@ clean:
 
 $(OUTDIR)/%$(OBJ): %.c
 	@echo "$@ <- $? | $(CMPL)"
-	$(CMPL) $<
+	@$(CMPL) $<
+
+MAKEDIR:
+	$(MKDIR) $(OUTDIR)/core
+	$(MKDIR) $(OUTDIR)/osi
 
 $(AUTOCONF): $(AUTOOBJS) $(AUTOINCS)
 	$(RM) autoconf.h
 	@echo "$@ <- $(AUTOOBJS) | $(LINK)"
-	$(LINK) $(AUTOOBJS)
+	@$(LINK) $(AUTOOBJS)
 	./$@
 
 LNLYLIB: $(COREOBJS) $(COREINCS) $(OSIOBJS) $(OSIINCS)
