@@ -20,7 +20,9 @@
 
 #define l_byte unsigned char
 
-static void l_log_e(const void* fmt, ...) {
+static void
+l_log_e(const void* fmt, ...)
+{
   const l_byte* p = (const l_byte*)fmt;
   va_list args;
   for (; *p; ++p) {
@@ -36,7 +38,9 @@ static void l_log_e(const void* fmt, ...) {
   fprintf(stdout, L_NEWLINE);
 }
 
-static int l_write_line(FILE* self, const void* fmt, ...) {
+static int
+l_write_line(FILE* self, const void* fmt, ...)
+{
   va_list args;
   int sz = 0;
   if (!self || !fmt) return 0;
@@ -48,7 +52,9 @@ static int l_write_line(FILE* self, const void* fmt, ...) {
   return sz;
 }
 
-static int l_write_cdir(FILE* self, const void* fmt) {
+static int
+l_write_cdir(FILE* self, const void* fmt)
+{
   /** getcwd, get_current_dir_name - get current working directory
   #include <unistd.h>
   char *get_current_dir_name(void);
@@ -56,17 +62,19 @@ static int l_write_cdir(FILE* self, const void* fmt) {
   working directory. if the environment variable PWD is set, and its value is correct,
   then that value will be returned. the caller should free(3) the returned buffer. */
 #if defined(L_PLAT_WINDOWS)
-  #error "[windows] undefined l_write_curdir"
+  #error "[windows] undefined l_write_cdir"
 #else
-  char* curdir = get_current_dir_name();
+  char* curdir = 0;
   int count = 0;
+  curdir = get_current_dir_name();
   if (curdir == 0) {
     l_log_e("get_current_dir_name %s", strerror(errno));
     return 0;
+  } else {
+    count = l_write_line(self, fmt, curdir);
+    free(curdir);
+    return count;
   }
-  count = l_write_line(self, fmt, curdir, "/");
-  free(curdir);
-  return count;
 #endif
 }
 
@@ -94,8 +102,8 @@ int main(void)
   l_write_line(file, "#undef LNLYLIB_CLIB_DIR");
   l_write_line(file, "#undef LNLYLIB_LUALIB_DIR");
   l_write_cdir(file, "#define LNLYLIB_HOME_DIR \"%s\"");
-  l_write_line(file, "#define LNLYLIB_CLIB_DIR LNLYLIB_HOME_DIR \"lib/\"");
-  l_write_line(file, "#define LNLYLIB_LUALIB_DIR LNLYLIB_HOME_DIR \"lib/lua/\"%s", L_NEWLINE);
+  l_write_line(file, "#define LNLYLIB_CLIB_DIR LNLYLIB_HOME_DIR \"/lib\"");
+  l_write_line(file, "#define LNLYLIB_LUALIB_DIR LNLYLIB_HOME_DIR \"/lib/lua\"%s", L_NEWLINE);
 
   l_write_line(file, "#undef L_MACH_32_BIT");
   l_write_line(file, "#undef L_MACH_64_BIT");

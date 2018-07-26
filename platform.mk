@@ -112,15 +112,9 @@ echo:
 clean:
 	$(RM) $(OUTDIR) autoconf.h
 
-.PHONY: default none echo clean LNLYLIB
-
 $(OUTDIR)/%$(OBJ): %.c
 	@echo "$@ <- $? | $(CMPL)"
 	@$(CMPL) $<
-
-MAKEDIR:
-	$(MKDIR) $(OUTDIR)/core
-	$(MKDIR) $(OUTDIR)/osi
 
 $(AUTOCONF): $(AUTOOBJS) $(AUTOINCS)
 	$(RM) autoconf.h
@@ -128,5 +122,11 @@ $(AUTOCONF): $(AUTOOBJS) $(AUTOINCS)
 	@$(LINK) $(AUTOOBJS)
 	./$@
 
+MAKEDIR:
+	$(MKDIR) $(OUTDIR)/core
+	$(MKDIR) $(OUTDIR)/osi
+
 LNLYLIB: $(COREOBJS) $(COREINCS) $(OSIOBJS) $(OSIINCS)
+
+.PHONY: default none echo clean MAKEDIR LNLYLIB
 
