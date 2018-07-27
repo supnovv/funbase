@@ -43,10 +43,14 @@ POSINDEPCODE = -fPIC # position independent code
 LDSTATIC = -Wl,-Bstatic
 LDSHARED = -Wl,-Bdynamic
 
+# please install lua first for link
+# $ apt-get install libreadline-dev
+# # cd lua_folder
+# $ make linux && make install
+
 LDFLAGS =
 LDPATH = -L./lib
-LDLIBS = -lm -ldl -lpthread  # left library is more basic
-LDLIBLUA = -llua
+LDLIBS = -lm -ldl -lpthread -llua  # left library is more basic
 
 ifeq ($(PLAT), linux)
 SHARED = $(POSINDEPCODE) -shared -Wl,-E -ldl
