@@ -4,6 +4,70 @@
 #include <errno.h>
 #include "core/base.h"
 
+L_EXTERN void
+l_filename_init(l_filename* fn)
+{
+  fn->buff_len = FILENAME_MAX-8;
+  fn->name_len = 0;
+  fn->s[0] = 0;
+}
+
+L_EXTERN l_bool
+l_filename_append(l_filename* fn, l_strn s)
+{
+  if (s.n > 0 && fn->name_len + s.n < fn->buff_len) {
+    const l_byte* pend = s.p + s.n;
+    while (s.p < pend) {
+      fn->s[fn->name_len++] = *s.p++;
+    }
+    fn->s[fn->name_len] = 0;
+    return true;
+  } else {
+    return false;
+  }
+}
+
+L_EXTERN l_bool
+l_filename_addname(l_filename* fn, l_strn name, l_strn suffix)
+{
+  return l_filename_append(fn, name) && l_filename_append(fn, suffix);
+}
+
+L_EXTERN l_bool
+l_filename_addname_combine(l_filename* fn, l_strn part1, l_strn part2, l_strn sep)
+{
+  return l_filename_append(fn, part1) && l_filename_append(fn, sep) && l_filename_append(fn, part2);
+}
+
+L_EXTERN l_bool
+l_filename_addpath(l_filename* fn, l_strn path)
+{
+  if (path.n > 0 && fn->name_len + path.n < fn->buff_len) {
+    const l_byte* pend = path.p + path.n;
+    if (fn->name_len > 0) {
+      if (fn->s[fn->name_len - 1] == '/') {
+        if (*path.p == '/') {
+          path.p += 1;
+        }
+      } else {
+        if (*path.p != '/') {
+          fn->s[fn->name_len++] = '/';
+        }
+      }
+    }
+    while (path.p < pend) {
+      fn->s[fn->name_len++] = *path.p++;
+    }
+    if (fn->s[fn->name_len - 1] != '/') {
+      fn->s[fn->name_len++] = '/';
+    }
+    fn->s[fn->name_len] = 0;
+    return true;
+  } else {
+    return false;
+  }
+}
+
 static l_stdfile
 l_impl_stdfile_open(const void* name, const char* mode)
 {

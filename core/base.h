@@ -61,6 +61,9 @@ returning the number of bytes actually transferred. this is true on both 32-bit 
 #undef LNUL
 #define LNUL (0)
 
+#undef L_UNUSED
+#define L_UNUSED(a) ((void)a)
+
 typedef union {
   double d;
   l_byte a[8];
@@ -80,6 +83,18 @@ typedef struct {
 #define l_strn_c(s) ((l_strn){l_cstr(s), (s) ? strlen((char*)(s)) : 0}
 #define l_empty_strn() l_const_strn("")
 #define l_const_strn(s) ((l_strn){l_cstr("" s), sizeof(s) - 1})
+
+L_INLINE l_bool
+l_strn_nt_empty(const l_strn* s)
+{
+  return s->p && (s->n > 0);
+}
+
+L_INLINE l_bool
+l_strn_is_empty(const l_strn* s)
+{
+  return !l_strn_nt_empty(s);
+}
 
 L_INLINE l_strn
 l_strn_l(const void* s, l_int len)
@@ -330,6 +345,19 @@ l_impl_logger_n(struct lnlylib_env* E, const void* tag, const void* s, l_int n, 
 {
   l_impl_logger_func(E, tag, s, n, a);
 }
+
+typedef struct {
+  l_int buff_len;
+  l_int name_len;
+  l_byte s[FILENAME_MAX];
+} l_filename;
+
+L_EXTERN void l_filename_init(l_filename* fn);
+L_INLINE l_strn l_filename_strn(l_filename* fn) { return l_strn_l(fn->s, fn->name_len); }
+L_EXTERN l_bool l_filename_append(l_filename* fn, l_strn s);
+L_EXTERN l_bool l_filename_addname(l_filename* fn, l_strn name, l_strn suffix);
+L_EXTERN l_bool l_filename_addname_combine(l_filename* fn, l_strn part1, l_strn part2, l_strn sep);
+L_EXTERN l_bool l_filename_addpath(l_filename* fn, l_strn path);
 
 typedef struct {
   void* file;

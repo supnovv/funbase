@@ -63,6 +63,14 @@ ll_get_field_table(lua_State* L, l_tableindex t, const void* field)
   return table;
 }
 
+L_EXTERN l_funcindex /* [-0, +1, e] */
+ll_get_field_func(lua_State* L, l_tableindex t, const void* field)
+{
+  l_funcindex func;
+  func.index = ll_get_field(L, t, field);
+  return func;
+}
+
 L_EXTERN l_tableindex
 ll_new_table(lua_State* L)
 {
@@ -80,7 +88,7 @@ ll_new_table_with_size(lua_State* L, int nseq, int rest)
 L_EXTERN int
 ll_type(lua_State* L, int stackindex)
 {
-  return lua_type(L, stackindex)
+  return lua_type(L, stackindex);
 }
 
 L_EXTERN l_bool
@@ -90,21 +98,21 @@ ll_is_str(lua_State* L, int stackindex)
 }
 
 L_EXTERN l_bool
-ll_is_int(lua_State* L, l_statckindex stackindex)
+ll_is_int(lua_State* L, int stackindex)
 {
-  return lua_isinteger(L, stackindex)
+  return lua_isinteger(L, stackindex);
 }
 
 L_EXTERN l_bool
 ll_is_num(lua_State* L, int stackindex)
 {
-  return ll_type(stackindex) == LUA_TNUMBER;
+  return ll_type(L, stackindex) == LUA_TNUMBER;
 }
 
 L_EXTERN l_bool
 ll_is_invalid(lua_State* L, int stackindex)
 {
-  int n = ll_type(L, stackindex)
+  int n = ll_type(L, stackindex);
   return (n == LUA_TNIL || n == LUA_TNONE);
 }
 
@@ -190,8 +198,8 @@ ll_new_str_n(lua_State* L, int n, l_strn* s)
   pend = s + n;
 
   while (s < pend) {
-    if (s->str && s->len > 0) {
-      luaL_addlstring(&B, (const char*)s->str, (size_t)s->len);
+    if (s->p && s->n > 0) {
+      luaL_addlstring(&B, (const char*)s->p, (size_t)s->n);
     }
     s += 1;
   }
@@ -308,19 +316,22 @@ ll_add_cpath(lua_State* L, l_strn path)
   ll_pop_beyond(L, package.index);
 }
 
+#if 0
 L_EXTERN l_funcindex /* load the code to a function */
 ll_load_expr(lua_State* L, l_strn expr)
-{}
+{
+}
 
 L_EXTERN l_funcindex /* load the code to a function */
 ll_load_file(lua_State* L, l_strn file)
-{}
+{
+}
 
 L_EXTERN l_funcindex /* load the code to a function */
 ll_load_clib(lua_State* L, l_strn file, l_strn openfuncname)
 {
-
 }
+#endif
 
 /** search and load moudle **
 void luaL_requiref(lua_State* L, const char* modname, lua_CFunction openf, int setglobal);
@@ -426,6 +437,10 @@ static l_funcindex
 ll_dynlib_load(lua_State* L, l_strn lib, l_strn symbol)
 {
   /* can use package.loadlib */
+  L_UNUSED(L);
+  L_UNUSED(lib);
+  L_UNUSED(symbol);
+  return (l_funcindex){0};
 }
 
 static int
@@ -433,17 +448,17 @@ ll_search_and_load_func(lua_State* L)
 {
   int name_lookup = 0;
   l_strn main_module;
-  l_tablindex package;
+  l_tableindex package;
   int path;
   l_funcindex search_func;
 
   name_lookup = lua_gettop(L);
   package = ll_get_table(L, "package");
   path = ll_get_field(L, package, "path");
-  search_func = ll_get_field(L, package, "searchpath");
+  search_func = ll_get_field_func(L, package, "searchpath");
 
   lua_pushvalue(L, name_lookup);
-  lua_pushvalue(L, path.index);
+  lua_pushvalue(L, path);
   ll_pcall(L, search_func, 1); /* get 1 result: nil or the found file name */
 
   if (lua_isnil(L, -1)) {
@@ -459,7 +474,7 @@ try_to_load_from_c_library:
   path = ll_get_field(L, package, "cpath");
 
   lua_pushvalue(L, name_lookup);
-  lua_pushvalue(L, path.index);
+  lua_pushvalue(L, path);
   ll_pcall(L, search_func, 1); /* get 1 result: nil or c library file name found */
 
   if (lua_isnil(L, -1)) {
@@ -476,10 +491,10 @@ try_all_module_in_one_library_method:
     return 1; /* return nil on the top */
   }
 
-  ll_pop_to(L, path.index);
+  ll_pop_to(L, path);
 
   ll_push_str(L, main_module);
-  lua_pushvalue(L, path.index);
+  lua_pushvalue(L, path);
   ll_pcall(L, search_func, 1); /* get 1 result: nil or c library file name found */
 
   if (lua_isnil(L, -1)) {
