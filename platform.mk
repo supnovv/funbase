@@ -33,7 +33,6 @@ PLAT = none
 PLATS = linux macosx
 
 CC = gcc
-CC89 = gcc -std=c89
 CFLAGS = -g -O2
 CWARNS = -Wall -Wextra -Werror -Wno-error=unused-function -Wno-unused-function
 CINCPATH = -I./
@@ -60,10 +59,11 @@ CMACRO += -DL_PLAT_MACOSX
 endif
 
 CMPL_OPTIONS = $(CFLAGS) $(CWARNS) $(CINCPATH) $(CMACRO)
-CMPL = $(CC89) $(CMPL_OPTIONS) -c -o$@
+CMPL = $(CC) -std=c89 $(CMPL_OPTIONS) -c -o$@
+CC99 = $(CC) -std=c99 $(CMPL_OPTIONS) -c -o$@
 
 LINK_OPTIONS = $(LDFLAGS) $(LDPATH) $(LDLIBS)
-LINK = $(CC89) $(LINK_OPTIONS) -o$@
+LINK = $(CC) -std=c89 $(LINK_OPTIONS) -o$@
 
 RM = rm -rf
 MKDIR = mkdir -p
@@ -113,6 +113,10 @@ clean:
 $(OUTDIR)/%$(OBJ): %.c
 	@echo "$@ <- $? | $(CMPL)"
 	@$(CMPL) $<
+
+$(OUTDIR)/core/lapi$(OBJ): core/lapi.c  # use c99 to support 'long long'
+	@echo "$@ <- $? | $(CC99)"
+	@$(CC99) $<
 
 $(AUTOCONF): $(AUTOOBJS) $(AUTOINCS)
 	$(RM) autoconf.h

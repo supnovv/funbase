@@ -11,7 +11,7 @@ l_impl_stdfile_open(const void* name, const char* mode)
   if (name && mode) {
     s.file = fopen((const char*)name, mode);
     if (s.file == 0) {
-      l_loge_1(LNUL, "fopen %s %s", ls(name), lserror(errno));
+      l_loge_2(LNUL, "fopen %s %s", ls(name), lserror(errno));
     }
   } else {
     l_loge_s(LNUL, "EINVAL");
@@ -22,7 +22,7 @@ l_impl_stdfile_open(const void* name, const char* mode)
 static l_stdfile
 l_impl_stdfile_open_nobuf(const void* name, const char* mode)
 {
-  l_stdfile s = l_impl_stdfile_open(name, "wb");
+  l_stdfile s = l_impl_stdfile_open(name, mode);
   if (s.file) {
     setbuf((FILE*)s.file, 0);
   }
@@ -34,7 +34,7 @@ l_impl_stdfile_reopen(FILE* file, const void* name, const char* mode)
 {
   if (name && mode) {
     if (freopen((const char*)name, mode, file) == 0) {
-      l_loge_1(LNUL, "freopen %s %s", ls(name), lserror(errno));
+      l_loge_2(LNUL, "freopen %s %s", ls(name), lserror(errno));
     }
   } else {
     l_loge_s(LNUL, "EINVAL");
@@ -139,7 +139,7 @@ l_stdfile_seekto(l_stdfile* s, l_int pos)
   if (fseek((FILE*)s->file, pos, SEEK_SET) == 0) {
     return true;
   } else {
-    l_loge_1(LNUL, "fseek SET %d %s", ld(pos), lserror(errno));
+    l_loge_2(LNUL, "fseek SET %d %s", ld(pos), lserror(errno));
     return false;
   }
 }
@@ -154,7 +154,7 @@ l_stdfile_forword(l_stdfile* s, l_int offset)
   if (fseek((FILE*)s->file, offset, SEEK_CUR) == 0) {
     return true;
   } else {
-    l_loge_1(LNUL, "fseek CUR %d %s", ld(offset), lserror(errno));
+    l_loge_2(LNUL, "fseek CUR %d %s", ld(offset), lserror(errno));
     return false;
   }
 }
@@ -169,7 +169,7 @@ l_stdfile_backward(l_stdfile* s, l_int offset)
   if (fseek((FILE*)s->file, -offset, SEEK_CUR) == 0) {
     return true;
   } else {
-    l_loge_1(LNUL, "fseek CUR %d %s", ld(offset), lserror(errno));
+    l_loge_2(LNUL, "fseek CUR %d %s", ld(offset), lserror(errno));
     return false;
   }
 }

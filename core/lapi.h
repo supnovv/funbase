@@ -1,7 +1,7 @@
 #ifndef LNLYLIB_CORE_LAPI_H
 #define LNLYLIB_CORE_LAPI_H
 #include <lualib.h>
-#include <luaxlib.h>
+#include <lauxlib.h>
 #include "core/base.h"
 
 #define ll_pop_err(L) {\
