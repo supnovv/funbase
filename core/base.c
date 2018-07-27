@@ -1,5 +1,8 @@
 #define LNLYLIB_API_IMPL
-#include "core/fsys.h"
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include "core/base.h"
 
 static l_stdfile
 l_impl_stdfile_open(const void* name, const char* mode)
@@ -8,10 +11,10 @@ l_impl_stdfile_open(const void* name, const char* mode)
   if (name && mode) {
     s.file = fopen((const char*)name, mode);
     if (s.file == 0) {
-      l_loge_1("fopen %s", lserror(errno));
+      l_loge_1(LNUL, "fopen %s %s", ls(name), lserror(errno));
     }
   } else {
-    l_loge_s("invalid parameter");
+    l_loge_s(LNUL, "EINVAL");
   }
   return s;
 }
@@ -31,10 +34,10 @@ l_impl_stdfile_reopen(FILE* file, const void* name, const char* mode)
 {
   if (name && mode) {
     if (freopen((const char*)name, mode, file) == 0) {
-      l_loge_1("freopen %s", lserror(errno));
+      l_loge_1(LNUL, "freopen %s %s", ls(name), lserror(errno));
     }
   } else {
-    l_loge_s("invalid parameter");
+    l_loge_s(LNUL, "EINVAL");
   }
 }
 
@@ -87,7 +90,7 @@ l_stdfile_close(l_stdfile* s)
     return;
   }
   if (fclose((FILE*)s->file) != 0) {
-    l_loge_1("fclose %s", lserror(errno));
+    l_loge_1(LNUL, "fclose %s", lserror(errno));
   }
   s->file = 0;
 }
@@ -107,7 +110,7 @@ l_stdfile_flush(l_stdfile* s)
   if (fflush((FILE*)s->file) == 0) {
     return true;
   } else {
-    l_loge_1("fflush %s", lserror(errno));
+    l_loge_1(LNUL, "fflush %s", lserror(errno));
     return false;
   }
 }
@@ -121,7 +124,7 @@ l_stdfile_rewind(l_stdfile* s)
   if (fseek((FILE*)s->file, 0, SEEK_SET) == 0) {
     return true;
   } else {
-    l_loge_1("fseek SET %s", lserror(errno));
+    l_loge_1(LNUL, "fseek SET %s", lserror(errno));
     return false;
   }
 }
@@ -130,13 +133,13 @@ L_EXTERN l_bool
 l_stdfile_seekto(l_stdfile* s, l_int pos)
 {
   if (s->file == 0 || pos < 0 || pos > L_MAX_INT_IO) {
-    l_loge_1("invalid parameter %d", ld(pos));
+    l_loge_1(LNUL, "EINVAL %d", ld(pos));
     return false;
   }
   if (fseek((FILE*)s->file, pos, SEEK_SET) == 0) {
     return true;
   } else {
-    l_loge_1("fseek SET %d %s", ld(pos), lserror(errno));
+    l_loge_1(LNUL, "fseek SET %d %s", ld(pos), lserror(errno));
     return false;
   }
 }
@@ -145,13 +148,13 @@ L_EXTERN l_bool
 l_stdfile_forword(l_stdfile* s, l_int offset)
 {
   if (s->file == 0 || offset < 0 || offset > L_MAX_INT_IO) {
-    l_loge_1("invalid parameter %d", ld(offset));
+    l_loge_1(LNUL, "EINVAL %d", ld(offset));
     return false;
   }
   if (fseek((FILE*)s->file, offset, SEEK_CUR) == 0) {
     return true;
   } else {
-    l_loge_1("fseek CUR %d %s", ld(offset), lserror(errno));
+    l_loge_1(LNUL, "fseek CUR %d %s", ld(offset), lserror(errno));
     return false;
   }
 }
@@ -160,13 +163,13 @@ L_EXTERN l_bool
 l_stdfile_backward(l_stdfile* s, l_int offset)
 {
   if (s->file == 0 || offset < 0 || offset > L_MAX_INT_IO) {
-    l_loge_1("invalid parameter %d", ld(offset));
+    l_loge_1(LNUL, "EINVAL %d", ld(offset));
     return false;
   }
   if (fseek((FILE*)s->file, -offset, SEEK_CUR) == 0) {
     return true;
   } else {
-    l_loge_1("fseek CUR %d %s", ld(offset), lserror(errno));
+    l_loge_1(LNUL, "fseek CUR %d %s", ld(offset), lserror(errno));
     return false;
   }
 }
@@ -175,7 +178,7 @@ L_EXTERN l_int
 l_stdfile_read(l_stdfile* s, void* out, l_int size)
 {
   if (s->file == 0 || out == 0 || size < 0 || size > L_MAX_INT_IO) {
-    l_loge_1("invalid parameter %d", ld(size));
+    l_loge_1(LNUL, "EINVAL %d", ld(size));
     return 0;
   }
   if (size == 0) {
@@ -187,7 +190,7 @@ l_stdfile_read(l_stdfile* s, void* out, l_int size)
       return n;
     }
     if (!feof((FILE*)s->file)) {
-      l_loge_1("fread %s", lserror(errno));
+      l_loge_1(LNUL, "fread %s", lserror(errno));
     }
     if (n < 0) {
       return 0;
@@ -200,7 +203,7 @@ L_EXTERN l_int
 l_stdfile_write(l_stdfile* s, const void* p, l_int len)
 {
   if (s->file == 0 || p == 0 || len < 0 || len > L_MAX_INT_IO) {
-    l_loge_1("invalid parameter %d", ld(len));
+    l_loge_1(LNUL, "EINVAL %d", ld(len));
     return 0;
   }
   if (len == 0) {
@@ -210,7 +213,7 @@ l_stdfile_write(l_stdfile* s, const void* p, l_int len)
     if (n == len) {
       return n;
     }
-    l_loge_1("fwrite %s", lserror(errno));
+    l_loge_1(LNUL, "fwrite %s", lserror(errno));
     if (n < 0) {
       return 0;
     }
@@ -219,7 +222,8 @@ l_stdfile_write(l_stdfile* s, const void* p, l_int len)
 }
 
 L_EXTERN l_int
-l_stdfile_write_strn(l_stdfile* out, l_strn s) {
+l_stdfile_write_strn(l_stdfile* out, l_strn s)
+{
   return l_stdfile_write(out, s.p, s.n);
 }
 
@@ -230,7 +234,7 @@ l_stdfile_put(l_stdfile* s, l_byte ch)
     return 0;
   }
   if (fwrite(&ch, 1, 1, (FILE*)s->file) != 1) {
-    l_loge_1("fwrite %s", lserror(errno));
+    l_loge_1(LNUL, "fwrite %s", lserror(errno));
     return 0;
   }
   return 1;
@@ -244,7 +248,7 @@ l_stdfile_get(l_stdfile* s, l_byte* ch)
   }
   if (fread(ch, 1, 1, (FILE*)s->file) != 1) {
     if (!feof((FILE*)s->file)) {
-      l_loge_1("fread %s", lserror(errno));
+      l_loge_1(LNUL, "fread %s", lserror(errno));
     }
     return 0;
   }
@@ -258,11 +262,11 @@ l_stdfile_remove(const void* name)
     if (remove((const char*)name) == 0) {
       return true;
     } else {
-      l_loge_1("remove %s", lserror(errno));
+      l_loge_1(LNUL, "remove %s", lserror(errno));
       return false;
     }
   } else {
-    l_loge_s("invalid parameter");
+    l_loge_s(LNUL, "EINVAL");
     return false;
   }
 }
@@ -283,11 +287,11 @@ l_stdfile_rename(const void* from, const void* to)
     if (rename((const char*)from, (const char*)to) == 0) {
       return true;
     } else {
-      l_loge_1("rename %s", lserror(errno));
+      l_loge_1(LNUL, "rename %s", lserror(errno));
       return false;
     }
   } else {
-    l_loge_s("invalid parameter");
+    l_loge_s(LNUL, "EINVAL");
     return false;
   }
 }

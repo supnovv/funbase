@@ -79,15 +79,13 @@ AUTOCONF = $(OUTDIR)/autoconf$(EXE)
 AUTOOBJS = $(OUTDIR)/autoconf$(OBJ)
 AUTOINCS = core/prefix.h
 
-COREOBJS = $(OUTDIR)/core/fsys$(OBJ) \
+COREOBJS = $(OUTDIR)/core/base$(OBJ) \
            $(OUTDIR)/core/lapi$(OBJ) \
            $(OUTDIR)/core/beat$(OBJ)
 
 COREINCS = autoconf.h \
            core/prefix.h \
            core/base.h \
-           core/time.h \
-           core/fsys.h \
            core/lapi.h \
            core/beat.h
 

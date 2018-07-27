@@ -211,7 +211,8 @@ l_dynhdl_close(l_dynhdl* hdl)
 }
 
 L_EXTERN int
-l_thrhdl_create(l_thrhdl* thrhdl, void* (*start)(void*), void* para) {
+l_thrhdl_create(l_thrhdl* thrhdl, void* (*start)(void*), void* para)
+{
   int n = pthread_create((pthread_t*)thrhdl, 0, start, para);
   if (n == 0) return true;
   l_loge_1(LNUL, "pthread_create %s", lserror(n));
@@ -219,7 +220,8 @@ l_thrhdl_create(l_thrhdl* thrhdl, void* (*start)(void*), void* para) {
 }
 
 L_EXTERN int
-l_thrhdl_cancel(l_thrhdl* thrhdl) {
+l_thrhdl_cancel(l_thrhdl* thrhdl)
+{
   /* pthread_cancel - send a cancellation request to a thread
   #include <pthread.h>
   int pthread_cancel(pthread_t thread);
@@ -232,14 +234,16 @@ l_thrhdl_cancel(l_thrhdl* thrhdl) {
 }
 
 L_EXTERN l_thrhdl
-l_thrhdl_self() {
+l_thrhdl_self()
+{
   l_thrhdl thrhdl;
   *((pthread_t*)&thrhdl) = pthread_self();
   return thrhdl;
 }
 
 L_EXTERN int
-l_thrhdl_join(l_thrhdl* thrhdl) {
+l_thrhdl_join(l_thrhdl* thrhdl)
+{
   int n = 0;
   void* exitcode = 0;
   /* wait thread terminate, if already terminated then return
@@ -252,7 +256,8 @@ l_thrhdl_join(l_thrhdl* thrhdl) {
 }
 
 L_EXTERN void
-l_thrhdl_sleep(l_long us) {
+l_thrhdl_sleep(l_long us)
+{
   struct timespec req;
   req.tv_sec = (time_t)(us / 1000000);
   req.tv_nsec = (long)(us % 1000000 * 1000);
@@ -262,12 +267,14 @@ l_thrhdl_sleep(l_long us) {
 }
 
 L_EXTERN void
-l_thrhdl_exit() {
+l_thrhdl_exit()
+{
   pthread_exit((void*)1);
 }
 
 L_EXTERN void
-l_thrkey_init(l_thrkey* self) {
+l_thrkey_init(l_thrkey* self)
+{
   /** pthread_key_create - thread-specific data key creation **
   #include <pthread.h>
   int pthread_key_create(pthread_key_t* key, void (*destructor)(void*));
@@ -279,7 +286,8 @@ l_thrkey_init(l_thrkey* self) {
 }
 
 L_EXTERN void
-l_thrkey_free(l_thrkey* self) {
+l_thrkey_free(l_thrkey* self)
+{
   /** pthread_key_delete - thread-specific data key deletion **
   #include <pthread.h>
   int pthread_key_delete(pthread_key_t key); */
@@ -288,7 +296,8 @@ l_thrkey_free(l_thrkey* self) {
 }
 
 L_EXTERN void
-l_thrkey_set_data(l_thrkey* self, const void* data) {
+l_thrkey_set_data(l_thrkey* self, const void* data)
+{
   /* different threads may bind different values to the same key, the value
   is typically a pointer to blocks of dynamically allocated memory that have
   been reserved for use by the calling thread. */
@@ -297,7 +306,8 @@ l_thrkey_set_data(l_thrkey* self, const void* data) {
 }
 
 L_EXTERN void*
-l_thrkey_get_data(l_thrkey* self) {
+l_thrkey_get_data(l_thrkey* self)
+{
   /** thread-specific data management **
   #include <pthread.h>
   void* pthread_getspecific(pthread_key_t key);
@@ -309,19 +319,22 @@ l_thrkey_get_data(l_thrkey* self) {
 }
 
 L_EXTERN void
-l_mutex_init(l_mutex* self) {
+l_mutex_init(l_mutex* self)
+{
   int n = pthread_mutex_init((pthread_mutex_t*)self, 0);
   if (n != 0) l_loge_1(LNUL, "pthread_mutex_init %s", lserror(n));
 }
 
 L_EXTERN void
-l_mutex_free(l_mutex* self) {
+l_mutex_free(l_mutex* self)
+{
   int n = pthread_mutex_destroy((pthread_mutex_t*)self);
   if (n != 0) l_loge_1(LNUL, "pthread_mutex_destroy %s", lserror(n));
 }
 
 L_EXTERN int
-l_mutex_lock(l_mutex* self) {
+l_mutex_lock(l_mutex* self)
+{
   int n = pthread_mutex_lock((pthread_mutex_t*)self);
   if (n == 0) return true;
   l_loge_1(LNUL, "pthread_mutex_lock %s", lserror(n));
@@ -329,7 +342,8 @@ l_mutex_lock(l_mutex* self) {
 }
 
 L_EXTERN int
-l_mutex_unlock(l_mutex* self) {
+l_mutex_unlock(l_mutex* self)
+{
   int n = pthread_mutex_unlock((pthread_mutex_t*)self);
   if (n == 0) return true;
   l_loge_1(LNUL, "pthread_mutex_unlock %s", lserror(n));
@@ -337,7 +351,8 @@ l_mutex_unlock(l_mutex* self) {
 }
 
 L_EXTERN int
-l_mutex_try_lock(l_mutex* self) {
+l_mutex_try_lock(l_mutex* self)
+{
   int n = pthread_mutex_trylock((pthread_mutex_t*)self);
   if (n == 0) return true;
   if (n != EBUSY) l_loge_1(LNUL, "pthread_mutex_trylock %s", lserror(n));
@@ -345,19 +360,22 @@ l_mutex_try_lock(l_mutex* self) {
 }
 
 L_EXTERN void
-l_rwlock_init(l_rwlock* self) {
+l_rwlock_init(l_rwlock* self)
+{
   int n = pthread_rwlock_init((pthread_rwlock_t*)self, 0);
   if (n != 0) l_loge_1(LNUL, "pthread_rwlock_init %s", lserror(n));
 }
 
 L_EXTERN void
-l_rwlock_free(l_rwlock* self) {
+l_rwlock_free(l_rwlock* self)
+{
   int n = pthread_rwlock_destroy((pthread_rwlock_t*)self);
   if (n != 0) l_loge_1(LNUL, "pthread_rwlock_destroy %s", lserror(n));
 }
 
 L_EXTERN int
-l_rwlock_rdlock(l_rwlock* self) {
+l_rwlock_rdlock(l_rwlock* self)
+{
   int n = pthread_rwlock_rdlock((pthread_rwlock_t*)self);
   if (n == 0) return true;
   l_loge_1(LNUL, "pthread_rwlock_rdlock %s", lserror(n));
@@ -365,7 +383,8 @@ l_rwlock_rdlock(l_rwlock* self) {
 }
 
 L_EXTERN int
-l_rwlock_wrlock(l_rwlock* self) {
+l_rwlock_wrlock(l_rwlock* self)
+{
   int n = pthread_rwlock_wrlock((pthread_rwlock_t*)self);
   if (n == 0) return true;
   l_loge_1(LNUL, "pthread_rwlock_wrlock %s", lserror(n));
@@ -373,7 +392,8 @@ l_rwlock_wrlock(l_rwlock* self) {
 }
 
 L_EXTERN int
-l_rwlock_unlock(l_rwlock* self) {
+l_rwlock_unlock(l_rwlock* self)
+{
   int n = pthread_rwlock_unlock((pthread_rwlock_t*)self);
   if (n == 0) return true;
   l_loge_1(LNUL, "pthread_rwlock_unlock %s", lserror(n));
@@ -381,7 +401,8 @@ l_rwlock_unlock(l_rwlock* self) {
 }
 
 L_EXTERN int
-l_rwlock_try_read(l_rwlock* self) {
+l_rwlock_try_read(l_rwlock* self)
+{
   int n = pthread_rwlock_tryrdlock((pthread_rwlock_t*)self);
   if (n == 0) return true;
   if (n != EBUSY) l_loge_1(LNUL, "pthread_rwlock_tryrdlock %s", lserror(n));
@@ -389,7 +410,8 @@ l_rwlock_try_read(l_rwlock* self) {
 }
 
 L_EXTERN int
-l_rwlock_try_write(l_rwlock* self) {
+l_rwlock_try_write(l_rwlock* self)
+{
   int n = pthread_rwlock_trywrlock((pthread_rwlock_t*)self);
   if (n == 0) return true;
   if (n != EBUSY) l_loge_1(LNUL, "pthread_rwlock_trywrlock %s", lserror(n));
@@ -397,19 +419,22 @@ l_rwlock_try_write(l_rwlock* self) {
 }
 
 L_EXTERN void
-l_condv_init(l_condv* self) {
+l_condv_init(l_condv* self)
+{
   int n = pthread_cond_init((pthread_cond_t*)self, 0);
   if (n != 0) l_loge_1(LNUL, "pthread_cond_init %s", lserror(n));
 }
 
 L_EXTERN void
-l_condv_free(l_condv* self) {
+l_condv_free(l_condv* self)
+{
   int n = pthread_cond_destroy((pthread_cond_t*)self);
   if (n != 0) l_loge_1(LNUL, "pthread_cond_destroy %s", lserror(n));
 }
 
 L_EXTERN int
-l_condv_wait(l_condv* self, l_mutex* mutex) {
+l_condv_wait(l_condv* self, l_mutex* mutex)
+{
   int n = pthread_cond_wait((pthread_cond_t*)self, (pthread_mutex_t*)mutex);
   if (n == 0) return true;
   l_loge_1(LNUL, "pthread_cond_wait %s", lserror(n));
@@ -417,14 +442,15 @@ l_condv_wait(l_condv* self, l_mutex* mutex) {
 }
 
 L_EXTERN int
-l_condv_timed_wait(l_condv* self, l_mutex* mutex, l_long ns) {
+l_condv_timed_wait(l_condv* self, l_mutex* mutex, l_long ns)
+{
   l_time curtime = l_system_time();
   struct timespec tm;
   int n = 0;
 
   /* caculate the absolute time */
   ns += curtime.nsec + curtime.sec *  L_NSEC_PERSEC;
-  if (ns < 0) { ns = 0; l_loge_s(LNUL, "l_condv_timedWait invalid timeout value"); }
+  if (ns < 0) { ns = 0; l_loge_s(LNUL, "EINVAL %d", ld(ns)); }
   tm.tv_sec = (time_t)(ns / L_NSEC_PERSEC);
   tm.tv_nsec = (long)(ns - tm.tv_sec * L_NSEC_PERSEC);
 
@@ -437,7 +463,8 @@ l_condv_timed_wait(l_condv* self, l_mutex* mutex, l_long ns) {
 }
 
 L_EXTERN int
-l_condv_signal(l_condv* self) {
+l_condv_signal(l_condv* self)
+{
   /* pthread_cond_signal() shall unblock at least one of the threads
   that are blocked on the specified condition variable cond (if any
   threads are blocked on cond).
@@ -456,7 +483,8 @@ l_condv_signal(l_condv* self) {
 }
 
 L_EXTERN int
-l_condv_broadcast(l_condv* self) {
+l_condv_broadcast(l_condv* self)
+{
   int n = pthread_cond_broadcast((pthread_cond_t*)self);
   if (n == 0) return true;
   l_loge_1(LNUL, "pthread_cond_broadcast %s", lserror(n));
@@ -496,19 +524,22 @@ On success, zero is returned; on error, -1 is returned and errno is set.
 **********************************************************************/
 
 L_EXTERN int
-l_file_isexist(const void* name) {
+l_file_isexist(const void* name)
+{
   return (name && faccessat(AT_FDCWD, (const char*)name, F_OK, AT_SYMLINK_NOFOLLOW) == 0);
 }
 
 L_EXTERN int
-l_file_isexistat(l_filedesc* dirfd, const void* name) {
-  l_lnxfiledesc* pdir = (l_lnxfiledesc*)dirfd);
+l_file_isexistat(l_filedesc* dirfd, const void* name)
+{
+  l_lnxfiledesc* pdir = (l_lnxfiledesc*)dirfd;
   if (pdir->fd == -1 || !name) return false;
   return (faccessat(pdir->fd, (const char*)name, F_OK, AT_SYMLINK_NOFOLLOW) == 0);
 }
 
 L_EXTERN int
-l_file_getattr(l_fileaddr* fa, const void* name) {
+l_file_getattr(l_fileaddr* fa, const void* name)
+{
   struct stat st;
   if (lstat((const char*)name, &st) != 0) return false;
   fa->size = (l_long)st.st_size;
@@ -522,20 +553,23 @@ l_file_getattr(l_fileaddr* fa, const void* name) {
 }
 
 L_EXTERN int
-l_file_folderexist(const void* foldername) {
+l_file_folderexist(const void* foldername)
+{
   struct stat st;
   return (lstat((const char*)name, &st) == 0 && S_ISDIR(st.st_mode));
 }
 
 L_EXTERN int
-l_file_opendir(l_filedesc* self, const void* name) {
+l_file_opendir(l_filedesc* self, const void* name)
+{
   l_lnxfiledesc* p = (l_lnxfiledesc*)self;
   p->fd = open((const char*)name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOATIME);
   return (p->fd != -1);
 }
 
 L_EXTERN void
-l_file_closefd(l_filedesc* self) {
+l_file_closefd(l_filedesc* self)
+{
   l_lnxfiledesc* p = (l_lnxfiledesc*)self;
   if (p->fd == -1) return;
   if (close(p->fd) != 0) {
@@ -590,7 +624,8 @@ typedef struct {
 } l_lnxdirstream;
 
 L_EXTERN int
-l_dirstream_opendir(l_dirstream* self, const void* name) {
+l_dirstream_opendir(l_dirstream* self, const void* name)
+{
   l_lnxdirstream* d = (l_lnxdirstream*)self;
   if ((d->stream = opendir((const char*)name)) == 0) {
     l_loge_1(LNUL, "opendir %s", lserror(errno));
@@ -599,7 +634,8 @@ l_dirstream_opendir(l_dirstream* self, const void* name) {
 }
 
 L_EXTERN void
-l_dirstream_close(l_dirstream* self) {
+l_dirstream_close(l_dirstream* self)
+{
   l_lnxdirstream* d = (l_lnxdirstream*)self;
   if (d->stream == 0) return;
   if (closedir(d->stream) != 0) {
@@ -609,7 +645,8 @@ l_dirstream_close(l_dirstream* self) {
 }
 
 L_EXTERN const l_byte*
-l_dirstream_read(l_dirstream* self) {
+l_dirstream_read(l_dirstream* self)
+{
   l_lnxdirstream* d = (l_lnxdirstream*)self;
   struct dirent* entry = 0;
   errno = 0;
@@ -621,7 +658,8 @@ l_dirstream_read(l_dirstream* self) {
 }
 
 L_EXTERN const l_byte*
-l_dirstream_read2(l_dirstream* self, int* isdir) {
+l_dirstream_read2(l_dirstream* self, int* isdir)
+{
   l_lnxdirstream* d = (l_lnxdirstream*)self;
   struct dirent* entry = 0;
   if (isdir) *isdir = 0;
@@ -698,7 +736,7 @@ l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port)
       }
     }
     if (retn == 0) {
-      l_loge_1(LNUL, "inet_pton invalid ip %strn", lstrn(&ip));
+      l_loge_1(LNUL, "inet_pton EINVAL ip %strn", lstrn(&ip));
     } else {
       l_loge_1(LNUL, "inet_pton %s", lserror(errno));
     }
@@ -978,7 +1016,7 @@ l_socket_shutdown(l_socket* sock, l_byte r_w_a)
   case 'r': case 'R': flag = SHUT_RD; break;
   case 'w': case 'W': flag = SHUT_WR; break;
   case 'a': case 'A': flag = SHUT_RDWR; break;
-  default: l_loge_s(LNUL, "shutdone invalid argument"); break;
+  default: l_loge_s(LNUL, "shutdone EINVAL"); break;
   }
   if (shutdown(sock->unifd, flag) != 0) {
     l_loge_1(LNUL, "shutdown %s", lserror(errno));
@@ -1031,7 +1069,7 @@ l_impl_socket_bind(int sock, const l_sockaddr* addr)
   这两个套接字选项时在详细讨论。*/
   l_impl_sockaddr* sa = (l_impl_sockaddr*)addr;
   if (sa->len == 0 || sock == -1) {
-    l_loge_2(LNUL, "bind invalid argument %d %d", ld(sa->len), ld(sock));
+    l_loge_2(LNUL, "bind EINVAL %d %d", ld(sa->len), ld(sock));
     return false;
   }
   if (bind(sock, &(sa->sa), sa->len) != 0) {
@@ -1706,7 +1744,7 @@ l_impl_read(int fd, void* out, l_int size)
   int status = 0;
 
   if (size < 0 || size > L_MAX_RWSIZE) {
-    l_loge_s(LNUL, "read - invalid argument");
+    l_loge_s(LNUL, "read EINVAL");
     return -2;
   }
 
@@ -1802,7 +1840,7 @@ l_impl_write(int fd, const void* data, l_int size)
   int status = 0;
 
   if (size < 0 || size > L_MAX_RWSIZE) {
-    l_loge_s(LNUL, "write - invalid argument");
+    l_loge_s(LNUL, "write EINVAL");
     return -2;
   }
 
@@ -2228,7 +2266,7 @@ static l_bool
 l_epoll_ctl(l_filehdl* hdl, int op, int fd, struct epoll_event* ev)
 {
   if (hdl->unifd == -1 || fd == -1 || hdl->unifd == fd) {
-    l_loge_s(LNUL, "l_epoll_ctl invalid argument");
+    l_loge_s(LNUL, "l_epoll_ctl EINVAL");
   }
 
   /** epoll_event **
