@@ -18,9 +18,9 @@ L_EXTERN struct l_message* l_get_message(struct lnlylib_env* E);
 L_EXTERN struct l_service* l_get_service(struct lnlylib_env* E);
 L_EXTERN struct l_worker* l_get_worker(struct lnlylib_env* E);
 
-L_EXTERN l_umedit l_message_id(struct message* msg);
-L_EXTERN l_umedit l_message_cust(struct message* msg);
-L_EXTERN l_strn l_message_data(struct message* msg);
+L_EXTERN l_umedit l_message_id(struct l_message* msg);
+L_EXTERN l_umedit l_message_cust(struct l_message* msg);
+L_EXTERN l_strn l_message_data(struct l_message* msg);
 
 L_EXTERN l_umedit l_get_mssg_id(struct lnlylib_env* E);
 L_EXTERN l_umedit l_get_mgid_cust(struct lnlylib_env* E);

@@ -349,7 +349,7 @@ l_impl_logger_n(struct lnlylib_env* E, const void* tag, const void* s, l_int n, 
 typedef struct {
   l_int buff_len;
   l_int name_len;
-  l_byte s[FILENAME_MAX];
+  l_byte s[L_MAX_FILENAME];
 } l_filename;
 
 L_EXTERN void l_filename_init(l_filename* fn);

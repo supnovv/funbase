@@ -110,7 +110,14 @@ ll_is_num(lua_State* L, int stackindex)
 }
 
 L_EXTERN l_bool
-ll_is_invalid(lua_State* L, int stackindex)
+ll_is_valid(lua_State* L, int stackindex)
+{
+  int n = ll_type(L, stackindex);
+  return (n != LUA_TNIL && n != LUA_TNONE);
+}
+
+L_EXTERN l_bool
+ll_nt_valid(lua_State* L, int stackindex)
 {
   int n = ll_type(L, stackindex);
   return (n == LUA_TNIL || n == LUA_TNONE);
@@ -132,6 +139,12 @@ ll_to_strn(lua_State* L, int stackindex)
     /* TODO: consider other types */
     return l_empty_strn();
   }
+}
+
+L_EXTERN const l_byte*
+ll_to_cstr(lua_State* L, int stackindex)
+{
+  return ll_to_strn(L, stackindex).p;
 }
 
 /** create string in lua **
@@ -316,22 +329,280 @@ ll_add_cpath(lua_State* L, l_strn path)
   ll_pop_beyond(L, package.index);
 }
 
-#if 0
-L_EXTERN l_funcindex /* load the code to a function */
-ll_load_expr(lua_State* L, l_strn expr)
+/** dump functions and values **
+string.dump(func [, strip]) ; return a string containing a binary representation of the given function
+typedef int (*lua_Writer)(lua_State* L, const void* p, size_t sz, void* data);
+int lua_dump(lua_State* L, lua_Writer writer, void* data, int strip); # this function pops nothing and also pushes nothing
+---
+lua_dump dumps a function as a binary chunk. The lua function is on the top of the stack, this lua function is not popped after lua_dump is called.
+If loaded again (the compiled chunk), results in a function equivalent to the one dumped.
+If strip is true, the binary representation may not include all debug information about the function, to save space.
+---
+lua_dump uses the writer function to produces the binary chunk out.
+Every time it produces another piece of chunk, lua_dump calls the writer, passing along with the buffer and its size, and the data parameter.
+The writer returns 0 means no errors, any other value means an error and stops lua_dump from calling the writer again.
+The lua_dump return the error code returned from the writer function.
+---
+Functions with upvalues have only their number of upvalues saved.
+When loaded, those upvalues receive fresh instances containing nil.
+You can use the debug library to serialize and reload the upvalues of a function in a way adequate to your needs.
+**********************************************************************/
+static int
+ll_string_writer_for_compile(lua_State* L, const void* p, size_t sz, void* data)
 {
+  luaL_Buffer* B = 0;
+  L_UNUSED(L);
+  B = (luaL_Buffer*)data;
+  luaL_addlstring(B, p, sz);
+  return 0;
 }
 
-L_EXTERN l_funcindex /* load the code to a function */
-ll_load_file(lua_State* L, l_strn file)
+static int
+ll_file_writer_for_compile(lua_State* L, const void* p, size_t sz, void* data)
 {
+  l_int n = 0;
+  l_stdfile* out = 0;
+  L_UNUSED(L);
+  out = (l_stdfile*)data;
+  n = l_stdfile_write(out, p, (l_int)sz);
+  return n == (l_int)sz;
 }
 
-L_EXTERN l_funcindex /* load the code to a function */
-ll_load_clib(lua_State* L, l_strn file, l_strn openfuncname)
+L_EXTERN const l_byte* /* return the stack index of the string of the compiled chunk */
+ll_compile_to_str(lua_State* L, l_funcindex func)
 {
+  int n = 0;
+  luaL_Buffer B;
+  luaL_buffinit(L, &B);
+  lua_pushvalue(L, func.index);
+  n = lua_dump(L, ll_string_writer_for_compile, &B, true);
+  if (n == 0) {
+    luaL_pushresult(&B);
+    return ll_to_cstr(L, -1);
+  } else {
+    return 0;
+  }
 }
-#endif
+
+L_EXTERN l_bool
+ll_compile_to_file(lua_State* L, l_funcindex func, const void* file)
+{
+  int n = 0;
+  l_stdfile outfile;
+
+  outfile = l_stdfile_open_write(file);
+  if (outfile.file == 0) {
+    return false;
+  }
+
+  lua_pushvalue(L, func.index);
+  n = lua_dump(L, ll_file_writer_for_compile, &outfile, true);
+  l_stdfile_close(&outfile);
+
+  return n == 0;
+}
+
+/** load the code into a function **
+load(chunk [, chunkname [, mode [, env]]]) ; chunk is a string or a function
+typedef const char* (*lua_Reader)(lua_State* L, void* data, size_t* size);
+int lua_load(lua_State* L, lua_Reader reader, void* data, const char* chunkname, const char* mode);
+int luaL_loadstring(lua_State* L, const char* s);
+int luaL_loadbufferx(lua_State* L, const char* buffer, size_t sz, const char* chunkname, const char* mode); luaL_loadbuffer is same but pass mode as 0
+int luaL_loadfilex(lua_State* L, const char* filename, const char* mode); luaL_loadfile is same but pass mode as 0
+---
+The load function loads a Lua chunk without running it.
+If there are no errors, lua_load pushes the compiled chunk as a Lua function on top of the stack,
+Otherwise, it pushes an error message, and the return value can be:
+LUA_OK (0) - no errors
+LUA_ERRSYNTAX - syntax error during precompilation
+LUA_ERRMEM - memory allocation (out-of-memory) error
+LUA_ERRGCMM - error while running a __gc metamethod, this error has no relation with the chunk being loaded
+---
+For lua_loadfile, if the filename is NULL, then it loads from the stdin.
+And the first line in the file is ignored if it starts with a #.
+lua_loadfile returns the same results as lua_load, but it has an extra error code LUA_ERRFILE for file related errors,
+e.g., it cannot open or read the file.
+---
+lua_load uses a user-specified reader function to read the code (the Lua chunk).
+lua_load uses the stack internally, so the reader function must always leave the stack unmodified when returning.
+The reader must return a pointer to a block of memory with a new piece of the chunk and set size to the block size.
+The block must exist until the reader function is called again.
+To signal the end of the chunk, the reader must return NULL or set size to 0.
+The reader function may return pieces of any size greater than 0.
+---
+The chunkname gives a name to the chunk, which is used for error messages and in debug information.
+The mode controls whether the chunk can be text or binary (a precompiled chunk).
+It may be the string "b" (only binary chunks), "t" (only text chunks), or "bt" (both binary and text).
+The default is "bt", and pass NULL also equal to the value "bt".
+---
+The chunk has the environment varialbe _ENV as its 1st upvalue, if there are more upvalues they are initialized with nil.
+If you want to change the environment variable for the chunk, you can call lua_setupvalue to change the 1st upvalue.
+**********************************************************************/
+
+L_EXTERN l_funcindex /* load lua code into a function */
+ll_load_code(lua_State* L, l_strn code)
+{
+  int n = 0;
+  if (l_strn_is_empty(&code)) {
+    return (l_funcindex){0};
+  }
+  n = luaL_loadbufferx(L, (const char*)code.p, (size_t)code.n, 0, 0);
+  if (n == LUA_OK) {
+    return (l_funcindex){lua_gettop(L)};
+  } else {
+    ll_pop_error(L);
+    return (l_funcindex){0};
+  }
+}
+
+L_EXTERN l_funcindex
+ll_load_compiled_code(lua_State* L, l_strn code)
+{
+  int n = 0;
+  if (l_strn_is_empty(&code)) {
+    return (l_funcindex){0};
+  }
+  n = luaL_loadbufferx(L, (const char*)code.p, (size_t)code.n, 0, "b");
+  if (n == LUA_OK) {
+    return (l_funcindex){lua_gettop(L)};
+  } else {
+    ll_pop_error(L);
+    return (l_funcindex){0};
+  }
+}
+
+L_EXTERN l_funcindex /* load lua code from the file into a function */
+ll_load_file(lua_State* L, const void* file)
+{
+  int n = 0;
+
+  if (file == 0) { /* dont load from stdin */
+    return (l_funcindex){0};
+  }
+
+  n = luaL_loadfilex(L, (const char*)file, 0);
+  if (n == LUA_OK) {
+    return (l_funcindex){lua_gettop(L)};
+  } else {
+    ll_pop_error(L);
+    return (l_funcindex){0};
+  }
+}
+
+L_EXTERN l_funcindex
+ll_load_compiled_file(lua_State* L, const void* file)
+{
+  int n = 0;
+
+  if (file == 0) { /* dont load from stdin */
+    return (l_funcindex){0};
+  }
+
+  n = luaL_loadfilex(L, (const char*)file, "b");
+  if (n == LUA_OK) {
+    return (l_funcindex){lua_gettop(L)};
+  } else {
+    ll_pop_error(L);
+    return (l_funcindex){0};
+  }
+}
+
+/** call the lua function (a real lua function or a lua callable c function) **
+void lua_call(lua_State* L, int nargs, int nresults);
+void lua_callk(lua_State* L, int nargs, int nresults, lua_KContext ctx, lua_KFunction k);
+int lua_pcall(lua_State* L, int nargs, int nresults, int msgh);
+int lua_pcallk(lua_State* L, int nargs, int nresults, int msgh, lua_KContext ctx, lua_KFunction k);
+lua_KContext is a type that can store a pointer in it;
+typedef int (*lua_KFunction)(lua_State* L, int status, lua_KContext ctx);
+typedef int (*lua_CFunction)(lua_State* L);
+---
+lua_call - return results on the stack or raise a error, and it is a no return value c function
+lua_pcall - return results or a error object on the stack, and it is a c function returns an error code
+---
+A function is called with following protocol:
+1. the function is pushed onto the stack
+2. the arguments for the function are pushed in direct order, first argument pushed first
+3. then you call lua_call/lua_pcall with the nargs the number of arguments you pushed onto the stack
+4. all arguments and the function value are poped from the stack after the function is called
+5. and then all the results are on the stack, starting at the original function position
+6. the number of results is adjusted to nresults, unless nresults is LUA_MULTRET to get all results
+7. lua takes care that the returned values fit into the stack space, but it does not ensure any extra spcae in stack
+Notes about the C functions using lua stack
+1. in the C function that used by lua code, i.e. a C function with the type lua_CFunction
+   you can just gets the arguments from the stack, do your work with the stack, and push the function results,
+   after the function is called by lua (via lua_call/lua_pcall or via lua code function call syntax func(a, b) for example,
+   the results are moved to the starting position before the function is called, i.e. after called only results left on the stack
+2. if a C function is just a normal C function operated the stack, not used for lua code, then
+   you better keep the stack unchanged, i.e. before and after the function called, the stack's content is the same
+   this kind of code is balanced, it is considered good programming practice
+The arguments ctx and k, allowed the called function yield from c, i.e.
+1. you can provide a continuation function k for the function call
+2. if the coroutine that called the funciton is yield, and the coroutine is resumed again, the function k is called
+lua_pcall calls the function in protected mode, i.e. if there is any error during the call,
+1. lua_pcall catches it, pushed a single result value the error object on the stack, and return the error code
+2. while the lua_call doesn't catch the error, the error just throwed and propagated upwards, and lua_call doesn't return error code (due to it throw the error)
+3. if there are no errors during the call, lua_pcall and lua_call behaves exactly the same
+4. and msgh the stack index of a message handler can be passed into lua_pcall, when the error happens,
+   msgh is called by lua_pcall with the error object, and lua_pcall pushed the value returned by the handler into the stack as the error object
+   typically, the message handler is used to add more debug information to the error object, such as a stack traceback.
+   such information cannot be gathered after the return of lua_pcall, since by then the stack has unwound.
+5. lua_pcall can return following error code:
+   LUA_OK (0) - success
+   LUA_ERRRUN - a runtime error
+   LUA_ERRMEM - memory allocation error, for such errors, lua does not call the message handler
+   LUA_ERRERR - error while running the message handler
+   LUA_ERRGCMM - error while running a __gc metamethod, for such errors, lua doesn't call the message handler, as this error typically has no relation with the function being called
+**********************************************************************/
+
+L_EXTERN void /* the func and the args are already pushed on the stack, after call results are on the stack or raise a error */
+ll_call_func(lua_State* L, l_funcindex func, int results)
+{
+  int args = lua_gettop(L) - func.index;
+  lua_call(L, args, results);
+}
+
+L_EXTERN l_bool /* the func and the args are already pushed on the stack, after call results or a error object on the stack */
+ll_pcall_func(lua_State* L, l_funcindex func, int results)
+{
+  int args = lua_gettop(L) - func.index;
+  int n = lua_pcall(L, args, results, 0); /* [-(nargs+1), +(nresults|1), -] */
+  if (n == LUA_OK) {
+    return true;
+  } else {
+    ll_pop_error(L);
+    return false;
+  }
+}
+
+L_EXTERN l_bool
+ll_pcall_with_msgh(lua_State* L, l_funcindex func, int results, l_funcindex msgh)
+{
+  int args = lua_gettop(L) - func.index;
+  int n = lua_pcall(L, args, results, msgh.index);
+  if (n == LUA_OK) {
+    return true;
+  } else {
+    ll_pop_error(L);
+    return false;
+  }
+}
+
+L_EXTERN int /* load the file and run it, no args passed, return all results or nil */
+ll_exec_file(lua_State* L, const void* file)
+{
+  l_funcindex func;
+  func = ll_load_file(L, file);
+  if (func.index <= 0) {
+    lua_pushnil(L);
+  } else {
+    l_bool succ = false;
+    succ = ll_pcall_func(L, func, LUA_MULTRET);
+    if (!succ) {
+      lua_pushnil(L);
+    }
+  }
+  return lua_gettop(L);
+}
 
 /** search and load moudle **
 void luaL_requiref(lua_State* L, const char* modname, lua_CFunction openf, int setglobal);
@@ -433,6 +704,7 @@ available on some platform (Windows, Linux, Mac OS X, Solaris, BSD,
 plus other Unix systems that support the dlfcn standard).
 **********************************************************************/
 
+#if 0
 static l_funcindex
 ll_dynlib_load(lua_State* L, l_strn lib, l_strn symbol)
 {
@@ -459,12 +731,12 @@ ll_search_and_load_func(lua_State* L)
 
   lua_pushvalue(L, name_lookup);
   lua_pushvalue(L, path);
-  ll_pcall(L, search_func, 1); /* get 1 result: nil or the found file name */
+  ll_call_func(L, search_func, 1); /* get 1 result: nil or the found file name */
 
   if (lua_isnil(L, -1)) {
     goto try_to_laod_from_c_library;
   } else {
-    ll_load_file(L, ll_to_strn(L, -1)); /* load the lua find */
+    ll_load_file(L, ll_to_cstr(L, -1)); /* load the lua find */
     return 1; /* return loaded func on the top */
   }
 
@@ -475,7 +747,7 @@ try_to_load_from_c_library:
 
   lua_pushvalue(L, name_lookup);
   lua_pushvalue(L, path);
-  ll_pcall(L, search_func, 1); /* get 1 result: nil or c library file name found */
+  ll_call_func(L, search_func, 1); /* get 1 result: nil or c library file name found */
 
   if (lua_isnil(L, -1)) {
     goto try_all_modules_in_one_library_method;
@@ -495,7 +767,7 @@ try_all_module_in_one_library_method:
 
   ll_push_str(L, main_module);
   lua_pushvalue(L, path);
-  ll_pcall(L, search_func, 1); /* get 1 result: nil or c library file name found */
+  ll_call_func(L, search_func, 1); /* get 1 result: nil or c library file name found */
 
   if (lua_isnil(L, -1)) {
     return 1; /* return nil on the top */
@@ -506,10 +778,10 @@ try_all_module_in_one_library_method:
   }
 }
 
-L_EXTERN l_funcindex
-ll_search_and_load(lua_State* L, const void* file)
+L_EXTERN int /* return the stack index of the value */
+ll_search_and_exec_file(lua_State* L, const void* file)
 {
   luaL_requiref(L, (const char*)file, ll_search_and_load_func, false);
-  return (l_funcindex){lua_gettop(L)};
+  return lua_gettop(L);
 }
-
+#endif

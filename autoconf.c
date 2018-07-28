@@ -205,6 +205,9 @@ int main(void)
   l_write_line(file, "#error l_filehdl not defined");
 #endif
 
+  l_write_line(file, "%s#undef L_MAX_FILENAME", L_NEWLINE);
+  l_write_line(file, "#define L_MAX_FILENAME %d", FILENAME_MAX);
+
   l_write_line(file, "%s/* char %d-bit */", L_NEWLINE, sizeof(char)*8);
   l_write_line(file, "/* short %d-bit */", sizeof(short)*8);
   l_write_line(file, "/* int %d-bit */", sizeof(int)*8);
