@@ -4,6 +4,398 @@
 #include <errno.h>
 #include "core/base.h"
 
+const l_strn l_digit_hex[] = {
+  L_STR("0123456789abcdef"),
+  L_STR("0123456789ABCDEF")
+};
+
+L_EXTERN l_int
+l_string_parseDec(l_strt s)
+{
+  l_int times = 1;
+  l_int value = 0;
+  const l_byte* start = 0;
+  const l_byte* end = 0;
+  int negative = false;
+
+  while (s.start < s.end) {
+    if (*s.start >= '0' && *s.start <= '9') break;
+    if (*s.start == '-') negative = true;
+    ++s.start;
+  }
+
+  start = s.start;
+  while (s.start < s.end) {
+    if (*s.start < '0' || *s.start > '9') break;
+    ++s.start;
+  }
+
+  end = s.start;
+  while (start < end--) {
+    value += *end * times;
+    times *= 10;
+  }
+
+  return (negative ? -value : value);
+}
+
+L_EXTERN l_int
+l_string_parseHex(l_strt s)
+{
+  l_int times = 1;
+  l_int value = 0;
+  const l_byte* start = 0;
+  const l_byte* end = 0;
+  int negative = false;
+
+  while (s.start < s.end) {
+    if (l_check_is_hex_digit(*s.start)) break;
+    if (*s.start == '-') negative = true;
+    ++s.start;
+  }
+
+  if (*s.start == '0' && s.start + 1 < s.end && (*(s.start + 1) == 'x' || *(s.start + 1) == 'X')) {
+    s.start += 2;
+    if (s.start >= s.end || !l_check_is_hex_digit(*s.start)) {
+      return 0;
+    }
+  }
+
+  start = s.start;
+  while (s.start < s.end) {
+    if (!l_check_is_hex_digit(*s.start)) break;
+    ++s.start;
+  }
+
+  end = s.start;
+  while (start < end--) {
+    value += *end * times;
+    times *= 16;
+  }
+
+  return (negative ? -value : value);
+}
+
+static l_int
+l_ostream_format_fill(l_ostream* os, l_byte* a, l_byte* p, l_umedit flags)
+{
+  l_byte fill = L_GETF(flags);
+  int width = L_GETW(flags);
+
+  if (width > p - a) {
+    if (fill == 0) {
+      fill = ' ';
+    }
+    if (flags & L_LEFT) {
+      while (width > p - a) {
+        *p++ = fill;
+      }
+    } else {
+      l_byte* e = a + width;
+      while (p > a) {
+        *(--e) = *(--p);
+      }
+      while (e > a) {
+        *(--e) = fill;
+      }
+      p = a + width;
+    }
+  }
+
+  return l_ostream_write(os, a, p - a);
+}
+
+L_EXTERN l_int
+l_ostream_format_strn(l_ostream* os, l_strn s, l_umedit flags)
+{
+  int width = L_GETW(flags);
+  if (l_strn_is_empty(&s)) {
+    return 0;
+  }
+  if (s.n >= width) {
+    return l_ostream_write(os, s.p, s.n);
+  } else {
+    l_byte a[160];
+    memcpy(a, s.p, s.n);
+    return l_ostream_format_fill(os, a, a + s.n, flags);
+  }
+}
+
+L_EXTERN l_int
+l_ostream_format_c(l_ostream* os, int c, l_umedit flags)
+{
+  l_byte ch = (l_byte)(c & 0xff);
+  if (flags & L_UPPER) {
+    if (ch >= 'a' && ch <= 'z') {
+      ch -= 32;
+    }
+  } else if (flags & L_LOWER) {
+    if (ch >= 'A' && ch <= 'Z') {
+      ch += 32;
+    }
+  }
+  return l_ostream_format_strn(os, l_strn_l(&ch, 1), flags);
+}
+
+#define L_HEX_FMT_BFSZ 159
+
+L_EXTERN l_int
+l_ostream_format_u(l_ostream* os, l_ulong u, l_umedit flags)
+{
+  /* 64-bit unsigned int max value 18446744073709552046 (20 chars) */
+  l_byte a[L_HEX_FMT_BFSZ];
+  l_byte basechar = 0;
+  l_byte* e = a + L_HEX_FMT_BFSZ - 1;
+  l_byte* p = e;
+  const l_byte* hex = 0;
+  l_umedit base = 0;
+  l_byte precise = L_GETP(flags);
+  l_byte width = L_GETW(flags);
+  l_byte fill = L_GETF(flags);
+
+  flags &= L_FORMAT_MASK;
+  base = (flags & L_BASE_MASK);
+
+  switch (l_right_most_bit(base)) {
+  case 0:
+    *--p = (u % 10) + '0';
+    while ((u /= 10)) {
+      *--p = (u % 10) + '0';
+    }
+    break;
+  case L_HEX:
+    hex = l_digit_hex[(flags & L_UPPER) != 0].p;
+    *--p = hex[u & 0x0f];
+    while ((u >>= 4)) {
+      *--p = hex[u & 0x0f];
+    }
+    if (!(flags & L_NOOX)) {
+      basechar = (flags & L_UPPER) ? 'X' : 'x';
+    }
+    flags &= (~L_BASE_MASK);
+    break;
+  case L_OCT:
+    *--p = (u & 0x07) + '0';
+    while ((u >>= 3)) {
+      *--p = (u & 0x07) + '0';
+    }
+    if (!(flags & L_NOOX)) {
+      basechar = (flags & L_UPPER) ? 'O' : 'o';
+    }
+    flags &= (~L_BASE_MASK);
+    break;
+  case L_BIN:
+    *--p = (u & 0x01) + '0';
+    while ((u >>= 1)) {
+      *--p = (u & 0x01) + '0';
+    }
+    if (!(flags & L_NOOX)) {
+      basechar = (flags & L_UPPER) ? 'B' : 'b';
+    }
+    flags &= (~L_BASE_MASK);
+    break;
+  default:
+    break;
+  }
+
+  while (precise > (p - a)) {
+    *--p = '0';
+  }
+
+  if (basechar) {
+    *--p = basechar;
+    *--p = '0';
+  }
+
+  if (flags & L_MINUX) *--p = '-';
+  else if (flags & L_PLUS) *--p = '+';
+  else if (flags & L_BLANK) *--p = ' ';
+
+  if (width > e - p) {
+    if (fill == 0) {
+      fill = ' ';
+    }
+    if (flags & L_LEFT) {
+      l_byte* end = a + width;
+      while (p < e) {
+        *a++ = *p++;
+      }
+      while (a < end) {
+        *a++ = fill;
+      }
+    } else {
+      while (width > e - p) {
+        *--p = fill;
+      }
+    }
+  }
+
+  return l_ostream_write(os, p, e - p);
+}
+
+L_EXTERN l_int
+l_ostream_format_d(l_ostream* os, l_long d, l_umedit flags)
+{
+  l_ulong n = 0;
+  if (d < 0) {
+    n = -d;
+    flags |= L_MINUS;
+  } else {
+    n = d;
+    flags &= (~L_MINUS);
+  }
+  return l_ostream_format_u(os, n, flags);
+}
+
+L_EXTERN l_int
+l_ostream_format_f(l_ostream* os, double f, l_umedit flags)
+{
+  l_value v = lf(f);
+  l_byte a[159];
+  l_byte sign = 0;
+  l_byte* p = a;
+  l_byte* dot = 0;
+  l_ulong fraction = 0;
+  l_ulong mantissa = 0;
+  int exponent = 0;
+  int negative = 0;
+  l_umedit precise = ((flags & 0x7f0000) >> 16);
+
+  /**
+   * Floating Point Components
+   * |                  | Sign   | Exponent   | Fraction   | Bias
+   * |----              |-----   | -----      |  ----      | ----
+   * | Single Precision | 1 [31] |  8 [30-23] | 23 [22-00] | 127
+   * | Double Precision | 1 [63] | 11 [62-52] | 52 [51-00] | 1023
+   * ------------------------------------------------------------
+   * Sign - 0 positive, 1 negative
+   * Exponent - represent both positive and negative exponents
+   *          - the ectual exponent = Exponent - (127 or 1023)
+   *          - exponents of -127/-1023 (all 0s) and 128/1024 (255/2047, all 1s) are reserved for special numbers
+   * Mantissa - stored in normalized form, this basically puts the radix point after the first non-zero digit
+   *          - the mantissa has effectively 24/53 bits of resolution, by way of 23/52 fraction bits: 1.Fraction
+   */
+
+  negative = (v.u & 0x8000000000000000) != 0;
+  exponent = (v.u & 0x7ff0000000000000) >> 52;
+  fraction = (v.u & 0x000fffffffffffff);
+
+  if (negative) sign = '-';
+  else if (flags & L_PLUS) sign = '+';
+  else if (flags & L_BLANK) sign = ' ';
+
+  if (exponent == 0 && fraction == 0) {
+    if (sign) *p++ = sign;
+    *p++ = '0'; *p++ = '.'; dot = p; *p++ = '0';
+  } else if (exponent == 0x00000000000007ff) {
+    if (fraction == 0) {
+      if (sign) *p++ = sign;
+      *p++ = 'I'; *p++ = 'N'; *p++ = 'F'; *p++ = 'I'; *p++ = 'N'; *p++ = 'I'; *p++ = 'T'; *p++ = 'Y';
+    } else {
+      if (flags & L_BLANK) *p++ = ' ';
+      *p++ = 'N'; *p++ = 'A'; *p++ = 'N';
+    }
+  } else {
+    if (sign) *p++ = sign;
+    if (negative) v.u &= 0x7fffffffffffffff;
+
+    exponent = exponent - 1023;
+    mantissa = 0x0010000000000000 | fraction;
+    /* intmasks = 0xfff0000000000000; */
+    /*                         1.fraction
+        [ , , , | , , , | , , ,1|f,r,a,c,t,i,o,n,n,n,...]
+        <----------- 12 --------|-------- 52 ----------->    */
+    if (exponent < 0) {
+      /* only have fraction part */
+      #if 0
+      if (exponent < -8) {
+        intmasks = 0xf000000000000000;
+        exponent += 8; /* 0000.00000001fraction * 2^exponent */
+        mantissa >>= (-exponent); /* lose lower digits */
+      } else {
+        intmasks <<= (-exponent);
+      }
+      *p++ = '0'; dot = p; *p++ = '.';
+      l_log_print_fraction(mantissa, intmasks, p);
+      #endif
+      *p++ = '0'; *p++ = '.'; dot = p;
+      p = l_string_print_fraction(v.f, p, precise);
+    } else {
+      if (exponent >= 52) {
+        /* only have integer part */
+        if (exponent <= 63) { /* 52 + 11 */
+          mantissa <<= (exponent - 52);
+          p = l_string_print_ulong(mantissa, p);
+          *p++ = '.'; dot = p; *p++ = '0';
+        } else {
+          exponent -= 63;
+          mantissa <<= 11;
+          p = l_string_print_ulong(mantissa, p);
+          *p++ = '*'; *p++ = '2'; *p++ = '^';
+          p = l_string_print_ulong(exponent, p);
+        }
+      } else {
+        /* have integer part and fraction part */
+        #if 0
+        intmasks >>= exponent;
+        l_log_print_ulong((mantissa & intmasks) >> (52 - exponent), p);
+        *p++ = '.';
+        l_log_print_fraction(mantissa & (~intmasks), intmasks, p);
+        #endif
+        l_ulong ipart = l_cast(l_ulong, v.f);
+        p = l_string_print_ulong(ipart, p);
+        *p++ = '.'; dot = p;
+        p = l_string_print_fraction(v.f - ipart, p, precise);
+      }
+    }
+  }
+
+  if (dot && precise) {
+    while (p - dot < precise) {
+      *p++ = '0';
+    }
+  }
+
+  return l_ostream_format_fill(os, a, p, flags);
+}
+
+L_EXTERN l_int
+l_ostream_format_s(l_ostream* os, const void* s, l_umedit flags)
+{
+  return l_ostream_format_strn(os, l_strn_c(s), flags);
+}
+
+L_EXTERN l_int
+l_ostream_format_bool(l_ostream* os, int n, l_umedit flags)
+{
+  if (n) {
+    if (flags & L_UPPER) {
+      return l_ostream_format_strn(os, L_STR("TRUE"), flags);
+    } else {
+      return l_ostream_format_strn(os, L_STR("true"), flags);
+    }
+  } else {
+    if (flags & L_UPPER) {
+      return l_ostream_format_strn(os, L_STR("FALSE"), flags);
+    } else {
+      return l_ostream_format_strn(os, L_STR("false"), flags);
+    }
+  }
+}
+
+L_EXTERN l_int
+l_ostream_format_n(l_ostream* os, const void* fmt, l_int n, const l_value* a)
+{}
+
+L_EXTERN l_int
+l_impl_ostream_format_v(l_ostream* os, const void* fmt, l_int n, va_list vl)
+{}
+
+L_EXTERN l_int
+l_impl_ostream_format(l_ostream* os, const void* fmt, l_int n, ...)
+{}
+
+
 L_EXTERN void
 l_filename_init(l_filename* fn)
 {

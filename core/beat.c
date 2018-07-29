@@ -1,5 +1,6 @@
 #define LNLYLIB_API_IMPL
 #include "core/beat.h"
+#include "core/lapi.h"
 #include "osi/base.h"
 
 #define L_SRVC_FLAG_ALIVE 0x01
@@ -77,7 +78,7 @@ typedef struct lnlylib_env {
 
   struct l_message* MSG;
   l_string* STR;
-  l_stdfile* LOG;
+  l_ostream* LOG;
 
   lua_State* L;
   lua_State* co;
@@ -246,7 +247,7 @@ typedef struct l_worker {
   l_uint work_flags;
   l_mutex* mast_rxlk;
   l_squeue* mast_rxmq;
-  l_stdfile logfile;
+  l_ostream logout;
   l_string thrstr;
   l_squeue mq[4];
   lnlylib_env ENV;
@@ -1562,11 +1563,11 @@ l_start_logging(lnlylib_env* E, const l_byte* tag)
   l_ostream* out = 0;
   int thridx = 0;
 
-  l_ostream_format(out, "%s %2x ", ls(tag), ld(thridx));
+  l_ostream_format_2(out, "%s %2x ", ls(tag), ld(thridx));
   return out;
 }
 
-extern void
+L_EXTERN void
 l_impl_logger_func(lnlylib_env* E, const void* tag, const void* fmt, ...)
 {
   int level = l_cstr(tag)[0] - '0';
@@ -1583,15 +1584,15 @@ l_impl_logger_func(lnlylib_env* E, const void* tag, const void* fmt, ...)
   if (nargs == 'n') {
     va_start(vl, fmt);
     nargs = va_arg(vl, l_int);
-    l_ostream_format_n_impl(out, fmt, nargs, va_arg(vl, l_logval*));
+    l_ostream_format_n(out, fmt, nargs, va_arg(vl, l_value*));
     va_end(vl);
   } else {
     va_start(vl, fmt);
-    l_ostream_format_v_impl(out, l_cstr(fmt), nargs - '0', vl);
+    l_impl_ostream_format_v(out, l_cstr(fmt), nargs - '0', vl);
     va_end(vl);
   }
 
-  l_ostream_format_out(out, l_const_strn(L_NEWLINE));
+  l_ostream_write(out, L_NEWLINE, L_NL_SIZE);
 }
 
 /** interface for lua **/

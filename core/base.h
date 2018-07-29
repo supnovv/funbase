@@ -78,6 +78,9 @@ typedef struct {
 #define l_empty_strn() l_const_strn("")
 #define l_const_strn(s) ((l_strn){l_cstr("" s), sizeof(s) - 1})
 
+#undef L_STR
+#define L_STR(s) l_const_strn(s)
+
 L_INLINE l_bool
 l_strn_nt_empty(const l_strn* s)
 {
@@ -234,40 +237,40 @@ typedef union {
   l_ulong u;
   double f;
   const void* p;
-} l_logval;
+} l_value;
 
-L_INLINE l_logval
+L_INLINE l_value
 lp(const void* p)
 {
-  l_logval a; a.p = p; return a;
+  l_value a; a.p = p; return a;
 }
 
-L_INLINE l_logval
+L_INLINE l_value
 ld(l_long d)
 {
-  l_logval a; a.d = d; return a;
+  l_value a; a.d = d; return a;
 }
 
-L_INLINE l_logval
+L_INLINE l_value
 lu(l_ulong u)
 {
-  l_logval a; a.u = u; return a;
+  l_value a; a.u = u; return a;
 }
 
-L_INLINE l_logval
+L_INLINE l_value
 lf(double f)
 {
-  l_logval a; a.f = f; return a;
+  l_value a; a.f = f; return a;
 }
 
-L_INLINE l_logval
+L_INLINE l_value
 lstrn(const l_strn* s)
 {
   return lp(s);
 }
 
 struct lnlylib_env;
-extern void l_impl_logger_func(struct lnlylib_env* E, const void* tag, const void* fmt, ...);
+L_EXTERN void l_impl_logger_func(struct lnlylib_env* E, const void* tag, const void* fmt, ...);
 
 L_INLINE void
 l_impl_logger_s(struct lnlylib_env* E, const void* tag, const void* s)
@@ -276,69 +279,170 @@ l_impl_logger_s(struct lnlylib_env* E, const void* tag, const void* s)
 }
 
 L_INLINE void
-l_impl_logger_1(struct lnlylib_env* E, const void* tag, const void* s, l_logval a)
+l_impl_logger_1(struct lnlylib_env* E, const void* tag, const void* s, l_value a)
 {
   l_impl_logger_func(E, tag, s, a);
 }
 
 L_INLINE void
-l_impl_logger_2(struct lnlylib_env* E, const void* tag, const void* s, l_logval a, l_logval b)
+l_impl_logger_2(struct lnlylib_env* E, const void* tag, const void* s, l_value a, l_value b)
 {
   l_impl_logger_func(E, tag, s, a, b);
 }
 
 L_INLINE void
-l_impl_logger_3(struct lnlylib_env* E, const void* tag, const void* s, l_logval a, l_logval b, l_logval c)
+l_impl_logger_3(struct lnlylib_env* E, const void* tag, const void* s, l_value a, l_value b, l_value c)
 {
   l_impl_logger_func(E, tag, s, a, b, c);
 }
 
 L_INLINE void
-l_impl_logger_4(struct lnlylib_env* E, const void* tag, const void* s, l_logval a, l_logval b, l_logval c, l_logval d)
+l_impl_logger_4(struct lnlylib_env* E, const void* tag, const void* s, l_value a, l_value b, l_value c, l_value d)
 {
   l_impl_logger_func(E, tag, s, a, b, c, d);
 }
 
 L_INLINE void
-l_impl_logger_5(struct lnlylib_env* E, const void* tag, const void* s, l_logval a, l_logval b, l_logval c, l_logval d,
-    l_logval e)
+l_impl_logger_5(struct lnlylib_env* E, const void* tag, const void* s, l_value a, l_value b, l_value c, l_value d, l_value e)
 {
   l_impl_logger_func(E, tag, s, a, b, c, d, e);
 }
 
 L_INLINE void
-l_impl_logger_6(struct lnlylib_env* E, const void* tag, const void* s, l_logval a, l_logval b, l_logval c, l_logval d,
-    l_logval e, l_logval f)
+l_impl_logger_6(struct lnlylib_env* E, const void* tag, const void* s, l_value a, l_value b, l_value c, l_value d, l_value e, l_value f)
 {
   l_impl_logger_func(E, tag, s, a, b, c, d, e, f);
 }
 
 L_INLINE void
-l_impl_logger_7(struct lnlylib_env* E, const void* tag, const void* s, l_logval a, l_logval b, l_logval c, l_logval d,
-    l_logval e, l_logval f, l_logval g)
+l_impl_logger_7(struct lnlylib_env* E, const void* tag, const void* s, l_value a, l_value b, l_value c, l_value d, l_value e, l_value f, l_value g)
 {
   l_impl_logger_func(E, tag, s, a, b, c, d, e, f, g);
 }
 
 L_INLINE void
-l_impl_logger_8(struct lnlylib_env* E, const void* tag, const void* s, l_logval a, l_logval b, l_logval c, l_logval d,
-    l_logval e, l_logval f, l_logval g, l_logval h)
+l_impl_logger_8(struct lnlylib_env* E, const void* tag, const void* s, l_value a, l_value b, l_value c, l_value d, l_value e, l_value f, l_value g, l_value h)
 {
   l_impl_logger_func(E, tag, s, a, b, c, d, e, f, g, h);
 }
 
 L_INLINE void
-l_impl_logger_9(struct lnlylib_env* E, const void* tag, const void* s, l_logval a, l_logval b, l_logval c, l_logval d,
-    l_logval e, l_logval f, l_logval g, l_logval h, l_logval i)
+l_impl_logger_9(struct lnlylib_env* E, const void* tag, const void* s, l_value a, l_value b, l_value c, l_value d, l_value e, l_value f, l_value g, l_value h, l_value i)
 {
   l_impl_logger_func(E, tag, s, a, b, c, d, e, f, g, h, i);
 }
 
 L_INLINE void
-l_impl_logger_n(struct lnlylib_env* E, const void* tag, const void* s, l_int n, const l_logval* a)
+l_impl_logger_n(struct lnlylib_env* E, const void* tag, const void* s, l_int n, const l_value* a)
 {
   l_impl_logger_func(E, tag, s, n, a);
 }
+
+/** output stream **/
+
+#define L_HEX         0x01000000
+#define L_OCT         0x02000000
+#define L_BIN         0x04000000
+#define L_BASE_MASK   0x07000000
+#define L_PLUS        0x10000000 /* use + as plus sign */
+#define L_BLANK       0x20000000 /* blank char as plus sign */
+#define L_MINUS       0x40000000
+#define L_SIGN_MASK   0x70000000
+#define L_LEFT        0x08000000
+#define L_NOOX        0x80000000 /* dont append 0b 0o 0x prefix */
+#define L_UPPER       0x00800000
+#define L_LOWER       0x00008000
+#define L_FORMAT_MASK 0xff808080
+
+#define L_SETP(n) (((n) & 0x7f) << 16) /* precise */
+#define L_SETW(n) (((n) & 0x7f) << 8) /* width */
+#define L_SETF(n) ((n) & 0x7f) /* fill char */
+
+#define L_GETP(f) ((l_byte)(((f) >> 16) & 0x7f))
+#define L_GETW(f) ((l_byte)(((f) >> 8) & 0x7f))
+#define L_GETF(f) ((l_byte)((f) & 0x7f))
+
+typedef struct {
+  void* out;
+  l_int (*write)(void* out, const void* p, l_int n);
+} l_ostream;
+
+L_INLINE l_int
+l_ostream_write(l_ostream* os, const void* p, l_int n)
+{
+  return os->write(os->out, p, n);
+}
+
+L_EXTERN l_int l_ostream_format_c(l_ostream* os, int c, l_umedit flags);
+L_EXTERN l_int l_ostream_format_d(l_ostream* os, l_long d, l_umedit flags);
+L_EXTERN l_int l_ostream_format_u(l_ostream* os, l_ulong u, l_umedit flags);
+L_EXTERN l_int l_ostream_format_f(l_ostream* os, double f, l_umedit flags);
+L_EXTERN l_int l_ostream_format_s(l_ostream* os, const void* s, l_umedit flags);
+L_EXTERN l_int l_ostream_format_strn(l_ostream* os, l_strn s, l_umedit flags);
+L_EXTERN l_int l_ostream_format_bool(l_ostream* os, int n, l_umedit flags);
+L_EXTERN l_int l_ostream_format_n(l_ostream* os, const void* fmt, l_int n, const l_value* a);
+L_EXTERN l_int l_impl_ostream_format(l_ostream* os, const void* fmt, l_int n, ...);
+L_EXTERN l_int l_impl_ostream_format_v(l_ostream* os, const void* fmt, l_int n, va_list vl);
+
+L_INLINE l_int
+l_ostream_format_1(l_ostream* os, const void* fmt, l_value a)
+{
+  return l_impl_ostream_format(os, fmt, 1, a);
+}
+
+L_INLINE l_int
+l_ostream_format_2(l_ostream* os, const void* fmt, l_value a, l_value b)
+{
+  return l_impl_ostream_format(os, fmt, 2, a, b);
+}
+
+L_INLINE l_int
+l_ostream_format_3(l_ostream* os, const void* fmt, l_value a, l_value b, l_value c)
+{
+  return l_impl_ostream_format(os, fmt, 3, a, b, c);
+}
+
+L_INLINE l_int
+l_ostream_format_4(l_ostream* os, const void* fmt, l_value a, l_value b, l_value c, l_value d)
+{
+  return l_impl_ostream_format(os, fmt, 4, a, b, c, d);
+}
+
+L_INLINE l_int
+l_ostream_format_5(l_ostream* os, const void* fmt, l_value a, l_value b, l_value c, l_value d, l_value e)
+{
+  return l_impl_ostream_format(os, fmt, 5, a, b, c, d, e);
+}
+
+L_INLINE l_int
+l_ostream_format_6(l_ostream* os, const void* fmt, l_value a, l_value b, l_value c, l_value d, l_value e, l_value f)
+{
+  return l_impl_ostream_format(os, fmt, 6, a, b, c, d, e, f);
+}
+
+L_INLINE l_int
+l_ostream_format_7(l_ostream* os, const void* fmt, l_value a, l_value b, l_value c, l_value d, l_value e, l_value f, l_value g)
+{
+  return l_impl_ostream_format(os, fmt, 7, a, b, c, d, e, f, g);
+}
+
+L_INLINE l_int
+l_ostream_format_8(l_ostream* os, const void* fmt, l_value a, l_value b, l_value c, l_value d, l_value e, l_value f, l_value g, l_value h)
+{
+  return l_impl_ostream_format(os, fmt, 8, a, b, c, d, e, f, g, h);
+}
+
+L_INLINE l_int
+l_ostream_format_9(l_ostream* os, const void* fmt, l_value a, l_value b, l_value c, l_value d, l_value e, l_value f, l_value g, l_value h, l_value i)
+{
+  return l_impl_ostream_format(os, fmt, 9, a, b, c, d, e, f, g, h, i);
+}
+
+typedef struct {
+  void* impl;
+} l_string;
+
+L_EXTERN l_ostream l_string_ostream(l_string* self);
 
 typedef struct {
   l_int buff_len;
@@ -346,12 +450,13 @@ typedef struct {
   l_byte s[L_MAX_FILENAME];
 } l_filename;
 
-L_EXTERN void l_filename_init(l_filename* fn);
-L_INLINE l_strn l_filename_strn(l_filename* fn) { return l_strn_l(fn->s, fn->name_len); }
-L_EXTERN l_bool l_filename_append(l_filename* fn, l_strn s);
-L_EXTERN l_bool l_filename_addname(l_filename* fn, l_strn name, l_strn suffix);
-L_EXTERN l_bool l_filename_addname_combine(l_filename* fn, l_strn part1, l_strn part2, l_strn sep);
-L_EXTERN l_bool l_filename_addpath(l_filename* fn, l_strn path);
+L_EXTERN l_ostream l_filename_ostream(l_filename* self);
+L_EXTERN void l_filename_init(l_filename* self);
+L_INLINE l_strn l_filename_strn(l_filename* self) { return l_strn_l(self->s, self->name_len); }
+L_EXTERN l_bool l_filename_append(l_filename* self, l_strn s);
+L_EXTERN l_bool l_filename_addname(l_filename* self, l_strn name, l_strn suffix);
+L_EXTERN l_bool l_filename_addname_combine(l_filename* self, l_strn part1, l_strn part2, l_strn sep);
+L_EXTERN l_bool l_filename_addpath(l_filename* self, l_strn path);
 
 typedef struct {
   void* file;
