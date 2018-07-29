@@ -12,12 +12,11 @@ L_INLINE
 L_EXTERN
 L_THREAD_LOCAL
 L_BUILD_SHARED
-LNLYLIB_AUTOCONF - only defined in autoconf.c
 LNLYLIB_API_IMPL - shall be defined in lib src file
 LNLYLIB_HOME_DIR - the lnlylib root folder when make
 LNLYLIB_CLIB_DIR - c libraries folder
-LNLYLIB_API_IMPL
 LNLYLIB_LUALIB_DIR - lua libraries folder
+LNLYLIB_API_IMPL
 L_MACH_32_BIT or L_MACH_64_BIT
 L_LIT_ENDIAN or L_BIG_ENDIAN
 l_bool false true - boolean
@@ -63,11 +62,6 @@ returning the number of bytes actually transferred. this is true on both 32-bit 
 
 #undef L_UNUSED
 #define L_UNUSED(a) ((void)a)
-
-typedef union {
-  double d;
-  l_byte a[8];
-} l_eightbyte;
 
 typedef struct {
   const l_byte* p;

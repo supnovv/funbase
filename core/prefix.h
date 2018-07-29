@@ -84,11 +84,47 @@ TARGET_IPHONE_SIMULATOR 0        0        1 */
 #define L_EXTERN extern
 #endif
 
+/** Thread-Local Storage **
+https://gcc.gnu.org/onlinedocs/gcc-8.2.0/gcc/Thread-Local.html#Thread-Local
+https://www.akkadia.org/drepper/tls.pdf
+---
+Thread-local storage (TLS) model in GCC requires significant support
+from the linker (ld), dynamic linker (ld.so), and system libraries
+(libc.so and libpthread.so), so it is not available everywhere.
+The TLS keyword __thread can be used like this:
+    __thread int i;
+    extern __thread struct state s;
+    static __thread char *p;
+The __thread specifier may be applied to any global, file-scoped
+static, funciton-scoped static, or static data member of a class.
+It may not be applied to block-scoped automatic or non-static data
+member.
+When the address-of operator is applied to a thread-local variable,
+it is evaluated at run time and returns the address of the current
+thread's instance of that variable. An address so obtained may be
+used by any thread. When a thread terminates, any pointers to
+thread-local variables in that thread become invalid.
+No static initialization may refer to the address of a thread-local
+variable. In C++, if an initializer is present for a thread-local
+variable, it must be a constant-expression.
+**********************************************************************/
+
 #if defined(L_CMPL_GCC)
 #define L_THREAD_LOCAL __thread 
 #elif defined(L_CMPL_MSC)
 #define L_THREAD_LOCAL __declspec(thread) 
 #endif
+
+typedef union {
+  double d;
+  char a[8];
+} l_eightbyte;
+
+#undef L_DEFINE_STRUCT_OF_SIZE
+#define L_DEFINE_STRUCT_OF_SIZE(name, size) \
+  typedef struct {\
+    l_eightbyte impl[((size) - 1) / sizeof(l_eightbyte) + 1];\
+  } name
 
 #endif /* L_PLAT_PREFIX_H */
 

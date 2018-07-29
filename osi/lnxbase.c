@@ -1,10 +1,6 @@
 #define LNLYLIB_API_IMPL
-#include "osi/srclnx/lnxpref.h"
+#include "osi/lnxdefs.h"
 #include "osi/base.h"
-
-#define l_filehdl_from(fd) (l_filehdl){fd}
-#define L_SOCKET_BACKLOG   (127)
-#define L_EPOLL_MAX_EVENTS (127)
 
 /** Open shared object and resolve symbols **
 #include <dlfcn.h> // link with -ldl
@@ -1925,6 +1921,8 @@ continue_to_write:
 }
 
 /** io events management **/
+
+#define l_filehdl_from(fd) (l_filehdl){fd}
 
 static l_filehdl
 l_evfd_create()

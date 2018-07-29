@@ -1,10 +1,10 @@
-#define LNLYLIB_AUTOCONF
+#define LNLYLIB_AUTOCONF_CODEGEN
 #include "core/prefix.h"
 
 #if defined(L_PLAT_LINUX)
-#include "osi/lnxpref.h"
+#include "osi/lnxdefs.h"
 #elif defined(L_PLAT_WINDOWS)
-#include "osi/winpref.h"
+#include "osi/windefs.h"
 #else
 #error "unsupported platform"
 #endif
@@ -95,7 +95,7 @@ int main(void)
   }
 
   l_write_line(file, "#ifndef LNLYLIB_AUTOCONF_H%s#define LNLYLIB_AUTOCONF_H", L_NEWLINE);
-  l_write_line(file, "#undef LNLYLIB_AUTOCONF");
+  l_write_line(file, "#undef LNLYLIB_AUTOCONF_CODEGEN");
   l_write_line(file, "#define _CRT_SECURE_NO_WARNINGS%s", L_NEWLINE);
 
   l_write_line(file, "#undef LNLYLIB_HOME_DIR");
@@ -133,9 +133,10 @@ int main(void)
     }
   }
 
-  l_write_line(file, "%s#undef false%s#undef true%s#undef l_bool", L_NEWLINE, L_NEWLINE, L_NEWLINE);
-  l_write_line(file, "#undef l_byte%s#undef l_sbyte", L_NEWLINE);
-  l_write_line(file, "#define false 0%s#define true 1", L_NEWLINE);
+  l_write_line(file, "%s#undef false%s#undef true", L_NEWLINE, L_NEWLINE);
+  l_write_line(file, "#define false 0%s#define true 1%s", L_NEWLINE, L_NEWLINE);
+
+  l_write_line(file, "#undef l_bool%s#undef l_byte%s#undef l_sbyte", " /* 8-bit integer type */" L_NEWLINE, L_NEWLINE);
   if (sizeof(char) == 1) {
     l_write_line(file, "#define l_bool unsigned char");
     l_write_line(file, "#define l_byte unsigned char");
@@ -144,7 +145,7 @@ int main(void)
     l_write_line(file, "#error \"char size shall be 1-byte\"");
   }
 
-  l_write_line(file, "%s#undef l_short%s#undef l_ushort", L_NEWLINE, L_NEWLINE);
+  l_write_line(file, "%s#undef l_short%s#undef l_ushort", L_NEWLINE, " /* 16-bit integer type */" L_NEWLINE);
   if (sizeof(short) == 2) {
     l_write_line(file, "#define l_short short");
     l_write_line(file, "#define l_ushort unsigned short");
@@ -152,7 +153,7 @@ int main(void)
     l_write_line(file, "#error \"short int size shall be 2-byte\"");
   }
 
-  l_write_line(file, "%s#undef l_medit%s#undef l_umedit", L_NEWLINE, L_NEWLINE);
+  l_write_line(file, "%s#undef l_medit%s#undef l_umedit", L_NEWLINE, " /* 32-bit integer type */" L_NEWLINE);
   if (sizeof(int) == 4) {
     l_write_line(file, "#define l_medit int");
     l_write_line(file, "#define l_umedit unsigned int");
@@ -163,7 +164,7 @@ int main(void)
     l_write_line(file, "#error \"32-bit integer type not found\"");
   }
 
-  l_write_line(file, "%s#undef l_long%s#undef l_ulong", L_NEWLINE, L_NEWLINE);
+  l_write_line(file, "%s#undef l_long%s#undef l_ulong", L_NEWLINE, " /* 64-bit integer type */" L_NEWLINE);
   if (sizeof(long) == 8) {
     l_write_line(file, "#define l_long long");
     l_write_line(file, "#define l_ulong unsigned long");
@@ -174,7 +175,7 @@ int main(void)
     l_write_line(file, "#error \"64-bit integer type not found\"");
   }
 
-  l_write_line(file, "%s#undef l_int /* pointer-size integer type */%s#undef l_uint", L_NEWLINE, L_NEWLINE);
+  l_write_line(file, "%s#undef l_int%s#undef l_uint", L_NEWLINE, " /* pointer-size integer type */" L_NEWLINE);
   if (sizeof(short) == sizeof(void*)) {
     l_write_line(file, "#define l_int short");
     l_write_line(file, "#define l_uint unsigned short");
@@ -192,18 +193,61 @@ int main(void)
   }
 
   l_write_line(file, "%s#undef L_EMPTY_HDL", L_NEWLINE);
-  l_write_line(file, "#define L_EMPTY_HDL l_empty_filehdl()");
+  l_write_line(file, "#define L_EMPTY_HDL ((l_filehdl){%s})", L_CODEGEN_FILEHDL_EMPTY_VAL);
 
-#if defined(L_PLAT_WINDOWS)
-  l_write_line(file, "typedef struct { HANDLE winfd; } l_filehdl;");
-#elif defined(L_PLAT_LINUX)
-  l_write_line(file, "typedef struct { int unifd; } l_filehdl;");
-  l_write_line(file, "static l_filehdl l_empty_filehdl() { return (l_filehdl){-1}; }");
-  l_write_line(file, "static l_bool l_filehdl_is_empty(l_filehdl* hdl) { return hdl->unifd == -1; }");
-  l_write_line(file, "static l_bool l_filehdl_nt_empty(l_filehdl* hdl) { return hdl->unifd != -1; }");
-#else
-  l_write_line(file, "#error l_filehdl not defined");
-#endif
+  if (L_CODEGEN_FILEHDL_TYPE_SIZE == sizeof(char)) {
+    if (L_CODEGEN_FILEHDL_IS_SIGNED) {
+      l_write_line(file, "typedef struct { signed char fd; } l_filehdl;");
+    } else {
+      l_write_line(file, "typedef struct { unsigned char fd; } l_filehdl;");
+    }
+  } else if (L_CODEGEN_FILEHDL_TYPE_SIZE == sizeof(short)) {
+    if (L_CODEGEN_FILEHDL_IS_SIGNED) {
+      l_write_line(file, "typedef struct { short fd; } l_filehdl;");
+    } else {
+      l_write_line(file, "typedef struct { unsigned short fd; } l_filehdl;");
+    }
+  } else if (L_CODEGEN_FILEHDL_TYPE_SIZE == sizeof(int)) {
+    if (L_CODEGEN_FILEHDL_IS_SIGNED) {
+      l_write_line(file, "typedef struct { int fd; } l_filehdl;");
+    } else {
+      l_write_line(file, "typedef struct { unsigned int fd; } l_filehdl;");
+    }
+  } else if (L_CODEGEN_FILEHDL_TYPE_SIZE == sizeof(long)) {
+    if (L_CODEGEN_FILEHDL_IS_SIGNED) {
+      l_write_line(file, "typedef struct { long fd; } l_filehdl;");
+    } else {
+      l_write_line(file, "typedef struct { unsigned long fd; } l_filehdl;");
+    }
+  } else if (L_CODEGEN_FILEHDL_TYPE_SIZE == sizeof(long long)) {
+    if (L_CODEGEN_FILEHDL_IS_SIGNED) {
+      l_write_line(file, "typedef struct { long long fd; } l_filehdl;");
+    } else {
+      l_write_line(file, "typedef struct { unsigned long long fd; } l_filehdl;");
+    }
+  } else {
+    l_write_line(file, "#error \"unsupported filehdl size %d\"", L_CODEGEN_FILEHDL_TYPE_SIZE);
+  }
+
+  l_write_line(file, "static l_filehdl l_empty_filehdl() { return L_EMPTY_HDL; }");
+  l_write_line(file, "static l_bool l_filehdl_is_empty(l_filehdl* self) { return self->fd == %s; }", L_CODEGEN_FILEHDL_EMPTY_VAL);
+  l_write_line(file, "static l_bool l_filehdl_nt_empty(l_filehdl* self) { return self->fd != %s; }", L_CODEGEN_FILEHDL_EMPTY_VAL);
+
+  l_write_line(file, "%s#undef L_IMPL_THRHDL_TYPE_SIZE", L_NEWLINE);
+  l_write_line(file, "#undef L_IMPL_THRKEY_TYPE_SIZE");
+  l_write_line(file, "#undef L_IMPL_MUTEX_TYPE_SIZE");
+  l_write_line(file, "#undef L_IMPL_RWLOCK_TYPE_SIZE");
+  l_write_line(file, "#undef L_IMPL_CONDV_TYPE_SIZE");
+  l_write_line(file, "#define L_IMPL_THRHDL_TYPE_SIZE %d", L_CODEGEN_THRHDL_TYPE_SIZE);
+  l_write_line(file, "#define L_IMPL_THRKEY_TYPE_SIZE %d", L_CODEGEN_THRKEY_TYPE_SIZE);
+  l_write_line(file, "#define L_IMPL_MUTEX_TYPE_SIZE %d", L_CODEGEN_MUTEX_TYPE_SIZE);
+  l_write_line(file, "#define L_IMPL_RWLOCK_TYPE_SIZE %d", L_CODEGEN_RWLOCK_TYPE_SIZE);
+  l_write_line(file, "#define L_IMPL_CONDV_TYPE_SIZE %d", L_CODEGEN_CONDV_TYPE_SIZE);
+
+  l_write_line(file, "%s#undef L_IMPL_SOCKADDR_TYPE_SIZE", L_NEWLINE);
+  l_write_line(file, "#undef L_IMPL_IOEVMGR_TYPE_SIZE");
+  l_write_line(file, "#define L_IMPL_SOCKADDR_TYPE_SIZE %d", L_CODEGEN_SOCKADDR_TYPE_SIZE);
+  l_write_line(file, "#define L_IMPL_IOEVMGR_TYPE_SIZE %d", L_CODEGEN_IOEVMGR_TYPE_SIZE);
 
   l_write_line(file, "%s#undef L_MAX_FILENAME", L_NEWLINE);
   l_write_line(file, "#define L_MAX_FILENAME %d", FILENAME_MAX);
