@@ -119,9 +119,10 @@ typedef struct l_global {
   l_condv QCNDV;
 } l_global;
 
+struct l_coroutine;
 typedef struct {
   l_smplnode node; /* chained to free q */
-  l_coroutine* coro;
+  struct l_coroutine* coro;
   l_umedit coro_index;
 } l_coroslot;
 
@@ -134,7 +135,7 @@ typedef struct {
   lua_State* L;
 } l_corotable;
 
-typedef struct {
+typedef struct l_coroutine {
   l_smplnode node;
   lua_State* co;
   l_ulong coro_id;
@@ -190,7 +191,7 @@ L_USEHDL(l_filehdl hdl)
 L_EXTERN l_srvc_ioev_data
 L_NODATA()
 {
-  return (l_srvc_ioev_data){flase, false, L_EMPTY_HDL, 0, 0};
+  return (l_srvc_ioev_data){false, false, L_EMPTY_HDL, 0, 0};
 }
 
 typedef struct {
@@ -1567,6 +1568,8 @@ l_start_logging(lnlylib_env* E, const l_byte* tag)
   return out;
 }
 
+L_EXTERN int l_impl_ostream_format_v(l_ostream* os, const void* fmt, l_int n, va_list vl);
+
 L_EXTERN void
 l_impl_logger_func(lnlylib_env* E, const void* tag, const void* fmt, ...)
 {
@@ -1588,7 +1591,7 @@ l_impl_logger_func(lnlylib_env* E, const void* tag, const void* fmt, ...)
     va_end(vl);
   } else {
     va_start(vl, fmt);
-    l_impl_ostream_format_v(out, l_cstr(fmt), nargs - '0', vl);
+    l_impl_ostream_format_v(out, fmt, nargs - '0', vl);
     va_end(vl);
   }
 

@@ -74,7 +74,7 @@ typedef struct {
 #undef l_const_strn
 
 #define l_cstr(s) ((l_byte*)(s)) /* zero terminated c string */
-#define l_strn_c(s) ((l_strn){l_cstr(s), (s) ? strlen((char*)(s)) : 0}
+#define l_strn_c(s) ((l_strn){l_cstr(s), (s) ? strlen((char*)(s)) : 0})
 #define l_empty_strn() l_const_strn("")
 #define l_const_strn(s) ((l_strn){l_cstr("" s), sizeof(s) - 1})
 
@@ -352,6 +352,7 @@ l_impl_logger_n(struct lnlylib_env* E, const void* tag, const void* s, l_int n, 
 #define L_NOOX        0x80000000 /* dont append 0b 0o 0x prefix */
 #define L_UPPER       0x00800000
 #define L_LOWER       0x00008000
+#define L_PRECISE     0x00000080
 #define L_FORMAT_MASK 0xff808080
 
 #define L_SETP(n) (((n) & 0x7f) << 16) /* precise */
@@ -364,6 +365,7 @@ l_impl_logger_n(struct lnlylib_env* E, const void* tag, const void* s, l_int n, 
 
 typedef struct {
   void* out;
+  l_int size;
   l_int (*write)(void* out, const void* p, l_int n);
 } l_ostream;
 
@@ -380,59 +382,58 @@ L_EXTERN l_int l_ostream_format_f(l_ostream* os, double f, l_umedit flags);
 L_EXTERN l_int l_ostream_format_s(l_ostream* os, const void* s, l_umedit flags);
 L_EXTERN l_int l_ostream_format_strn(l_ostream* os, l_strn s, l_umedit flags);
 L_EXTERN l_int l_ostream_format_bool(l_ostream* os, int n, l_umedit flags);
-L_EXTERN l_int l_ostream_format_n(l_ostream* os, const void* fmt, l_int n, const l_value* a);
-L_EXTERN l_int l_impl_ostream_format(l_ostream* os, const void* fmt, l_int n, ...);
-L_EXTERN l_int l_impl_ostream_format_v(l_ostream* os, const void* fmt, l_int n, va_list vl);
+L_EXTERN int l_ostream_format_n(l_ostream* os, const void* fmt, l_int n, const l_value* a);
+L_EXTERN int l_impl_ostream_format(l_ostream* os, const void* fmt, l_int n, ...);
 
-L_INLINE l_int
+L_INLINE int
 l_ostream_format_1(l_ostream* os, const void* fmt, l_value a)
 {
   return l_impl_ostream_format(os, fmt, 1, a);
 }
 
-L_INLINE l_int
+L_INLINE int
 l_ostream_format_2(l_ostream* os, const void* fmt, l_value a, l_value b)
 {
   return l_impl_ostream_format(os, fmt, 2, a, b);
 }
 
-L_INLINE l_int
+L_INLINE int
 l_ostream_format_3(l_ostream* os, const void* fmt, l_value a, l_value b, l_value c)
 {
   return l_impl_ostream_format(os, fmt, 3, a, b, c);
 }
 
-L_INLINE l_int
+L_INLINE int
 l_ostream_format_4(l_ostream* os, const void* fmt, l_value a, l_value b, l_value c, l_value d)
 {
   return l_impl_ostream_format(os, fmt, 4, a, b, c, d);
 }
 
-L_INLINE l_int
+L_INLINE int
 l_ostream_format_5(l_ostream* os, const void* fmt, l_value a, l_value b, l_value c, l_value d, l_value e)
 {
   return l_impl_ostream_format(os, fmt, 5, a, b, c, d, e);
 }
 
-L_INLINE l_int
+L_INLINE int
 l_ostream_format_6(l_ostream* os, const void* fmt, l_value a, l_value b, l_value c, l_value d, l_value e, l_value f)
 {
   return l_impl_ostream_format(os, fmt, 6, a, b, c, d, e, f);
 }
 
-L_INLINE l_int
+L_INLINE int
 l_ostream_format_7(l_ostream* os, const void* fmt, l_value a, l_value b, l_value c, l_value d, l_value e, l_value f, l_value g)
 {
   return l_impl_ostream_format(os, fmt, 7, a, b, c, d, e, f, g);
 }
 
-L_INLINE l_int
+L_INLINE int
 l_ostream_format_8(l_ostream* os, const void* fmt, l_value a, l_value b, l_value c, l_value d, l_value e, l_value f, l_value g, l_value h)
 {
   return l_impl_ostream_format(os, fmt, 8, a, b, c, d, e, f, g, h);
 }
 
-L_INLINE l_int
+L_INLINE int
 l_ostream_format_9(l_ostream* os, const void* fmt, l_value a, l_value b, l_value c, l_value d, l_value e, l_value f, l_value g, l_value h, l_value i)
 {
   return l_impl_ostream_format(os, fmt, 9, a, b, c, d, e, f, g, h, i);

@@ -1,12 +1,12 @@
 #ifndef LNLYLIB_CORE_LAPI_H
 #define LNLYLIB_CORE_LAPI_H
-#include <lualib.h>
-#include <lauxlib.h>
 #include "core/base.h"
 
+typedef struct lua_State lua_State;
+
 #define ll_pop_error(L) {\
-  l_loge_1(LNUL, "lua error %s", ls(lua_tostring((L), -1))); \
-  lua_pop((L), 1); }
+  l_loge_1(LNUL, "lua error %s", ls(ll_to_cstr((L), -1))); \
+  ll_pop_n((L), 1); }
 
 typedef struct {
   int index;
@@ -16,6 +16,7 @@ typedef struct {
   int index;
 } l_funcindex;
 
+L_EXTERN void ll_pop_n(lua_State* L, int n);
 L_EXTERN void ll_pop_to(lua_State* L, int pos);
 L_EXTERN void ll_pop_beyond(lua_State* L, int pos);
 L_EXTERN void ll_set_global(lua_State* L, const void* name, int value_at);

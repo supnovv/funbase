@@ -1,5 +1,18 @@
 #define LNLYLIB_API_IMPL
+#include <lualib.h>
+#include <lauxlib.h>
 #include "core/lapi.h"
+
+L_EXTERN void /* pos n emements */
+ll_pop_n(lua_State* L, int n)
+{
+  int total = lua_gettop(L);
+  if (n < total) {
+    lua_pop(L, n);
+  } else {
+    lua_pop(L, total);
+  }
+}
 
 L_EXTERN void /* pos is not popped */
 ll_pop_to(lua_State* L, int pos)

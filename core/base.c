@@ -1,36 +1,122 @@
 #define LNLYLIB_API_IMPL
 #include <stdio.h>
+#include <stdarg.h>
+#include <stddef.h>
 #include <string.h>
 #include <errno.h>
+#include <float.h>
 #include "core/base.h"
 
-const l_strn l_digit_hex[] = {
+/**
+ * [non-zero] pritable charater
+ * [00111010] G ~ Z   0x3a
+ * [00111011] g ~ z   0x3b
+ * [00111101] 0 ~ 9   0x3d
+ * [00111110] A ~ F   0x3e
+ * [00111111] a ~ f   0x3f
+ * [00110000] _       0x30
+ * [00100000] -       0x20
+ * [0000XX1X] letter                 (ch & 0x02)
+ * [0000XX10] upper letter           (ch & 0x03) == 2
+ * [0000XX11] lower letter           (ch & 0x03) == 3
+ * [0000X1XX] hex digit              (ch & 0x04)
+ * [00001XXX] alphanum               (ch & 0x08)
+ * [XXX1XXXX] alphanum and _         (ch & 0x10)
+ * [XX1XXXXX] alphanum and _ and -   (ch & 0x20)
+ */
+static const l_byte l_char_table[] = {
+  0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+  0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80, 0x80,0x80,0x80,0x80,0x80,0x20,0x80,0x80, 0x3d,0x3d,0x3d,0x3d,0x3d,0x3d,0x3d,0x3d, 0x3d,0x3d,0x80,0x80,0x80,0x80,0x80,0x80, /* (20) - (3d) 0 ~ 9 */
+  0x80,0x3e,0x3e,0x3e,0x3e,0x3e,0x3e,0x3a, 0x3a,0x3a,0x3a,0x3a,0x3a,0x3a,0x3a,0x3a, 0x3a,0x3a,0x3a,0x3a,0x3a,0x3a,0x3a,0x3a, 0x3a,0x3a,0x3a,0x80,0x80,0x80,0x80,0x30, /* (3e,3a) A ~ Z (30) _ */
+  0x80,0x3f,0x3f,0x3f,0x3f,0x3f,0x3f,0x3b, 0x3b,0x3b,0x3b,0x3b,0x3b,0x3b,0x3b,0x3b, 0x3b,0x3b,0x3b,0x3b,0x3b,0x3b,0x3b,0x3b, 0x3b,0x3b,0x3b,0x80,0x80,0x80,0x80,0x00, /* (3f,3b) a ~ z */
+  0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+  0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+  0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+  0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+};
+
+static const l_strn l_hex_digit[] = {
   L_STR("0123456789abcdef"),
   L_STR("0123456789ABCDEF")
 };
 
+L_EXTERN int
+l_is_printable(l_byte c)
+{
+  return l_char_table[c];
+}
+
+L_EXTERN int
+l_is_dec_digit(l_byte c)
+{
+  return l_char_table[c] == 0x3d;
+}
+
+L_EXTERN int
+l_is_letter(l_byte c)
+{
+  return l_char_table[c] & 0x02;
+}
+
+L_EXTERN int
+l_is_upper_letter(l_byte c)
+{
+  return (l_char_table[c] & 0x03) == 2;
+}
+
+L_EXTERN int
+l_is_lower_letter(l_byte c)
+{
+  return (l_char_table[c] & 0x03) == 3;
+}
+
+L_EXTERN int
+l_is_hex_digit(l_byte c)
+{
+  return l_char_table[c] & 0x04;
+}
+
+L_EXTERN int
+l_is_alphanum(l_byte c)
+{
+  return l_char_table[c] & 0x08;
+}
+
+L_EXTERN int
+l_is_alphanum_underscore(l_byte c)
+{
+  return l_char_table[c] & 0x10;
+}
+
+L_EXTERN int
+l_is_alphanum_underscore_hyphen(l_byte c)
+{
+  return l_char_table[c] & 0x20;
+}
+
 L_EXTERN l_int
-l_string_parseDec(l_strt s)
+l_dec_string_to_int(l_strn s)
 {
   l_int times = 1;
   l_int value = 0;
   const l_byte* start = 0;
   const l_byte* end = 0;
+  const l_byte* s_end = s.p + s.n;
   int negative = false;
 
-  while (s.start < s.end) {
-    if (*s.start >= '0' && *s.start <= '9') break;
-    if (*s.start == '-') negative = true;
-    ++s.start;
+  while (s.p < s_end) {
+    if (*s.p >= '0' && *s.p <= '9') break;
+    if (*s.p == '-') negative = true;
+    ++s.p;
   }
 
-  start = s.start;
-  while (s.start < s.end) {
-    if (*s.start < '0' || *s.start > '9') break;
-    ++s.start;
+  start = s.p;
+  while (s.p < s_end) {
+    if (*s.p < '0' || *s.p > '9') break;
+    ++s.p;
   }
 
-  end = s.start;
+  end = s.p;
   while (start < end--) {
     value += *end * times;
     times *= 10;
@@ -40,34 +126,35 @@ l_string_parseDec(l_strt s)
 }
 
 L_EXTERN l_int
-l_string_parseHex(l_strt s)
+l_hex_string_to_int(l_strn s)
 {
   l_int times = 1;
   l_int value = 0;
   const l_byte* start = 0;
   const l_byte* end = 0;
+  const l_byte* s_end = s.p + s.n;
   int negative = false;
 
-  while (s.start < s.end) {
-    if (l_check_is_hex_digit(*s.start)) break;
-    if (*s.start == '-') negative = true;
-    ++s.start;
+  while (s.p < s_end) {
+    if (l_is_hex_digit(*s.p)) break;
+    if (*s.p == '-') negative = true;
+    ++s.p;
   }
 
-  if (*s.start == '0' && s.start + 1 < s.end && (*(s.start + 1) == 'x' || *(s.start + 1) == 'X')) {
-    s.start += 2;
-    if (s.start >= s.end || !l_check_is_hex_digit(*s.start)) {
+  if (*s.p == '0' && s.p + 1 < s_end && (*(s.p + 1) == 'x' || *(s.p + 1) == 'X')) {
+    s.p += 2;
+    if (s.p >= s_end || !l_is_hex_digit(*s.p)) {
       return 0;
     }
   }
 
-  start = s.start;
-  while (s.start < s.end) {
-    if (!l_check_is_hex_digit(*s.start)) break;
-    ++s.start;
+  start = s.p;
+  while (s.p < s_end) {
+    if (!l_is_hex_digit(*s.p)) break;
+    ++s.p;
   }
 
-  end = s.start;
+  end = s.p;
   while (start < end--) {
     value += *end * times;
     times *= 16;
@@ -139,6 +226,12 @@ l_ostream_format_c(l_ostream* os, int c, l_umedit flags)
 
 #define L_HEX_FMT_BFSZ 159
 
+static l_umedit
+l_right_most_bit(l_umedit n)
+{
+  return n & (-n);
+}
+
 L_EXTERN l_int
 l_ostream_format_u(l_ostream* os, l_ulong u, l_umedit flags)
 {
@@ -164,7 +257,7 @@ l_ostream_format_u(l_ostream* os, l_ulong u, l_umedit flags)
     }
     break;
   case L_HEX:
-    hex = l_digit_hex[(flags & L_UPPER) != 0].p;
+    hex = l_hex_digit[(flags & L_UPPER) != 0].p;
     *--p = hex[u & 0x0f];
     while ((u >>= 4)) {
       *--p = hex[u & 0x0f];
@@ -207,7 +300,7 @@ l_ostream_format_u(l_ostream* os, l_ulong u, l_umedit flags)
     *--p = '0';
   }
 
-  if (flags & L_MINUX) *--p = '-';
+  if (flags & L_MINUS) *--p = '-';
   else if (flags & L_PLUS) *--p = '+';
   else if (flags & L_BLANK) *--p = ' ';
 
@@ -216,12 +309,13 @@ l_ostream_format_u(l_ostream* os, l_ulong u, l_umedit flags)
       fill = ' ';
     }
     if (flags & L_LEFT) {
+      l_byte* pa = a;
       l_byte* end = a + width;
       while (p < e) {
-        *a++ = *p++;
+        *pa++ = *p++;
       }
-      while (a < end) {
-        *a++ = fill;
+      while (pa < end) {
+        *pa++ = fill;
       }
     } else {
       while (width > e - p) {
@@ -247,6 +341,48 @@ l_ostream_format_d(l_ostream* os, l_long d, l_umedit flags)
   return l_ostream_format_u(os, n, flags);
 }
 
+static l_byte*
+l_format_ulong_dec(l_ulong n, l_byte* p)
+{
+  l_byte a[80];
+  l_byte* s = a;
+
+  *s++ = (n % 10) + '0';
+
+  while ((n /= 10)) {
+    *s++ = (n % 10) + '0';
+  }
+
+  while (s-- > a) {
+    *p++ = *s;
+  }
+
+  return p;
+}
+
+static l_byte*
+l_format_fraction_dec(double f, l_byte* p, int precise)
+{
+  l_ulong ipart = 0;
+
+  if (f < DBL_EPSILON) {
+    *p++ = '0';
+    return p;
+  }
+
+  if (precise == 0) {
+    precise = 80;
+  }
+
+  while (f >= DBL_EPSILON && precise-- > 0) {
+    ipart = (l_ulong)(f * 10);
+    *p++ = (l_byte)(ipart + '0');
+    f = f * 10 - ipart;
+  }
+
+  return p;
+}
+
 L_EXTERN l_int
 l_ostream_format_f(l_ostream* os, double f, l_umedit flags)
 {
@@ -259,7 +395,7 @@ l_ostream_format_f(l_ostream* os, double f, l_umedit flags)
   l_ulong mantissa = 0;
   int exponent = 0;
   int negative = 0;
-  l_umedit precise = ((flags & 0x7f0000) >> 16);
+  l_umedit precise = L_GETP(flags);
 
   /**
    * Floating Point Components
@@ -316,36 +452,36 @@ l_ostream_format_f(l_ostream* os, double f, l_umedit flags)
         intmasks <<= (-exponent);
       }
       *p++ = '0'; dot = p; *p++ = '.';
-      l_log_print_fraction(mantissa, intmasks, p);
+      l_format_fraction_dec(mantissa, intmasks, p);
       #endif
       *p++ = '0'; *p++ = '.'; dot = p;
-      p = l_string_print_fraction(v.f, p, precise);
+      p = l_format_fraction_dec(v.f, p, precise);
     } else {
       if (exponent >= 52) {
         /* only have integer part */
         if (exponent <= 63) { /* 52 + 11 */
           mantissa <<= (exponent - 52);
-          p = l_string_print_ulong(mantissa, p);
+          p = l_format_ulong_dec(mantissa, p);
           *p++ = '.'; dot = p; *p++ = '0';
         } else {
           exponent -= 63;
           mantissa <<= 11;
-          p = l_string_print_ulong(mantissa, p);
+          p = l_format_ulong_dec(mantissa, p);
           *p++ = '*'; *p++ = '2'; *p++ = '^';
-          p = l_string_print_ulong(exponent, p);
+          p = l_format_ulong_dec(exponent, p);
         }
       } else {
         /* have integer part and fraction part */
         #if 0
         intmasks >>= exponent;
-        l_log_print_ulong((mantissa & intmasks) >> (52 - exponent), p);
+        l_format_ulong_dec((mantissa & intmasks) >> (52 - exponent), p);
         *p++ = '.';
-        l_log_print_fraction(mantissa & (~intmasks), intmasks, p);
+        l_format_fraction_dec(mantissa & (~intmasks), intmasks, p);
         #endif
-        l_ulong ipart = l_cast(l_ulong, v.f);
-        p = l_string_print_ulong(ipart, p);
+        l_ulong ipart = (l_ulong)v.f;
+        p = l_format_ulong_dec(ipart, p);
         *p++ = '.'; dot = p;
-        p = l_string_print_fraction(v.f - ipart, p, precise);
+        p = l_format_fraction_dec(v.f - ipart, p, precise);
       }
     }
   }
@@ -383,18 +519,248 @@ l_ostream_format_bool(l_ostream* os, int n, l_umedit flags)
   }
 }
 
-L_EXTERN l_int
+static const l_byte*
+l_ostream_format_a_value(l_ostream* os, const l_byte* start, const l_byte* end, l_value a)
+{
+  /** format flags **
+  s - const void*
+  f - double
+  d - l_long
+  u - l_ulong
+  strn - l_strn*
+  bool - print true or false
+  p - print as pointer value
+  b - bin
+  o - oct
+  x - hex
+  base - (b)in (o)ct (h)ex
+  sign - ( )blank (+)plus (z)dont print 0b 0o 0x prefix
+  justify - (l)eft, default is right
+  width - 1 ~ 2 digit
+  precision - (.) and 1 ~ 2 digit
+  fill - fill to reach the width length
+  ********************************************************************/
+  l_umedit flags = 0; /* start point to '%' and next char is not '%' */
+  const l_byte* cur = start;
+
+  while (++cur < end) {
+    switch (*cur) {
+    case ' ':
+      flags |= L_BLANK;
+      continue;
+    case '+':
+      flags |= L_PLUS;
+      continue;
+    case '.':
+      flags |= L_PRECISE;
+      continue;
+    case 'l': case 'L':
+      flags |= L_LEFT;
+      continue;
+    case 'z': case 'Z':
+      flags |= L_NOOX;
+      continue;
+    case '0': case '~': case '-': case '=': case '#':
+      flags |= L_SETF(*cur); /* fill char */
+      continue;
+    case '1': case '2': case '3': case '4':
+    case '5': case '6': case '7': case '8': case '9': {
+      l_umedit width = *cur - '0';
+      l_byte ch = 0;
+      if (cur + 1 < end && (ch = *(cur + 1)) >= '0' && ch <= '9') {
+        /* cur + 1 is the 2nd digit */
+        width = width * 10 + ch - '0';
+        ++cur;
+        /* skip next extra digits */
+        while (cur + 1 < end && (ch = *(cur + 1)) >= '0' && ch <= '9') {
+          ++cur;
+        }
+      }
+      /* current char is digit, and next is not digit or end */
+      if (flags & L_PRECISE) {
+        flags |= L_SETP(width);
+        flags &= (~L_PRECISE);
+      } else {
+        flags |= L_SETW(width);
+      }
+    }
+    continue;
+    case 'S':
+      flags |= L_UPPER;
+      /* fallthrough */
+    case 's':
+      if (end - cur >= 4 && *(cur+1) == 't' && *(cur+2) == 'r' && *(cur+3) == 'n') {
+        os->size += l_ostream_format_s(os, a.p, flags);
+        return cur + 4;
+      } else {
+        os->size += l_ostream_format_s(os, a.p, flags);
+        return cur + 1;
+      }
+    case 'f': case 'F':
+      os->size += l_ostream_format_f(os, a.f, flags);
+      return cur + 1;
+    case 'u': case 'U':
+      os->size += l_ostream_format_u(os, a.u, flags);
+      return cur + 1;
+    case 'd': case 'D':
+      os->size += l_ostream_format_d(os, a.d, flags);
+      return cur + 1;
+    case 'C':
+      flags |= L_UPPER;
+      /* fallthrough */
+    case 'c':
+      os->size += l_ostream_format_c(os, (int)a.u, flags);
+      return cur + 1;
+    case 'B':
+      flags |= L_UPPER;
+      /* fallthrough */
+    case 'b':
+      if (end - cur >= 4 && *(cur+1) == 'o' && *(cur+2) == 'o' && *(cur+3) == 'l') {
+        os->size += l_ostream_format_bool(os, (int)a.u, flags);
+        return cur + 4;
+      } else {
+        flags |= L_BIN;
+        os->size += l_ostream_format_u(os, a.u, flags);
+        return cur + 1;
+      }
+    case 'O':
+      flags |= L_UPPER;
+      /* fallthrough */
+    case 'o':
+      flags |= L_OCT;
+      os->size += l_ostream_format_u(os, a.u, flags);
+      return cur + 1;
+    case 'X': case 'P':
+      flags |= L_UPPER;
+      /* fallthrough */
+    case 'x': case 'p':
+      flags |= L_HEX;
+      os->size += l_ostream_format_u(os, a.u, flags);
+      return cur + 1;
+    default:
+      break;
+    }
+
+    /* wrong format if goes here */
+    break;
+  }
+
+  os->size += l_ostream_write(os, start, end - start);
+  return 0;
+}
+
+static l_value
+l_format_n_get_value(const void* p, l_int n)
+{
+  const l_value* a = (const l_value*)p;
+  return a[n];
+}
+
+/** variable arguments **
+The type va_list is an object type suitable for holding information
+needed by the macros va_start, va_arg, va_end, and va_copy. If access
+to the varying arguments is desired, the called function shall decalre
+an object such as ap having type va_list. The object ap may be passed
+as an argument to another function; if that function invokes the va_arg
+macro with parameter ap, the value of ap in the calling function is
+indeterminate and shall be passed to the va_end macro prior to any
+further reference to ap. 215) It is permitted to create a pointer to a
+va_list and pass that pointer to another function, in which case the
+original function may make further use of the original list after
+the other function returns.
+Each invocation of the va_arg macro modifies ap so that the values of
+successive arguments are returned in turn. **/
+
+static l_value
+l_format_v_get_value(const void* p, l_int n)
+{
+  va_list* vl = (va_list*)p;
+  L_UNUSED(n);
+  return va_arg(*vl, l_value);
+}
+
+static int
+l_impl_ostream_format_n(l_ostream* os, const void* fmt, l_int n, const void* p, l_value (*getval)(const void*, l_int))
+{
+  int nfmts = 0;
+  const l_byte* cur = 0;
+  const l_byte* end = 0;
+  const l_byte* beg = 0;
+  l_strn fmt_str;
+
+  if (fmt == 0) {
+    return 0;
+  }
+
+  fmt_str = l_strn_c(fmt);
+
+  if (n <= 0 || p == 0) {
+    os->size += l_ostream_write(os, fmt_str.p, fmt_str.n);
+    return 0;
+  }
+
+  cur = fmt_str.p;
+  end = cur + fmt_str.n;
+  beg = cur;
+
+  while (cur < end) {
+    if (*cur != '%') {
+      ++cur;
+      continue;
+    }
+
+    /* cur char is '%' */
+    os->size += l_ostream_write(os, beg, cur - beg);
+    beg = cur;
+
+    /* cur is '%' and next char also is '%' */
+    if (cur + 1 < end && *(cur + 1) == '%') {
+      beg = cur + 1;
+      cur = cur + 2;
+      continue;
+    }
+
+    /* cur is '%' and next is not '%' or end */
+    if (!(cur = l_ostream_format_a_value(os, cur, end, getval(p, nfmts)))) {
+      break;
+    }
+
+    ++nfmts;
+
+    if (nfmts >= n) {
+      break;
+    }
+  }
+
+  if (beg < cur) {
+    os->size += l_ostream_write(os, beg, cur - beg);
+  }
+
+  return nfmts;
+}
+
+L_EXTERN int
 l_ostream_format_n(l_ostream* os, const void* fmt, l_int n, const l_value* a)
-{}
+{
+  return l_impl_ostream_format_n(os, fmt, n, a, l_format_n_get_value);
+}
 
-L_EXTERN l_int
+L_EXTERN int
 l_impl_ostream_format_v(l_ostream* os, const void* fmt, l_int n, va_list vl)
-{}
+{
+  return l_impl_ostream_format_n(os, fmt, n, &vl, l_format_v_get_value);
+}
 
-L_EXTERN l_int
+L_EXTERN int
 l_impl_ostream_format(l_ostream* os, const void* fmt, l_int n, ...)
-{}
-
+{
+  int nfmts = 0;
+  va_list vl;
+  va_start(vl, n);
+  nfmts = l_impl_ostream_format_v(os, fmt, n, vl);
+  va_end(vl);
+  return nfmts;
+}
 
 L_EXTERN void
 l_filename_init(l_filename* fn)
