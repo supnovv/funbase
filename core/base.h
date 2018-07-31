@@ -338,6 +338,23 @@ l_impl_logger_n(struct lnlylib_env* E, const void* tag, const void* s, l_int n, 
   l_impl_logger_func(E, tag, s, n, a);
 }
 
+/** memory operation **/
+
+typedef void* (*l_mallocfunc)(void* ud, void* p, l_ulong oldsz, l_ulong newsz);
+L_EXTERN l_mallocfunc l_malloc_func; /* note the allocated memory is not initialized */
+
+#undef L_MALLOC
+#undef L_MALLOC_TYPE
+#undef L_MALLOC_TYPE_N
+#undef L_RALLOC
+#undef L_MFREE
+
+#define L_MALLOC(E, size) l_malloc_func((E), 0, 0, (size))
+#define L_MALLOC_TYPE(E, type) (type*)L_MALLOC((E), sizeof(type))
+#define L_MALLOC_TYPE_N(E, type, n) (type*)L_MALLOC((E), sizeof(type) * (n))
+#define L_RALLOC(E, p, newsz) l_malloc_func((E), (p), 0, (newsz))
+#define L_MFREE(E, p) l_malloc_func((E), (p), 0, 0)
+
 /** output stream **/
 
 #define L_HEX         0x01000000
