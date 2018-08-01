@@ -355,6 +355,9 @@ L_EXTERN l_mallocfunc l_malloc_func; /* note the allocated memory is not initial
 #define L_RALLOC(E, p, newsz) l_malloc_func((E), (p), 0, (newsz))
 #define L_MFREE(E, p) l_malloc_func((E), (p), 0, 0)
 
+L_EXTERN l_bool l_zero_n(void* p, l_ulong size);
+L_EXTERN l_ulong l_copy_n(void* dest, void* from, l_ulong size);
+
 /** output stream **/
 
 #define L_HEX         0x01000000
@@ -392,6 +395,8 @@ l_ostream_write(l_ostream* os, const void* p, l_int n)
   return os->write(os->out, p, n);
 }
 
+L_EXTERN l_ostream l_stdout_ostream();
+L_EXTERN l_ostream l_stderr_ostream();
 L_EXTERN l_int l_ostream_format_c(l_ostream* os, int c, l_umedit flags);
 L_EXTERN l_int l_ostream_format_d(l_ostream* os, l_long d, l_umedit flags);
 L_EXTERN l_int l_ostream_format_u(l_ostream* os, l_ulong u, l_umedit flags);

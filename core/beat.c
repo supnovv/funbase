@@ -1,4 +1,5 @@
 #define LNLYLIB_API_IMPL
+#include <stdio.h>
 #include <stdlib.h>
 #include "core/beat.h"
 #include "core/lapi.h"
@@ -35,25 +36,6 @@
 #define L_MSG_SERVICE_STOP_REQ   0x04
 #define L_MSG_SERVICE_ON_CREATE  0x05
 #define L_MSG_SERVICE_ON_DESTROY 0x06
-
-struct l_master;
-struct l_thread;
-struct l_worker;
-struct l_service;
-struct l_message;
-struct l_coroutine;
-
-typedef struct lnlylib_env {
-  struct l_master* M;
-  struct l_thread* T;
-  struct l_service* S;
-  struct l_message* MSG;
-  l_ostream* LOG;
-  void* SVUD;
-  void* ALLOC;
-  lua_State* L;
-  struct l_coroutine* CO;
-} lnlylib_env;
 
 typedef struct l_thread {
   l_thrhdl thrhdl;
@@ -157,7 +139,7 @@ typedef struct l_service {
   l_squeue srvc_msgq;
   l_filehdl ioev_hdl;
   l_umedit srvc_flags;
-  l_ulong srvc_id; /* the highest bit is for remote service or not */
+  l_ulong srvc_id; /* the highest bit is for remote service or not, high 32-bit is the index, low 32-bit is the seed num */
   l_corotable* coro_tabl; /* only created for lua service */
   l_service_callback* cb;
   void* ud;
@@ -283,6 +265,43 @@ lnlylib_rawalloc(void* ud, void* p, l_ulong oldsz, l_ulong newsz)
 
 l_mallocfunc l_malloc_func = lnlylib_rawalloc;
 
+L_EXTERN l_bool
+l_zero_n(void* p, l_ulong size)
+{
+  if (p == 0 || size == 0) {
+    return false;
+  }
+  if (p == memset(p, 0, size)) {
+    return true;
+  } else {
+    l_loge_1(LNUL, "memset fail %d", ld(size));
+    return false;
+  }
+}
+
+L_EXTERN l_ulong
+l_copy_n(void* dest, const void* from, l_ulong size)
+{
+  if (dest == 0 || from == 0 || size == 0) {
+    return 0;
+  }
+  if (l_cstr(dest) + size <= l_cstr(from) || l_cstr(from) + size <= l_cstr(dest)) {
+    if (dest == memcpy(dest, from, size)) {
+      return size;
+    } else {
+      l_loge_3(LNUL, "memcpy fail %p <- %p %d", ld(dest), ld(from), ld(size));
+      return 0;
+    }
+  } else {
+    if (dest == memmove(dest, from, size)) {
+      return size;
+    } else {
+      l_loge_3(LNUL, "memmove fail %p <- %p %d", ld(dest), ld(from), ld(size));
+      return 0;
+    }
+  }
+}
+
 static l_master* L_MASTER;
 
 #if defined(L_THREAD_LOCAL)
@@ -323,6 +342,72 @@ l_threadlocal_get()
 }
 
 static void
+l_config_load(l_config* C)
+{
+  lua_State* L = ll_newstate();
+
+  l_string_init(&C->start_script);
+
+  C->num_workers = luastate_readint(c->L, "workers");
+  if (C->num_workers < 1) {
+    C->num_workers = 1;
+  }
+
+  C->min_stbl_size = l_config_read_int(L, "service_table_size");
+  if (C->min_stbl_size < L_MIN_SRVC_TABLE_SIZE) {
+    C->min_stbl_size = L_MIN_SRVC_TABLE_SIZE;
+  }
+
+  // ...
+
+  luastate_close(&L);
+}
+
+L_EXTERN l_int l_impl_file_write(void* out, const void* p, l_int len);
+
+static l_ostream
+l_config_logout(l_config* conf, l_umedit thridx)
+{
+  l_strn logfile_prefix;
+
+  logfile_prefix = l_filename_strn(&conf->log_file_name);
+
+  if (l_strn_equal(&logfile_prefix, L_STR("stdout"))) {
+    return l_stdout_ostream();
+
+  } else if (l_strn_equal(&logfile_prefix, L_STR("stderr"))) {
+    return l_stderr_ostream();
+
+  } else {
+    l_filename result_name;
+    l_ostream result_out;
+
+    l_filename_init(&result_name);
+    result_out = l_filename_ostream(&result_name);
+
+    if (l_ostream_format_2(&result_out, "%strn.%d.log", lstrn(&logfile_prefix), ld(thridx)) != 2) {
+      l_loge_2(LNUL, "create log ostream fail %strn %d", lstrn(&logfile_prefix), ld(thridx));
+      return l_stdout_ostream();
+
+    } else {
+      l_ostream logout;
+
+      logout.out = fopen(result_name.p, "wb");
+
+      if (logout.out == 0) {
+        l_loge_1(LNUL, "open log file fail %s", ls(result_name.s));
+        return l_stdout_ostream();
+
+      } else {
+        logout.size = 0;
+        logout.write = l_impl_file_write;
+        return logout;
+      }
+    }
+  }
+}
+
+static void
 l_thread_init(l_thread* T, l_umedit thridx, lnlylib_env* env, l_config* conf)
 {
   T->thridx = thridx;
@@ -334,6 +419,20 @@ l_thread_init(l_thread* T, l_umedit thridx, lnlylib_env* env, l_config* conf)
   } else {
     T->logout = l_config_logout(conf, thridx);
     T->thrd_alloc = l_thrdalloc_create();
+  }
+}
+
+static void
+l_thread_free(l_thread* T)
+{
+  if (T->logout.out && T->logout.out != stdout && T->logout.out != stderr) {
+    fclose((FILE*)T->logout.out);
+    T->logout.out = 0;
+  }
+
+  if (T->thrd_alloc) {
+    l_thrdalloc_destroy(T->thrd_alloc);
+    T->thrd_alloc = 0;
   }
 }
 
@@ -400,7 +499,7 @@ l_srvctable_alloc_slot(l_master* M, l_srvctable* stbl)
     return slot;
   }
 
-  l_logw_2("stbl is full: capacity %d num_services %d",
+  l_logw_2(E, "stbl is full: capacity %d num_services %d",
       ld(stbl->capacity), ld(stbl->num_services));
 
   { l_srvcslot* new_sarr = 0;
@@ -409,11 +508,11 @@ l_srvctable_alloc_slot(l_master* M, l_srvctable* stbl)
 
     new_size = stbl->capacity * 2;
     if (new_size <= stbl->capacity) {
-      l_loge_2("current stbl is too large %d", stbl->capacity);
+      l_loge_2(E, "current stbl is too large %d", stbl->capacity);
       return 0;
     }
 
-    l_logw_1("stbl alloced to new size %d", ld(new_size));
+    l_logw_1(E, "stbl alloced to new size %d", ld(new_size));
     new_sarr = L_MALLOC_TYPE_N(M->E, l_srvcslot, new_size);
 
     /* copy the old slots and free the old */
@@ -445,28 +544,6 @@ l_srvctable_alloc_slot(l_master* M, l_srvctable* stbl)
   }
 
   return 0;
-}
-
-static void
-l_config_load(l_config* C)
-{
-  lua_State* L = ll_newstate();
-
-  l_string_init(&C->start_script);
-
-  C->num_workers = luastate_readint(c->L, "workers");
-  if (C->num_workers < 1) {
-    C->num_workers = 1;
-  }
-
-  C->min_stbl_size = l_config_read_int(L, "service_table_size");
-  if (C->min_stbl_size < L_MIN_SRVC_TABLE_SIZE) {
-    C->min_stbl_size = L_MIN_SRVC_TABLE_SIZE;
-  }
-
-  // ...
-
-  luastate_close(&L);
 }
 
 static lnlylib_env*
@@ -576,25 +653,25 @@ l_master_init(int (*start)(lnlylib_env*), int argc, char** argv)
 static int
 l_master_loop(lnlylib_env* main_env)
 {
-  l_global* G = main_env->G;
-  l_squeue* Q = &G->Q;
-  l_mutex* QLOCK = &G->QLOCK;
-  l_condv* QCNDV = &G->QCNDV;
+  l_master* M = main_env->M;
+  l_squeue* Q = M->globalq;
+  l_mutex* QLOCK = M->qlock;
+  l_condv* QCNDV = M->qcndv;
 
-  l_master* M = &G->master;
-  l_srvctable* stbl = &M->stbl;
-  l_squeue* temp_svcq = &M->temp_svcq;
+  l_srvctable* stbl = M->stbl;
+  l_squeue* temp_svcq = M->temp_svcq;
   l_service* S = 0;
   l_srvcslot* srvc_slot = 0;
 
   l_umedit num_workers = M->num_workers;
-  l_squeue* mast_frmq = &M->mast_frmq;
-  l_squeue* mast_frsq = &M->mast_frsq;
+  l_squeue* mast_frmq = M->mast_frmq;
+  l_squeue* mast_frsq = M->mast_frsq;
   l_worknode* work_node = 0;
   l_message* MSG = 0;
-  l_int global_q_is_empty = 0;
-  l_int i = 0;
-  l_int events = 0;
+  l_umedit i = 0;
+  int global_q_is_empty = 0;
+  int num_events = 0;
+  int master_exit = 0;
 
   l_service* launcher = 0;
   l_message* on_create_msg = 0;
@@ -607,7 +684,8 @@ l_master_loop(lnlylib_env* main_env)
   l_squeue_init(&rxms);
   l_squeue_init(&svcq);
 
-  /* launcher is the service to bang the whole new world */
+  /* launcher is the 1st service to bang the whole new world */
+
   launcher = l_master_create_reserved_service(M, L_SERVICE_LAUNCHER, &l_launcher_service_cb, 0);
   on_create_msg = l_master_create_message(M, L_MSG_SERVICE_ON_CREATE, launcher->srvc_id, 0, 0, 0);
   l_squeue_push(&launcher->srvc_msgq, &on_create_msg->node);
@@ -629,7 +707,7 @@ l_master_loop(lnlylib_env* main_env)
       l_rawapi_sleep(30);
     }
 
-    if (M->mast_flags & L_MAST_FLAG_QUIT) {
+    if (master_exit) {
       break;
     }
 
@@ -643,8 +721,8 @@ l_master_loop(lnlylib_env* main_env)
     while ((MSG = (l_message*)l_sqeueue_pop(&rxmq))) {
       switch (MSG->mgid >> 32) {
       case L_MSG_WORKER_FEEDBACK: {
-        l_worker_feedback_data* feedback = 0;
-        feedback = (l_worker_feedback_data)&MSG->mssg_data;
+        l_worker_feedback* feedback = 0;
+        feedback = (l_worker_feedback)&MSG->mssg_data;
         S = feedback->service;
         srvc_slot = stbl->slot + (S->srvc_id >> 32);
         srvc_slot->service = S; /* dock the service to the table first */
@@ -655,9 +733,9 @@ l_master_loop(lnlylib_env* main_env)
         l_assert((S->srvc_flags & L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ) == 0);
         S->srvc_flags |= L_SRVC_FLAG_DOCKED_SERVICE_INSERTED_TO_TEMPQ;
 
-        /* handle messages */
         l_master_deliver_messages(M, &feedback->txmq);
-        l_master_handle_self_messages(M, &feedback->txms);
+
+        master_exit = l_master_handle_self_messages(M, &feedback->txms);
 
         /* handle io events if any pending */
         if (l_filhdl_nt_empty(&srvc_slot->iohdl) && srvc_slot->events) {
@@ -677,16 +755,16 @@ l_master_loop(lnlylib_env* main_env)
         }}
         break;
       default:
-        l_loge_3("unrecognized master message %d", ld(MSG->mgid));
+        l_loge_3(E, "unrecognized master message %d", ld(MSG->mgid));
         break;
       }
 
       l_squeue_push(mast_frmq, &MSG->node); /* TODO: how to free msgdata */
     }
 
-    events = l_ioevmgr_try_wait(M->evmgr, l_master_dispatch_io_event);
-    if (events > 0) {
-      events += l_ioevmgr_try_wait(M->evmgr, l_master_dispatch_io_event);
+    num_events = l_ioevmgr_try_wait(M->evmgr, l_master_dispatch_io_event);
+    if (num_events > 0) {
+      num_events += l_ioevmgr_try_wait(M->evmgr, l_master_dispatch_io_event);
     }
 
     while ((S = (l_service*)l_squeue_pop(temp_svcq))) {
@@ -717,7 +795,7 @@ l_worker_loop(lnlylib_env* ENV)
   l_message* MSG = 0;
   int i = 0, n = 0;
 
-  l_logm_1("worker %d started", ld(W->T.thridx));
+  l_logm_1(ENV, "worker %d started", ld(W->T.thridx));
 
   for (; ;) {
     l_mutex_lock(QLOCK);
@@ -744,7 +822,7 @@ l_worker_loop(lnlylib_env* ENV)
           if (S->ud == 0) {
             ENV->SVUD = S->ud = svud;
           } else if (svud != 0) {
-            l_loge_1("the srvc %d user data already assigned", ld(S->srvc_id));
+            l_loge_1(ENV, "the srvc %d user data already assigned", ld(S->srvc_id));
           }
         }
         break;
@@ -770,7 +848,7 @@ l_worker_loop(lnlylib_env* ENV)
     }
   }
 
-  l_logm_1("worker %d exited", ld(W->T.thridx));
+  l_logm_1(ENV, "worker %d exited", ld(W->T.thridx));
   return 0;
 }
 
@@ -780,26 +858,29 @@ lnlylib_main(int (*start)(lnlylib_env*), int argc, char** argv)
   lnlylib_env* main_env = l_master_init(start, argc, argv);
   l_master* M = main_env->M;
   l_worker* W = 0;
+  l_umedit num_workers = 0;
   l_umedit i = 0;
   int exit_code = 0;
 
-  l_logm_s("master started");
+  l_logm_s(main_env, "master started");
 
-  for (i = 0; i < M->num_workers; ++i) {
+  num_workers = M->num_workers;
+
+  for (i = 0; i < num_workers; ++i) {
     W = M->node_arr[i].worker;
     l_thread_start(&W->T, l_worker_loop);
   }
 
   exit_code = l_master_loop(main_env);
-  l_logm_s("master loop complete %d", ld(exit_code));
+  l_logm_s(main_env, "master loop complete %d", ld(exit_code));
 
-  for (i = 0; i < M->num_workers; ++i) {
+  for (i = 0; i < num_workers; ++i) {
     W = M->node_arr[i].worker;
     l_thread_join(&W->T);
-    l_logm_s("worker %d joined", ld(W->T.thridx));
+    l_logm_s(main_env, "worker %d joined", ld(W->T.thridx));
   }
 
-  l_logm_s("master exited");
+  l_logm_s(main_env, "master exited");
   l_master_exit(main_env);
   return 0;
 }
@@ -1125,6 +1206,7 @@ l_master_create_service(l_master* M, l_service_create_req* req, l_umedit svid)
   l_srvcslot* slot = 0;
   l_srvctable* stbl = 0;
   l_service_callback* cb = 0;
+  lnlylib_env* E = M->T.E;
   l_fildhdl ioev_hdl = L_EMPTY_HDL;
   l_ushort flags = 0;
   l_ushort events = 0;
@@ -1136,7 +1218,7 @@ l_master_create_service(l_master* M, l_service_create_req* req, l_umedit svid)
   }
 
   if (cb == 0) {
-    l_loge_s("service create fail due to null cb");
+    l_loge_s(E, "service create fail due to null cb");
     return 0;
   }
 
@@ -1144,18 +1226,18 @@ l_master_create_service(l_master* M, l_service_create_req* req, l_umedit svid)
     if (l_fildhdl_is_empty(req->ioev.hdl)) {
       l_sockaddr sa;
       if (!req->ioev.ip || !req->ioev.poart) {
-        l_loge_s("service create fail due to empty ip or port");
+        l_loge_s(E, "service create fail due to empty ip or port");
         return 0;
       }
       if (!l_sockaddr_init(&sa, l_strn_c(req->ioev.ip), req->ioev.port)) {
-        l_loge_s("service create fail due to invalid address");
+        l_loge_s(E, "service create fail due to invalid address");
         return 0;
       }
       if (req->ioev.listen) {
         l_socket sock;
         sock = l_socket_tcp_listen(&sa, 0);
         if (l_socket_is_empty(&sock)) {
-          l_loge_s("service create fail due to listen fail");
+          l_loge_s(E, "service create fail due to listen fail");
           return 0;
         }
         ioev_hdl = sock;
@@ -1166,7 +1248,7 @@ l_master_create_service(l_master* M, l_service_create_req* req, l_umedit svid)
         l_bool done = false;
         sock = l_socket_tcp_connect(&sa, &done);
         if (l_socket_is_empty(&sock)) {
-          l_loge_s("service create fail due to connect fail");
+          l_loge_s(E, "service create fail due to connect fail");
           return 0;
         }
         ioev_hdl = sock;
@@ -1183,19 +1265,19 @@ l_master_create_service(l_master* M, l_service_create_req* req, l_umedit svid)
 
   if (svid != 0) {
     if (svid >= L_MIN_USER_SERVICE_ID || svid >= stbl->capacity) {
-      l_loge_1("invalid reserved service id %d", ld(svid));
+      l_loge_1(E, "invalid reserved service id %d", ld(svid));
       return 0;
     }
 
     slot = stbl->slot_arr + svid;
     if (slot->service || (slot->flags & L_SRVC_FLAG_ALIVE)) {
-      l_loge_1("reserved service %d already created", ld(svid));
+      l_loge_1(E, "reserved service %d already created", ld(svid));
       return 0;
     }
   } else {
     slot = l_srvctable_alloc_slot(M, stbl);
     if (slot == 0) {
-      l_loge_s("service create fail due to slot alloc");
+      l_loge_s(E, "service create fail due to slot alloc");
       return 0;
     }
   }
@@ -1206,12 +1288,12 @@ l_master_create_service(l_master* M, l_service_create_req* req, l_umedit svid)
   }
 
   if (S == 0) {
-    l_loge_s("service create fail due to malloc");
+    l_loge_s(E, "service create fail due to malloc");
     return 0;
   }
 
   slot->seed_num = l_get_srvc_seed(M);
-  l_service_init(S, slot->srvc_index, slot->seed_num, cb, 0);
+  l_service_init(S, slot - stbl->slot_arr, slot->seed_num, cb, 0);
   S->ioev_hdl = ioev_hel;
 
   slot->service = service; /* dock the service to the table */
@@ -1240,7 +1322,7 @@ l_launcher_on_create(lnlylib_env* E)
   l_master* M = &G->master;
   l_config* C = &G->conf;
 
-  l_logm_s("launcher on create");
+  l_logm_s(E, "launcher on create");
 
   if (l_string_nt_empty(&C->start_script)) {
     ll_pcall(C->L, l_string_strn(&C->start_script));
@@ -1257,13 +1339,13 @@ l_launcher_on_create(lnlylib_env* E)
 static void
 l_launcher_on_destroy(lnlylib_env* E)
 {
-  l_logm_1("launcher on destroy (ud %d)", ld(E->svud));
+  l_logm_1(E, "launcher on destroy (ud %d)", ld(E->svud));
 }
 
 static void
 l_launcher_service_proc(lnlylib_env* E)
 {
-  l_logm_1("launcher handle msg %d", ld(E->cmsg->mgid));
+  l_logm_1(E, "launcher handle msg %d", ld(E->cmsg->mgid));
 }
 
 static l_service_callback
@@ -1321,7 +1403,7 @@ l_master_insert_message(l_master* M, l_message* msg)
   srvc_slot = stbl->slot_arr + mssg_dest;
   if (mssg_dest >= stbl->capacity || (srvc_slot->flags & L_SRVC_FLAG_ALIVE) == 0) {
     /* invalid message, just insert into free q. TODO: how to free msgdata */
-    l_loge_3("invalid message %d from %d to %d", ld(msg->mgid), ld(msg->mssg_from), ld(mssg_dest));
+    l_loge_3(E, "invalid message %d from %d to %d", ld(msg->mgid), ld(msg->mssg_from), ld(mssg_dest));
     l_squeue_push(&M->mast_frmq, &msg->node);
   } else {
     if ((S = srvc_slot->service)) {
@@ -1439,7 +1521,7 @@ l_master_stop_service(l_master* M, l_ulong srvc_id)
 
   srvc_slot = stbl->slot_arr + svid;
   if (svid >= stbl->capacity || (srvc_slot->flags & L_SRVC_FLAG_ALIVE) == 0) {
-    l_loge_1("try to stop invalid service %d", ld(svid));
+    l_loge_1(E, "try to stop invalid service %d", ld(svid));
   } else {
     l_message* on_destroy_msg = 0;
     on_destroy_msg = l_master_create_message(M, L_MSG_SERVICE_ON_DESTROY, srvc_id, 0, 0, 0);
@@ -1458,14 +1540,14 @@ l_master_destroy_service(l_master* M, l_ulong srvc_id)
 
   srvc_slot = stbl->slot_arr + svid;
   if (svid >= stbl->capacity || (srvc_slot->flags & L_SRVC_FLAG_ALIVE) == 0) {
-    l_loge_1("try to destroy invalid service %d", ld(svid));
+    l_loge_1(E, "try to destroy invalid service %d", ld(svid));
   } else {
     l_assert(srvc_slot->service); /* the service must docked when destroy */
     S = srvc_slot->service;
     srvc_slot->service = 0;
     srvc_slot->flags &= (~L_SRVC_FLAG_ALIVE);
     if (l_squeue_nt_empty(&S->srvc_msgq)) {
-      l_loge_1("service %d destroyed with unhandled messages", ld(svid));
+      l_loge_1(E, "service %d destroyed with unhandled messages", ld(svid));
       while ((srvc_msg = (l_message*)l_squeue_pop(&S->srvc_msgq))) {
         l_squeue_push(&M->mast_frmq, &srvc_msg->node); /* TODO: how to free msgdata */
       }
@@ -1475,14 +1557,26 @@ l_master_destroy_service(l_master* M, l_ulong srvc_id)
   }
 }
 
-static void
+static int
 l_master_handle_self_messages(l_master* M, l_squeue* txms)
 {
   l_srvctable* stbl = &M->stbl;
   l_message* msg = 0;
+  int master_exit = 0;
 
   while ((msg = (l_message*)l_squeue_pop(txms))) {
-    switch (msg->mgid >> 32) {
+    switch (msg->mssg_id) {
+    case L_MSG_MASTER_EXIT_REQ:
+      /* send L_MSG_WORKER_EXIT_REQ to each workers */
+      break;
+    case L_MSG_WORKER_EXIT_RSP:
+      /* worker will send L_MSG_WORKER_EXIT_RSP to master before it is exit */
+      l_assert(M->num_workers != 0);
+      M->num_workers -= 1;
+      if (M->num_workers == 0) {
+        master_exit = 1;
+      }
+      break;
     case L_MSG_CREATE_SERVICE_REQ: {
       l_service* S = 0;
       l_service_create_req* create_data = 0;
@@ -1514,11 +1608,13 @@ l_master_handle_self_messages(l_master* M, l_squeue* txms)
       l_master_stop_service(M, msg->mssg_dest);
       break;
     default:
-      l_loge_3("invalid master message %d", ld(msg->mgid));
+      l_loge_3(E, "invalid master message %d", ld(msg->mgid));
       break;
     }
     l_squeue_push(mast_frmq, &msg->node); /* no need to free msgdata */
   }
+
+  return master_exit;
 }
 
 static l_message*
@@ -1595,10 +1691,10 @@ l_send_master_message(lnlylib_env* E, l_umedit mgid, l_ulong dest_svid, l_umedit
 }
 
 static void /* lua message has dest coroutine need to be specified */
-l_send_lua_message(lnlylib_env* E, l_umedit mgid, l_umedit mgid_cust, l_ulong mssg_dest, l_ulong dest_coro, l_umedit flags, void* data, l_umedit size)
+l_send_lua_message(lnlylib_env* E, l_umedit mgid, l_umedit mgid_cust, l_ulong mssg_dest, l_ulong dest_coro, void* data, l_umedit size)
 {
   if (mgid < L_MIN_USER_MSG_ID) {
-    l_loge_1("invalid message id %d", ld(mgid));
+    l_loge_1(E, "invalid message id %d", ld(mgid));
   } else {
     l_message* msg = l_create_message(E, mgid, mgid_cust, mssg_dest, flags, data, size);
     if (msg) {
@@ -1609,10 +1705,10 @@ l_send_lua_message(lnlylib_env* E, l_umedit mgid, l_umedit mgid_cust, l_ulong ms
 }
 
 L_EXTERN void
-l_send_message(lnlylib_env* E, l_umedit mgid, l_umedit mgid_cust, l_ulong dest_svid, l_umedit flags, void* data, l_umedit size)
+l_send_message(lnlylib_env* E, l_umedit mgid, l_umedit mgid_cust, l_ulong dest_svid, void* data, l_umedit size)
 {
   if (mgid < L_MIN_USER_MSG_ID) {
-    l_loge_1("invalid message id %d", ld(mgid));
+    l_loge_1(E, "invalid message id %d", ld(mgid));
   } else {
     l_send_message_impl(E, l_create_message(E, mgid, mgid_cust, svid, flags, data, size));
   }
@@ -1667,14 +1763,14 @@ l_worker_flush_messages(lnlylib_env* E)
   l_worker* W = E->cthr;
   l_service* S = E->csvc;
   l_message* msg = 0;
-  l_worker_feedback_data feedback;
+  l_worker_feedback feedback;
 
   l_squeue_push_queue(&S->srvc_msgq, W->work_txme);
   feedback.service = S;
   feedback.txmq = l_squeue_move(W->work_txmq);
   feedback.txms = l_squeue_move(W->work_txms);
 
-  msg = l_create_message(E, L_MSG_WORKER_FEEDBACK, 0, 0, 0, &feedback, sizeof(l_worker_feedback_data));
+  msg = l_create_message(E, L_MSG_WORKER_FEEDBACK, 0, 0, 0, &feedback, sizeof(l_worker_feedback));
   if (msg == 0) {
     return;
   }
@@ -1866,7 +1962,7 @@ L_EXTERN void
 ll_yield_impl(lua_State* co, int nresults)
 {
   int status = lua_yield(co, nresults);
-  l_loge_1("lua_yield never returns to here %d", ld(status));
+  l_loge_1(E, "lua_yield never returns to here %d", ld(status));
 }
 
 L_EXTERN int

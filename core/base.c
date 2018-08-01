@@ -765,7 +765,7 @@ l_impl_ostream_format(l_ostream* os, const void* fmt, l_int n, ...)
 L_EXTERN void
 l_filename_init(l_filename* fn)
 {
-  fn->buff_len = FILENAME_MAX-8;
+  fn->buff_len = L_MAX_FILENAME - 8;
   fn->name_len = 0;
   fn->s[0] = 0;
 }
@@ -783,6 +783,32 @@ l_filename_append(l_filename* fn, l_strn s)
   } else {
     return false;
   }
+}
+
+static l_int
+l_filename_write(void* out, const void* p, l_int len)
+{
+  l_filename* self = (l_filename*)out;
+  if (p == 0 || len <= 0) {
+    return 0;
+  }
+  if (self->name_len + len < self->buff_len) {
+    l_copy_n(self->s + self->name_len, p, len);
+    self->name_len += len;
+    self->s[self->name_len] = 0;
+  } else {
+    return 0;
+  }
+}
+
+L_EXTERN l_ostream
+l_filename_ostream(l_filename* out)
+{
+  l_ostream os;
+  os.out = out;
+  os.size = 0;
+  os.write = l_filename_write;
+  return os;
 }
 
 L_EXTERN l_bool
@@ -1024,23 +1050,59 @@ l_stdfile_read(l_stdfile* s, void* out, l_int size)
 L_EXTERN l_int
 l_stdfile_write(l_stdfile* s, const void* p, l_int len)
 {
-  if (s->file == 0 || p == 0 || len < 0 || len > L_MAX_INT_IO) {
+  l_int n = 0;
+
+  if (s->file == 0 || p == 0 || len <= 0 || len > L_MAX_INT_IO) {
     l_loge_1(LNUL, "EINVAL %d", ld(len));
     return 0;
   }
-  if (len == 0) {
-    return 0;
-  }
-  { l_int n = (l_int)fwrite(p, 1, (size_t)len, (FILE*)s->file);
-    if (n == len) {
-      return n;
-    }
-    l_loge_1(LNUL, "fwrite %s", lserror(errno));
-    if (n < 0) {
-      return 0;
-    }
+
+  n = (l_int)fwrite(p, 1, (size_t)len, (FILE*)s->file);
+  if (n == len) {
     return n;
   }
+
+  l_loge_1(LNUL, "fwrite %s", lserror(errno));
+  return (n < 0 ? 0 : n);
+}
+
+L_EXTERN l_int
+l_impl_file_write(void* out, const void* p, l_int len)
+{
+  l_int n = 0;
+
+  if (out == 0 || p == 0 || len <= 0 || len > L_MAX_INT_IO) {
+    l_loge_1(LNUL, "EINVAL %s", ld(len));
+    return 0;
+  }
+
+  n = (l_int)fwrite(p, 1, (size_t)len, (FILE*)out);
+  if (n == len) {
+    return n;
+  }
+
+  l_loge_1(LNUL, "fwrite %s", lserror(errno));
+  return (n < 0 ? 0 : n);
+}
+
+L_EXTERN l_ostream
+l_stdout_ostream()
+{
+  l_ostream os;
+  os.out = stdout;
+  os.size = 0;
+  os.write = l_impl_file_write;
+  return os;
+}
+
+L_EXTERN l_ostream
+l_stderr_ostream()
+{
+  l_ostream os;
+  os.out = stderr;
+  os.size = 0;
+  os.write = l_impl_file_write;
+  return os;
 }
 
 L_EXTERN l_int
