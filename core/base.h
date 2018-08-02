@@ -24,8 +24,7 @@ l_byte l_sbyte - 8-bit integer
 l_short l_ushort - 16-bit integer
 l_medit l_umedit - 32-bit integer
 l_long l_ulong - 64-bit integer
-l_int l_uint - pointer-size integer
-**********************************************************************/
+l_int l_uint - pointer-size integer **/
 
 #undef L_MAX_INT_UB
 #undef L_MAX_INT_SB
@@ -116,6 +115,28 @@ l_strn_s(const void* s, l_int m, l_int n)
   return l_strn_l(l_cstr(s) + m, n - m);
 }
 
+/** memory operation **/
+
+typedef void* (*l_mallocfunc)(void* ud, void* p, l_ulong oldsz, l_ulong newsz);
+L_EXTERN l_mallocfunc l_malloc_func; /* note the allocated memory is not initialized */
+
+#undef L_MALLOC
+#undef L_MALLOC_TYPE
+#undef L_MALLOC_TYPE_N
+#undef L_RALLOC
+#undef L_MFREE
+
+#define L_MALLOC(E, size) l_malloc_func((E), 0, 0, (size))
+#define L_MALLOC_TYPE(E, type) (type*)L_MALLOC((E), sizeof(type))
+#define L_MALLOC_TYPE_N(E, type, n) (type*)L_MALLOC((E), sizeof(type) * (n))
+#define L_RALLOC(E, p, newsz) l_malloc_func((E), (p), 0, (newsz))
+#define L_MFREE(E, p) l_malloc_func((E), (p), 0, 0)
+
+L_EXTERN l_bool l_zero_n(void* p, l_ulong size);
+L_EXTERN l_ulong l_copy_n(void* dest, const void* from, l_ulong size);
+
+/** debug and logging **/
+
 #undef L_MKSTR
 #undef L_X_MKSTR
 #undef L_FILE_LINE
@@ -172,54 +193,54 @@ l_strn_s(const void* s, l_int m, l_int n)
 #undef l_logd_8
 #undef l_logd_9
 
-#define l_impl_assert_pass(E, expr) l_impl_logger_func(E, "41[D] " L_FILE_LINE, "assert pass: %s", ls(expr))
-#define l_impl_assert_fail(E, expr) l_impl_logger_func(E, "01[E] " L_FILE_LINE, "assert fail: %s", ls(expr))
+#define l_impl_assert_pass(E,expr) l_impl_logger_func(E, "41[D] " L_FILE_LINE, "assert pass: %s", ls(expr))
+#define l_impl_assert_fail(E,expr) l_impl_logger_func(E, "01[E] " L_FILE_LINE, "assert fail: %s", ls(expr))
 
-#define l_assert(E, e) ((e) ? l_impl_assert_pass(E, #e) : l_impl_assert_fail(E, #e)) /* 0:assert */
-#define l_loge_s(E, s)                   l_impl_logger_s(E, "10[E] " L_FILE_LINE, (s)) /* 1:error */
-#define l_loge_1(E, fmt,a)               l_impl_logger_1(E, "11[E] " L_FILE_LINE, (fmt), a)
-#define l_loge_n(E, fmt,n,a)             l_impl_logger_n(E, "1n[E] " L_FILE_LINE, (fmt), n,a)
-#define l_loge_2(E, fmt,a,b)             l_impl_logger_2(E, "12[E] " L_FILE_LINE, (fmt), a,b)
-#define l_loge_3(E, fmt,a,b,c)           l_impl_logger_3(E, "13[E] " L_FILE_LINE, (fmt), a,b,c)
-#define l_loge_4(E, fmt,a,b,c,d)         l_impl_logger_4(E, "14[E] " L_FILE_LINE, (fmt), a,b,c,d)
-#define l_loge_5(E, fmt,a,b,c,d,e)       l_impl_logger_5(E, "15[E] " L_FILE_LINE, (fmt), a,b,c,d,e)
-#define l_loge_6(E, fmt,a,b,c,d,e,f)     l_impl_logger_6(E, "16[E] " L_FILE_LINE, (fmt), a,b,c,d,e,f)
-#define l_loge_7(E, fmt,a,b,c,d,e,f,g)   l_impl_logger_7(E, "17[E] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g)
-#define l_loge_8(E, fmt,a,b,c,d,e,f,g,h) l_impl_logger_8(E, "18[E] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g,h)
-#define l_loge_9(E, t,a,b,c,d,e,f,g,h,i) l_impl_logger_9(E, "19[E] " L_FILE_LINE, (t), a,b,c,d,e,f,g,h,i)
-#define l_logw_s(E, s)                   l_impl_logger_s(E, "20[W] " L_FILE_LINE, (s)) /* 2:warning */
-#define l_logw_1(E, fmt,a)               l_impl_logger_1(E, "21[W] " L_FILE_LINE, (fmt), a)
-#define l_logw_n(E, fmt,n,a)             l_impl_logger_n(E, "2n[W] " L_FILE_LINE, (fmt), n,a)
-#define l_logw_2(E, fmt,a,b)             l_impl_logger_2(E, "22[W] " L_FILE_LINE, (fmt), a,b)
-#define l_logw_3(E, fmt,a,b,c)           l_impl_logger_3(E, "23[W] " L_FILE_LINE, (fmt), a,b,c)
-#define l_logw_4(E, fmt,a,b,c,d)         l_impl_logger_4(E, "24[W] " L_FILE_LINE, (fmt), a,b,c,d)
-#define l_logw_5(E, fmt,a,b,c,d,e)       l_impl_logger_5(E, "25[W] " L_FILE_LINE, (fmt), a,b,c,d,e)
-#define l_logw_6(E, fmt,a,b,c,d,e,f)     l_impl_logger_6(E, "26[W] " L_FILE_LINE, (fmt), a,b,c,d,e,f)
-#define l_logw_7(E, fmt,a,b,c,d,e,f,g)   l_impl_logger_7(E, "27[W] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g)
-#define l_logw_8(E, fmt,a,b,c,d,e,f,g,h) l_impl_logger_8(E, "28[W] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g,h)
-#define l_logw_9(E, t,a,b,c,d,e,f,g,h,i) l_impl_logger_9(E, "29[W] " L_FILE_LINE, (t), a,b,c,d,e,f,g,h,i)
-#define l_logm_s(E, s)                   l_impl_logger_s(E, "30[L] " L_FILE_LINE, (s)) /* 3:main flow */
-#define l_logm_1(E, fmt,a)               l_impl_logger_1(E, "31[L] " L_FILE_LINE, (fmt), a)
-#define l_logm_n(E, fmt,n,a)             l_impl_logger_n(E, "3n[L] " L_FILE_LINE, (fmt), n,a)
-#define l_logm_2(E, fmt,a,b)             l_impl_logger_2(E, "32[L] " L_FILE_LINE, (fmt), a,b)
-#define l_logm_3(E, fmt,a,b,c)           l_impl_logger_3(E, "33[L] " L_FILE_LINE, (fmt), a,b,c)
-#define l_logm_4(E, fmt,a,b,c,d)         l_impl_logger_4(E, "34[L] " L_FILE_LINE, (fmt), a,b,c,d)
-#define l_logm_5(E, fmt,a,b,c,d,e)       l_impl_logger_5(E, "35[L] " L_FILE_LINE, (fmt), a,b,c,d,e)
-#define l_logm_6(E, fmt,a,b,c,d,e,f)     l_impl_logger_6(E, "36[L] " L_FILE_LINE, (fmt), a,b,c,d,e,f)
-#define l_logm_7(E, fmt,a,b,c,d,e,f,g)   l_impl_logger_7(E, "37[L] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g)
-#define l_logm_8(E, fmt,a,b,c,d,e,f,g,h) l_impl_logger_8(E, "38[L] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g,h)
-#define l_logm_9(E, t,a,b,c,d,e,f,g,h,i) l_impl_logger_9(E, "39[L] " L_FILE_LINE, (t), a,b,c,d,e,f,g,h,i)
-#define l_logd_s(E, s)                   l_impl_logger_s(E, "40[D] " L_FILE_LINE, (s)) /* 4:debug log */
-#define l_logd_1(E, fmt,a)               l_impl_logger_1(E, "41[D] " L_FILE_LINE, (fmt), a)
-#define l_logd_n(E, fmt,n,a)             l_impl_logger_n(E, "4n[D] " L_FILE_LINE, (fmt), n,a)
-#define l_logd_2(E, fmt,a,b)             l_impl_logger_2(E, "42[D] " L_FILE_LINE, (fmt), a,b)
-#define l_logd_3(E, fmt,a,b,c)           l_impl_logger_3(E, "43[D] " L_FILE_LINE, (fmt), a,b,c)
-#define l_logd_4(E, fmt,a,b,c,d)         l_impl_logger_4(E, "44[D] " L_FILE_LINE, (fmt), a,b,c,d)
-#define l_logd_5(E, fmt,a,b,c,d,e)       l_impl_logger_5(E, "45[D] " L_FILE_LINE, (fmt), a,b,c,d,e)
-#define l_logd_6(E, fmt,a,b,c,d,e,f)     l_impl_logger_6(E, "46[D] " L_FILE_LINE, (fmt), a,b,c,d,e,f)
-#define l_logd_7(E, fmt,a,b,c,d,e,f,g)   l_impl_logger_7(E, "47[D] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g)
-#define l_logd_8(E, fmt,a,b,c,d,e,f,g,h) l_impl_logger_8(E, "48[D] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g,h)
-#define l_logd_9(E, t,a,b,c,d,e,f,g,h,i) l_impl_logger_9(E, "49[D] " L_FILE_LINE, (t), a,b,c,d,e,f,g,h,i)
+#define l_assert(E,e) ((e) ? l_impl_assert_pass(E, #e) : l_impl_assert_fail(E, #e)) /* 0:assert */
+#define l_loge_s(E,s)                   l_impl_logger_s(E, "10[E] " L_FILE_LINE, (s)) /* 1:error */
+#define l_loge_1(E,fmt,a)               l_impl_logger_1(E, "11[E] " L_FILE_LINE, (fmt), a)
+#define l_loge_n(E,fmt,n,a)             l_impl_logger_n(E, "1n[E] " L_FILE_LINE, (fmt), n,a)
+#define l_loge_2(E,fmt,a,b)             l_impl_logger_2(E, "12[E] " L_FILE_LINE, (fmt), a,b)
+#define l_loge_3(E,fmt,a,b,c)           l_impl_logger_3(E, "13[E] " L_FILE_LINE, (fmt), a,b,c)
+#define l_loge_4(E,fmt,a,b,c,d)         l_impl_logger_4(E, "14[E] " L_FILE_LINE, (fmt), a,b,c,d)
+#define l_loge_5(E,fmt,a,b,c,d,e)       l_impl_logger_5(E, "15[E] " L_FILE_LINE, (fmt), a,b,c,d,e)
+#define l_loge_6(E,fmt,a,b,c,d,e,f)     l_impl_logger_6(E, "16[E] " L_FILE_LINE, (fmt), a,b,c,d,e,f)
+#define l_loge_7(E,fmt,a,b,c,d,e,f,g)   l_impl_logger_7(E, "17[E] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g)
+#define l_loge_8(E,fmt,a,b,c,d,e,f,g,h) l_impl_logger_8(E, "18[E] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g,h)
+#define l_loge_9(E,t,a,b,c,d,e,f,g,h,i) l_impl_logger_9(E, "19[E] " L_FILE_LINE, (t), a,b,c,d,e,f,g,h,i)
+#define l_logw_s(E,s)                   l_impl_logger_s(E, "20[W] " L_FILE_LINE, (s)) /* 2:warning */
+#define l_logw_1(E,fmt,a)               l_impl_logger_1(E, "21[W] " L_FILE_LINE, (fmt), a)
+#define l_logw_n(E,fmt,n,a)             l_impl_logger_n(E, "2n[W] " L_FILE_LINE, (fmt), n,a)
+#define l_logw_2(E,fmt,a,b)             l_impl_logger_2(E, "22[W] " L_FILE_LINE, (fmt), a,b)
+#define l_logw_3(E,fmt,a,b,c)           l_impl_logger_3(E, "23[W] " L_FILE_LINE, (fmt), a,b,c)
+#define l_logw_4(E,fmt,a,b,c,d)         l_impl_logger_4(E, "24[W] " L_FILE_LINE, (fmt), a,b,c,d)
+#define l_logw_5(E,fmt,a,b,c,d,e)       l_impl_logger_5(E, "25[W] " L_FILE_LINE, (fmt), a,b,c,d,e)
+#define l_logw_6(E,fmt,a,b,c,d,e,f)     l_impl_logger_6(E, "26[W] " L_FILE_LINE, (fmt), a,b,c,d,e,f)
+#define l_logw_7(E,fmt,a,b,c,d,e,f,g)   l_impl_logger_7(E, "27[W] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g)
+#define l_logw_8(E,fmt,a,b,c,d,e,f,g,h) l_impl_logger_8(E, "28[W] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g,h)
+#define l_logw_9(E,t,a,b,c,d,e,f,g,h,i) l_impl_logger_9(E, "29[W] " L_FILE_LINE, (t), a,b,c,d,e,f,g,h,i)
+#define l_logm_s(E,s)                   l_impl_logger_s(E, "30[L] " L_FILE_LINE, (s)) /* 3:main flow */
+#define l_logm_1(E,fmt,a)               l_impl_logger_1(E, "31[L] " L_FILE_LINE, (fmt), a)
+#define l_logm_n(E,fmt,n,a)             l_impl_logger_n(E, "3n[L] " L_FILE_LINE, (fmt), n,a)
+#define l_logm_2(E,fmt,a,b)             l_impl_logger_2(E, "32[L] " L_FILE_LINE, (fmt), a,b)
+#define l_logm_3(E,fmt,a,b,c)           l_impl_logger_3(E, "33[L] " L_FILE_LINE, (fmt), a,b,c)
+#define l_logm_4(E,fmt,a,b,c,d)         l_impl_logger_4(E, "34[L] " L_FILE_LINE, (fmt), a,b,c,d)
+#define l_logm_5(E,fmt,a,b,c,d,e)       l_impl_logger_5(E, "35[L] " L_FILE_LINE, (fmt), a,b,c,d,e)
+#define l_logm_6(E,fmt,a,b,c,d,e,f)     l_impl_logger_6(E, "36[L] " L_FILE_LINE, (fmt), a,b,c,d,e,f)
+#define l_logm_7(E,fmt,a,b,c,d,e,f,g)   l_impl_logger_7(E, "37[L] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g)
+#define l_logm_8(E,fmt,a,b,c,d,e,f,g,h) l_impl_logger_8(E, "38[L] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g,h)
+#define l_logm_9(E,t,a,b,c,d,e,f,g,h,i) l_impl_logger_9(E, "39[L] " L_FILE_LINE, (t), a,b,c,d,e,f,g,h,i)
+#define l_logd_s(E,s)                   l_impl_logger_s(E, "40[D] " L_FILE_LINE, (s)) /* 4:debug log */
+#define l_logd_1(E,fmt,a)               l_impl_logger_1(E, "41[D] " L_FILE_LINE, (fmt), a)
+#define l_logd_n(E,fmt,n,a)             l_impl_logger_n(E, "4n[D] " L_FILE_LINE, (fmt), n,a)
+#define l_logd_2(E,fmt,a,b)             l_impl_logger_2(E, "42[D] " L_FILE_LINE, (fmt), a,b)
+#define l_logd_3(E,fmt,a,b,c)           l_impl_logger_3(E, "43[D] " L_FILE_LINE, (fmt), a,b,c)
+#define l_logd_4(E,fmt,a,b,c,d)         l_impl_logger_4(E, "44[D] " L_FILE_LINE, (fmt), a,b,c,d)
+#define l_logd_5(E,fmt,a,b,c,d,e)       l_impl_logger_5(E, "45[D] " L_FILE_LINE, (fmt), a,b,c,d,e)
+#define l_logd_6(E,fmt,a,b,c,d,e,f)     l_impl_logger_6(E, "46[D] " L_FILE_LINE, (fmt), a,b,c,d,e,f)
+#define l_logd_7(E,fmt,a,b,c,d,e,f,g)   l_impl_logger_7(E, "47[D] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g)
+#define l_logd_8(E,fmt,a,b,c,d,e,f,g,h) l_impl_logger_8(E, "48[D] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g,h)
+#define l_logd_9(E,t,a,b,c,d,e,f,g,h,i) l_impl_logger_9(E, "49[D] " L_FILE_LINE, (t), a,b,c,d,e,f,g,h,i)
 
 #undef ls
 #undef lc
@@ -343,26 +364,6 @@ l_impl_logger_n(struct lnlylib_env* E, const void* tag, const void* s, l_int n, 
   l_impl_logger_func(E, tag, s, n, a);
 }
 
-/** memory operation **/
-
-typedef void* (*l_mallocfunc)(void* ud, void* p, l_ulong oldsz, l_ulong newsz);
-L_EXTERN l_mallocfunc l_malloc_func; /* note the allocated memory is not initialized */
-
-#undef L_MALLOC
-#undef L_MALLOC_TYPE
-#undef L_MALLOC_TYPE_N
-#undef L_RALLOC
-#undef L_MFREE
-
-#define L_MALLOC(E, size) l_malloc_func((E), 0, 0, (size))
-#define L_MALLOC_TYPE(E, type) (type*)L_MALLOC((E), sizeof(type))
-#define L_MALLOC_TYPE_N(E, type, n) (type*)L_MALLOC((E), sizeof(type) * (n))
-#define L_RALLOC(E, p, newsz) l_malloc_func((E), (p), 0, (newsz))
-#define L_MFREE(E, p) l_malloc_func((E), (p), 0, 0)
-
-L_EXTERN l_bool l_zero_n(void* p, l_ulong size);
-L_EXTERN l_ulong l_copy_n(void* dest, const void* from, l_ulong size);
-
 /** output stream **/
 
 #define L_HEX         0x01000000
@@ -390,17 +391,13 @@ L_EXTERN l_ulong l_copy_n(void* dest, const void* from, l_ulong size);
 
 typedef struct {
   void* out;
-  l_int osz;
-  void (*reset)(void* out);
   l_int (*write)(void* out, const void* p, l_int n);
 } l_ostream;
 
 L_INLINE l_int
 l_ostream_write(l_ostream* os, const void* p, l_int n)
 {
-  l_int a = os->write(os->out, p, n);
-  os->osz += a;
-  return a;
+  return os->write(os->out, p, n);
 }
 
 L_INLINE l_int
@@ -409,18 +406,8 @@ l_ostream_write_strn(l_ostream* os, l_strn s)
   return l_ostream_write(os, s->p, s->n);
 }
 
-L_INLINE l_int
-l_ostream_reset(l_ostream* os, l_strn s)
-{
-  os->reset(os->out);
-  os->osz = 0;
-  return l_ostream_write(os, s->p, s->n);
-}
-
 L_EXTERN l_ostream l_stdout_ostream();
 L_EXTERN l_ostream l_stderr_ostream();
-L_EXTERN l_int l_ostream_add_path(l_ostream* os, l_strn path);
-L_EXTERN l_int l_ostream_end_path(l_ostream* os, l_strn fileanme);
 L_EXTERN l_int l_ostream_format_c(l_ostream* os, int c, l_umedit flags);
 L_EXTERN l_int l_ostream_format_d(l_ostream* os, l_long d, l_umedit flags);
 L_EXTERN l_int l_ostream_format_u(l_ostream* os, l_ulong u, l_umedit flags);
@@ -486,96 +473,59 @@ l_ostream_format_9(l_ostream* os, const void* fmt, l_value a, l_value b, l_value
 }
 
 typedef struct {
-  void* impl;
-} l_string;
-
-L_EXTERN l_ostream l_string_ostream(l_string* s);
-L_EXTERN l_string l_empty_string();
-L_EXTERN l_string l_string_from(l_strn from);
-L_EXTERN void l_string_set(l_string* s, l_strn from);
-
-typedef struct {
-  l_int total;
-  l_int n;
-  l_byte s[16];
+  l_uint a[2 + 16 / sizeof(l_uint)];
 } l_sbuf16;
 
 typedef struct {
-  l_int total;
-  l_int n;
-  l_byte s[32];
+  l_uint a[2 + 32 / sizeof(l_uint)];
 } l_sbuf32;
 
 typedef struct {
-  l_int total;
-  l_int n;
-  l_byte s[64];
+  l_uint a[2 + 64 / sizeof(l_uint)];
 } l_sbuf64;
 
 typedef struct {
-  l_int total;
-  l_int n;
-  l_byte s[128];
+  l_uint a[2 + 128 / sizeof(l_uint)];
 } l_sbuf12;
 
 typedef struct {
-  l_int total;
-  l_int n;
-  l_byte s[256];
+  l_uint a[2 + 256 / sizeof(l_uint)];
 } l_sbuf25;
 
 typedef struct {
-  l_int total;
-  l_int n;
-  l_byte s[512];
+  l_uint a[2 + 512 / sizeof(l_uint)];
 } l_sbuf51;
 
 typedef struct {
-  l_int total;
-  l_int n;
-  l_byte s[1024];
+  l_uint a[2 + 1024 / sizeof(l_uint)];
 } l_sbuf1k;
 
 typedef struct {
-  l_int total;
-  l_int n;
-  l_byte s[1024*2];
+  l_uint a[2 + 1024 * 2 / sizeof(l_uint)];
 } l_sbuf2k;
 
 typedef struct {
-  l_int total;
-  l_int n;
-  l_byte s[1024*3];
+  l_uint a[2 + 1024 * 3 / sizeof(l_uint)];
 } l_sbuf3k;
 
 typedef struct {
-  l_int total;
-  l_int n;
-  l_byte s[1024*4];
+  l_uint a[2 + 1024 * 4 / sizeof(l_uint)];
 } l_sbuf4k;
 
 typedef struct {
-  l_int total;
-  l_int n;
-  l_byte s[1024*5];
+  l_uint a[2 + 1024 * 5 / sizeof(l_uint)];
 } l_sbuf5k;
 
 typedef struct {
-  l_int total;
-  l_int n;
-  l_byte s[1024*6];
+  l_uint a[2 + 1024 * 6 / sizeof(l_uint)];
 } l_sbuf6k;
 
 typedef struct {
-  l_int total;
-  l_int n;
-  l_byte s[1024*7];
+  l_uint a[2 + 1024 * 7 / sizeof(l_uint)];
 } l_sbuf7k;
 
 typedef struct {
-  l_int total;
-  l_int n;
-  l_byte s[1024*8];
+  l_uint a[2 + 1024 * 8 / sizeof(l_uint)];
 } l_sbuf8k;
 
 L_EXTERN l_ostream l_sbuf16_init(l_sbuf16* b);
@@ -593,36 +543,73 @@ L_EXTERN l_ostream l_sbuf6k_init(l_sbuf6k* b);
 L_EXTERN l_ostream l_sbuf7k_init(l_sbuf7k* b);
 L_EXTERN l_ostream l_sbuf8k_init(l_sbuf8k* b);
 
+struct l_strbuf;
+
+L_INLINE struct l_strbuf* l_sbuf16_p(l_sbuf16* b) { return (struct l_strbuf*)b; }
+L_INLINE struct l_strbuf* l_sbuf32_p(l_sbuf32* b) { return (struct l_strbuf*)b; }
+L_INLINE struct l_strbuf* l_sbuf64_p(l_sbuf64* b) { return (struct l_strbuf*)b; }
+L_INLINE struct l_strbuf* l_sbuf12_p(l_sbuf12* b) { return (struct l_strbuf*)b; }
+L_INLINE struct l_strbuf* l_sbuf25_p(l_sbuf25* b) { return (struct l_strbuf*)b; }
+L_INLINE struct l_strbuf* l_sbuf51_p(l_sbuf51* b) { return (struct l_strbuf*)b; }
+L_INLINE struct l_strbuf* l_sbuf1k_p(l_sbuf1k* b) { return (struct l_strbuf*)b; }
+L_INLINE struct l_strbuf* l_sbuf2k_p(l_sbuf2k* b) { return (struct l_strbuf*)b; }
+L_INLINE struct l_strbuf* l_sbuf3k_p(l_sbuf3k* b) { return (struct l_strbuf*)b; }
+L_INLINE struct l_strbuf* l_sbuf4k_p(l_sbuf4k* b) { return (struct l_strbuf*)b; }
+L_INLINE struct l_strbuf* l_sbuf5k_p(l_sbuf5k* b) { return (struct l_strbuf*)b; }
+L_INLINE struct l_strbuf* l_sbuf6k_p(l_sbuf6k* b) { return (struct l_strbuf*)b; }
+L_INLINE struct l_strbuf* l_sbuf7k_p(l_sbuf7k* b) { return (struct l_strbuf*)b; }
+L_INLINE struct l_strbuf* l_sbuf8k_p(l_sbuf8k* b) { return (struct l_strbuf*)b; }
+
+L_EXTERN l_int l_strbuf_reset(struct l_strbuf* b, l_strn s);
+L_EXTERN l_int l_strbuf_clear(struct l_strbuf* b);
+L_EXTERN const l_byte* l_strbuf_cstr(struct l_strbuf* b);
+L_EXTERN l_strn l_strbuf_strn(struct l_strbuf* b);
+L_EXTERN l_int l_strbuf_add_path(struct l_strbuf* b, l_strn path);
+L_EXTERN l_int l_strbuf_end_path(struct l_strbuf* b, l_strn fileanme);
+
+typedef struct {
+  void* impl;
+} l_string;
+
+L_EXTERN l_string l_empty_string();
+L_EXTERN l_string l_string_init(l_strn from);
+L_EXTERN l_int l_string_reset(l_string* s, l_strn from);
+L_EXTERN l_int l_string_clear(l_string* s);
+L_EXTERN const l_byte* l_string_cstr(l_string* s);
+L_EXTERN l_strn l_string_strn(l_string* s);
+L_EXTERN l_ostream l_string_ostream(l_string* s);
+
 typedef struct {
   void* file;
-} l_stdfile;
+} l_file;
 
-L_EXTERN l_stdfile l_stdfile_open_read(const void* name);
-L_EXTERN l_stdfile l_stdfile_open_read_nobuf(const void* name);
-L_EXTERN l_stdfile l_stdfile_open_write(const void* name);
-L_EXTERN l_stdfile l_stdfile_open_write_nobuf(const void* name);
-L_EXTERN l_stdfile l_stdfile_open_append(const void* name);
-L_EXTERN l_stdfile l_stdfile_open_append_nobuf(const void* name);
-L_EXTERN l_stdfile l_stdfile_open_read_write(const void* name);
-L_EXTERN void l_stdfile_close(l_stdfile* s);
-L_EXTERN void l_stdfile_clearerr(l_stdfile* s);
-L_EXTERN l_bool l_stdfile_flush(l_stdfile* s);
-L_EXTERN l_bool l_stdfile_rewind(l_stdfile* s);
-L_EXTERN l_bool l_stdfile_seekto(l_stdfile* s, l_int pos);
-L_EXTERN l_bool l_stdfile_forward(l_stdfile* s, l_int offset);
-L_EXTERN l_bool l_stdfile_backward(l_stdfile* s, l_int offset);
-L_EXTERN l_int l_stdfile_read(l_stdfile* s, void* out, l_int size);
-L_EXTERN l_int l_stdfile_write(l_stdfile* s, const void* p, l_int len);
-L_EXTERN l_int l_stdfile_write_strn(l_stdfile* out, l_strn s);
-L_EXTERN l_int l_stdfile_put(l_stdfile* s, l_byte ch);
-L_EXTERN l_int l_stdfile_get(l_stdfile* s, l_byte* ch);
-L_EXTERN l_bool l_stdfile_remove(const void* name);
-L_EXTERN l_bool l_stdfile_rename(const void* from, const void* to);
-L_EXTERN void l_stdfile_redirect_stdout(const void* name);
-L_EXTERN void l_stdfile_redirect_stderr(const void* name);
-L_EXTERN void l_stdfile_redirect_stdin(const void* name);
+L_EXTERN l_file l_file_open_read(const void* name);
+L_EXTERN l_file l_file_open_read_nobuf(const void* name);
+L_EXTERN l_file l_file_open_write(const void* name);
+L_EXTERN l_file l_file_open_write_nobuf(const void* name);
+L_EXTERN l_file l_file_open_append(const void* name);
+L_EXTERN l_file l_file_open_append_nobuf(const void* name);
+L_EXTERN l_file l_file_open_read_write(const void* name);
+L_EXTERN void l_file_close(l_file* s);
+L_EXTERN void l_file_clearerr(l_file* s);
+L_EXTERN l_bool l_file_flush(l_file* s);
+L_EXTERN l_bool l_file_rewind(l_file* s);
+L_EXTERN l_bool l_file_seekto(l_file* s, l_int pos);
+L_EXTERN l_bool l_file_forward(l_file* s, l_int offset);
+L_EXTERN l_bool l_file_backward(l_file* s, l_int offset);
+L_EXTERN l_int l_file_read(l_file* s, void* out, l_int size);
+L_EXTERN l_int l_file_write(l_file* s, const void* p, l_int len);
+L_EXTERN l_int l_file_write_strn(l_file* out, l_strn s);
+L_EXTERN l_int l_file_put(l_file* s, l_byte ch);
+L_EXTERN l_int l_file_get(l_file* s, l_byte* ch);
+L_EXTERN l_bool l_file_remove(const void* name);
+L_EXTERN l_bool l_file_rename(const void* from, const void* to);
+L_EXTERN void l_file_redirect_stdout(const void* name);
+L_EXTERN void l_file_redirect_stderr(const void* name);
+L_EXTERN void l_file_redirect_stdin(const void* name);
+L_EXTERN l_ostream l_file_ostream(l_file* s);
 
-/** simple link list */
+/** linked node **/
 
 typedef struct l_smplnode {
   struct l_smplnode* next;
@@ -654,8 +641,6 @@ l_smplnode_remove_next(l_smplnode* node)
   node->next = p->next;
   return p;
 }
-
-/** bidirectional link list */
 
 typedef struct l_linknode {
   struct l_linknode* next;
@@ -691,7 +676,7 @@ l_linknode_remove(l_linknode* node)
   return node;
 }
 
-/** simple linked queue */
+/** linked queue **/
 
 typedef struct l_squeue {
   l_smplnode head;
@@ -768,8 +753,6 @@ l_squeue_pop(l_squeue* sq)
   }
   return node;
 }
-
-/** bidirectional queue */
 
 typedef struct l_dqueue {
   l_linknode head;
