@@ -1,6 +1,7 @@
 #define LNLYLIB_API_IMPL
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "core/beat.h"
 #include "core/lapi.h"
 #include "osi/base.h"
@@ -26,6 +27,8 @@
 #define L_MASTER_THRIDX 1000
 #define L_WORKER_THRIDX 1001
 #define L_THREAD_THRIDX 2001
+#define L_MAX_NUM_WORKERS 1000
+
 #define L_WORK_FLAG_QUIT 0x01
 #define L_MAST_FLAG_QUIT 0x01
 
@@ -50,7 +53,7 @@ typedef struct {
   l_umedit num_workers;
   l_umedit init_stbl_size;
   l_string start_script;
-  l_filename log_file_name;
+  l_filename logfilename;
 } l_config;
 
 typedef struct {
@@ -289,14 +292,14 @@ l_copy_n(void* dest, const void* from, l_ulong size)
     if (dest == memcpy(dest, from, size)) {
       return size;
     } else {
-      l_loge_3(LNUL, "memcpy fail %p <- %p %d", ld(dest), ld(from), ld(size));
+      l_loge_3(LNUL, "memcpy fail %p <- %p %d", lp(dest), lp(from), ld(size));
       return 0;
     }
   } else {
     if (dest == memmove(dest, from, size)) {
       return size;
     } else {
-      l_loge_3(LNUL, "memmove fail %p <- %p %d", ld(dest), ld(from), ld(size));
+      l_loge_3(LNUL, "memmove fail %p <- %p %d", lp(dest), lp(from), ld(size));
       return 0;
     }
   }
@@ -341,36 +344,226 @@ l_threadlocal_get()
 #endif
 }
 
-static void
-l_config_load(l_config* C)
+lnlylib_env* l_get_lnlylib_env()
 {
-  lua_State* L = ll_newstate();
+  return l_threadlocal_get();
+}
 
-  l_string_init(&C->start_script);
+static void
+l_config_load(l_config* conf)
+{
+  lua_State* L = ll_new_state();
+  l_funcindex func;
+  l_tableindex env;
+  l_strn script, logfile;
 
-  C->num_workers = luastate_readint(c->L, "workers");
-  if (C->num_workers < 1) {
-    C->num_workers = 1;
+  conf->num_workers = 1;
+  conf->init_stbl_size = L_MIN_SRVC_TABLE_SIZE;
+  conf->start_script = l_empty_string();
+  l_filename_set(&conf->logfilename, L_STR("stdout"));
+
+  func = ll_load_file(L, LNLYLIB_HOME_DIR "/conf/config.lua");
+  if (func.index <= 0) {
+    l_loge_s(LNUL, "load config file failed");
+    return;
   }
 
-  C->min_stbl_size = l_config_read_int(L, "service_table_size");
-  if (C->min_stbl_size < L_MIN_SRVC_TABLE_SIZE) {
-    C->min_stbl_size = L_MIN_SRVC_TABLE_SIZE;
+  env = ll_new_table(L);
+  if (env.index <= 0) {
+    l_loge_s(LNUL, "create env table failed");
+    return;
   }
 
-  // ...
+  ll_set_funcenv(L, func, env);
+  ll_push(L, func.index);
+  ll_pcall_func(L, func, 0);
 
-  luastate_close(&L);
+  conf->num_workers = ll_table_get_int(L, env, "workers");
+  if (conf->num_workers < 1) {
+    conf->num_workers = 1;
+  } else if (conf->num_workers > L_MAX_NUM_WORKERS) {
+    conf->num_workers = L_MAX_NUM_WORKERS;
+  }
+
+  conf->init_stbl_size = ll_table_get_int(L, env, "services");
+  if (conf->init_stbl_size < L_MIN_SRVC_TABLE_SIZE) {
+    conf->init_stbl_size = L_MIN_SRVC_TABLE_SIZE;
+  }
+
+  script = ll_table_get_str(L, env, "script");
+  l_string_set(&conf->start_script, script);
+
+  logfile = ll_table_get_str(L, env, "logfile");
+  if (!l_filename_set(&conf->logfilename, logfile)) {
+    l_filename_set(&conf->logfilename, L_STR("stdout"));
+  }
+
+  ll_close_state(L);
 }
 
 L_EXTERN l_int l_impl_file_write(void* out, const void* p, l_int len);
+
+static l_ostream
+l_ostream_from(void* out, l_int (*write)(void* out, const void* p, l_int n))
+{
+  return (l_ostream){out, 0, write};
+}
+
+typedef struct {
+  l_int total;
+  l_int n;
+  l_byte s[1];
+} l_strbuf;
+
+static l_int
+l_impl_strbuf_write(void* out, const void* p, l_int len)
+{
+  l_strbuf* b = (l_strbuf*)out;
+  if (p == 0 || n <= 0) {
+    return 0;
+  }
+  if (b->n + len < b->total) {
+    l_copy_n(b->s + b->n, p, len);
+    b->n += len;
+    b->s[b->n] = 0;
+    return len;
+  } else {
+    return 0;
+  }
+}
+
+L_EXTERN l_ostream
+l_sbuf16_init(l_sbuf16* b)
+{
+  b->total = 16;
+  b->n = 0;
+  b->s[0] = 0;
+  return l_ostream_from(b, l_impl_strbuf_write);
+}
+
+L_EXTERN l_ostream
+l_sbuf32_init(l_sbuf32* b)
+{
+  b->total = 32;
+  b->n = 0;
+  b->s[0] = 0;
+  return l_ostream_from(b, l_impl_strbuf_write);
+}
+
+L_EXTERN l_ostream
+l_sbuf64_init(l_sbuf64* b)
+{
+  b->total = 64;
+  b->n = 0;
+  b->s[0] = 0;
+  return l_ostream_from(b, l_impl_strbuf_write);
+}
+
+L_EXTERN l_ostream
+l_sbuf12_init(l_sbuf12* b)
+{
+  b->total = 128;
+  b->n = 0;
+  b->s[0] = 0;
+  return l_ostream_from(b, l_impl_strbuf_write);
+}
+
+L_EXTERN l_ostream
+l_sbuf25_init(l_sbuf25* b)
+{
+  b->total = 256;
+  b->n = 0;
+  b->s[0] = 0;
+  return l_ostream_from(b, l_impl_strbuf_write);
+}
+
+L_EXTERN l_ostream
+l_sbuf51_init(l_sbuf51* b)
+{
+  b->total = 512;
+  b->n = 0;
+  b->s[0] = 0;
+  return l_ostream_from(b, l_impl_strbuf_write);
+}
+
+L_EXTERN l_ostream
+l_sbuf1k_init(l_sbuf1k* b)
+{
+  b->total = 1024;
+  b->n = 0;
+  b->s[0] = 0;
+  return l_ostream_from(b, l_impl_strbuf_write);
+}
+
+L_EXTERN l_ostream
+l_sbuf2k_init(l_sbuf2k* b)
+{
+  b->total = 1024*2;
+  b->n = 0;
+  b->s[0] = 0;
+  return l_ostream_from(b, l_impl_strbuf_write);
+}
+
+L_EXTERN l_ostream
+l_sbuf3k_init(l_sbuf3k* b)
+{
+  b->total = 1024*3;
+  b->n = 0;
+  b->s[0] = 0;
+  return l_ostream_from(b, l_impl_strbuf_write);
+}
+
+L_EXTERN l_ostream
+l_sbuf4k_init(l_sbuf4k* b)
+{
+  b->total = 1024*4;
+  b->n = 0;
+  b->s[0] = 0;
+  return l_ostream_from(b, l_impl_strbuf_write);
+}
+
+L_EXTERN l_ostream
+l_sbuf5k_init(l_sbuf5k* b)
+{
+  b->total = 1024*5;
+  b->n = 0;
+  b->s[0] = 0;
+  return l_ostream_from(b, l_impl_strbuf_write);
+}
+
+L_EXTERN l_ostream
+l_sbuf6k_init(l_sbuf6k* b)
+{
+  b->total = 1024*6;
+  b->n = 0;
+  b->s[0] = 0;
+  return l_ostream_from(b, l_impl_strbuf_write);
+}
+
+L_EXTERN l_ostream
+l_sbuf7k_init(l_sbuf7k* b)
+{
+  b->total = 1024*7;
+  b->n = 0;
+  b->s[0] = 0;
+  return l_ostream_from(b, l_impl_strbuf_write);
+}
+
+L_EXTERN l_ostream
+l_sbuf8k_init(l_sbuf8k* b)
+{
+  b->total = 1024*8;
+  b->n = 0;
+  b->s[0] = 0;
+  return l_ostream_from(b, l_impl_strbuf_write);
+}
 
 static l_ostream
 l_config_logout(l_config* conf, l_umedit thridx)
 {
   l_strn logfile_prefix;
 
-  logfile_prefix = l_filename_strn(&conf->log_file_name);
+  logfile_prefix = l_filename_strn(&conf->logfilename);
 
   if (l_strn_equal(&logfile_prefix, L_STR("stdout"))) {
     return l_stdout_ostream();
@@ -921,7 +1114,7 @@ l_master_load_service_module(const char* module)
 
   hdl = l_dynlib_open2(l_const_strn(LNLYLIB_CLIB_DIR), module_name); /* TODO: 1. do module cache? 2. multiple service can exist in one module */
   if (l_dynlib_is_empty(&hdl)) {
-    l_loge_1("open library %strn failed", lstrn(&module_name));
+    l_loge_1(LNUL, "open library %strn failed", lstrn(&module_name));
     return 0;
   }
 
@@ -1325,7 +1518,7 @@ l_launcher_on_create(lnlylib_env* E)
   l_logm_s(E, "launcher on create");
 
   if (l_string_nt_empty(&C->start_script)) {
-    ll_pcall(C->L, l_string_strn(&C->start_script));
+    ll_pcall_func(C->L, l_string_strn(&C->start_script));
   }
 
   if (M->start) {

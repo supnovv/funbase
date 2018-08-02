@@ -590,37 +590,37 @@ l_ostream_format_a_value(l_ostream* os, const l_byte* start, const l_byte* end, 
       /* fallthrough */
     case 's':
       if (end - cur >= 4 && *(cur+1) == 't' && *(cur+2) == 'r' && *(cur+3) == 'n') {
-        os->size += l_ostream_format_s(os, a.p, flags);
+        l_ostream_format_s(os, a.p, flags);
         return cur + 4;
       } else {
-        os->size += l_ostream_format_s(os, a.p, flags);
+        l_ostream_format_s(os, a.p, flags);
         return cur + 1;
       }
     case 'f': case 'F':
-      os->size += l_ostream_format_f(os, a.f, flags);
+      l_ostream_format_f(os, a.f, flags);
       return cur + 1;
     case 'u': case 'U':
-      os->size += l_ostream_format_u(os, a.u, flags);
+      l_ostream_format_u(os, a.u, flags);
       return cur + 1;
     case 'd': case 'D':
-      os->size += l_ostream_format_d(os, a.d, flags);
+      l_ostream_format_d(os, a.d, flags);
       return cur + 1;
     case 'C':
       flags |= L_UPPER;
       /* fallthrough */
     case 'c':
-      os->size += l_ostream_format_c(os, (int)a.u, flags);
+      l_ostream_format_c(os, (int)a.u, flags);
       return cur + 1;
     case 'B':
       flags |= L_UPPER;
       /* fallthrough */
     case 'b':
       if (end - cur >= 4 && *(cur+1) == 'o' && *(cur+2) == 'o' && *(cur+3) == 'l') {
-        os->size += l_ostream_format_bool(os, (int)a.u, flags);
+        l_ostream_format_bool(os, (int)a.u, flags);
         return cur + 4;
       } else {
         flags |= L_BIN;
-        os->size += l_ostream_format_u(os, a.u, flags);
+        l_ostream_format_u(os, a.u, flags);
         return cur + 1;
       }
     case 'O':
@@ -628,14 +628,14 @@ l_ostream_format_a_value(l_ostream* os, const l_byte* start, const l_byte* end, 
       /* fallthrough */
     case 'o':
       flags |= L_OCT;
-      os->size += l_ostream_format_u(os, a.u, flags);
+      l_ostream_format_u(os, a.u, flags);
       return cur + 1;
     case 'X': case 'P':
       flags |= L_UPPER;
       /* fallthrough */
     case 'x': case 'p':
       flags |= L_HEX;
-      os->size += l_ostream_format_u(os, a.u, flags);
+      l_ostream_format_u(os, a.u, flags);
       return cur + 1;
     default:
       break;
@@ -645,7 +645,7 @@ l_ostream_format_a_value(l_ostream* os, const l_byte* start, const l_byte* end, 
     break;
   }
 
-  os->size += l_ostream_write(os, start, end - start);
+  l_ostream_write(os, start, end - start);
   return 0;
 }
 
@@ -695,7 +695,7 @@ l_impl_ostream_format_n(l_ostream* os, const void* fmt, l_int n, const void* p, 
   fmt_str = l_strn_c(fmt);
 
   if (n <= 0 || p == 0) {
-    os->size += l_ostream_write(os, fmt_str.p, fmt_str.n);
+    l_ostream_write(os, fmt_str.p, fmt_str.n);
     return 0;
   }
 
@@ -710,7 +710,7 @@ l_impl_ostream_format_n(l_ostream* os, const void* fmt, l_int n, const void* p, 
     }
 
     /* cur char is '%' */
-    os->size += l_ostream_write(os, beg, cur - beg);
+    l_ostream_write(os, beg, cur - beg);
     beg = cur;
 
     /* cur is '%' and next char also is '%' */
@@ -733,7 +733,7 @@ l_impl_ostream_format_n(l_ostream* os, const void* fmt, l_int n, const void* p, 
   }
 
   if (beg < cur) {
-    os->size += l_ostream_write(os, beg, cur - beg);
+    l_ostream_write(os, beg, cur - beg);
   }
 
   return nfmts;
@@ -763,22 +763,27 @@ l_impl_ostream_format(l_ostream* os, const void* fmt, l_int n, ...)
 }
 
 L_EXTERN void
-l_filename_init(l_filename* fn)
+l_filename_init(l_filename* nm)
 {
-  fn->buff_len = L_MAX_FILENAME - 8;
-  fn->name_len = 0;
-  fn->s[0] = 0;
+  nm->buff_len = L_MAX_FILENAME - 8;
+  nm->name_len = 0;
+  nm->s[0] = 0;
 }
 
 L_EXTERN l_bool
-l_filename_append(l_filename* fn, l_strn s)
+l_filename_set(l_filename* nm, l_strn s)
 {
-  if (s.n > 0 && fn->name_len + s.n < fn->buff_len) {
-    const l_byte* pend = s.p + s.n;
-    while (s.p < pend) {
-      fn->s[fn->name_len++] = *s.p++;
-    }
-    fn->s[fn->name_len] = 0;
+  l_filename_init(nm);
+  return l_filename_append(nm, s);
+}
+
+L_EXTERN l_bool
+l_filename_append(l_filename* nm, l_strn s)
+{
+  if (s.n > 0 && nm->name_len + s.n < nm->buff_len) {
+    l_copy_n(nm->s + nm->name_len, s.p, s.n);
+    nm->name_len += s.n;
+    nm->s[nm->name_len] = 0;
     return true;
   } else {
     return false;
@@ -796,6 +801,7 @@ l_filename_write(void* out, const void* p, l_int len)
     l_copy_n(self->s + self->name_len, p, len);
     self->name_len += len;
     self->s[self->name_len] = 0;
+    return len;
   } else {
     return 0;
   }
@@ -812,40 +818,40 @@ l_filename_ostream(l_filename* out)
 }
 
 L_EXTERN l_bool
-l_filename_addname(l_filename* fn, l_strn name, l_strn suffix)
+l_filename_addname(l_filename* nm, l_strn name, l_strn suffix)
 {
-  return l_filename_append(fn, name) && l_filename_append(fn, suffix);
+  return l_filename_append(nm, name) && l_filename_append(nm, suffix);
 }
 
 L_EXTERN l_bool
-l_filename_addname_combine(l_filename* fn, l_strn part1, l_strn part2, l_strn sep)
+l_filename_addname_combine(l_filename* nm, l_strn part1, l_strn part2, l_strn sep)
 {
-  return l_filename_append(fn, part1) && l_filename_append(fn, sep) && l_filename_append(fn, part2);
+  return l_filename_append(nm, part1) && l_filename_append(nm, sep) && l_filename_append(nm, part2);
 }
 
 L_EXTERN l_bool
-l_filename_addpath(l_filename* fn, l_strn path)
+l_filename_addpath(l_filename* nm, l_strn path)
 {
-  if (path.n > 0 && fn->name_len + path.n < fn->buff_len) {
+  if (path.n > 0 && nm->name_len + path.n < nm->buff_len) {
     const l_byte* pend = path.p + path.n;
-    if (fn->name_len > 0) {
-      if (fn->s[fn->name_len - 1] == '/') {
+    if (nm->name_len > 0) {
+      if (nm->s[nm->name_len - 1] == '/') {
         if (*path.p == '/') {
           path.p += 1;
         }
       } else {
         if (*path.p != '/') {
-          fn->s[fn->name_len++] = '/';
+          nm->s[nm->name_len++] = '/';
         }
       }
     }
     while (path.p < pend) {
-      fn->s[fn->name_len++] = *path.p++;
+      nm->s[nm->name_len++] = *path.p++;
     }
-    if (fn->s[fn->name_len - 1] != '/') {
-      fn->s[fn->name_len++] = '/';
+    if (nm->s[nm->name_len - 1] != '/') {
+      nm->s[nm->name_len++] = '/';
     }
-    fn->s[fn->name_len] = 0;
+    nm->s[nm->name_len] = 0;
     return true;
   } else {
     return false;

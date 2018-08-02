@@ -79,7 +79,12 @@ typedef struct {
 #define l_const_strn(s) ((l_strn){l_cstr("" s), sizeof(s) - 1})
 
 #undef L_STR
+#undef L_EMPTY_STR
 #define L_STR(s) l_const_strn(s)
+#define L_EMPTY_STR l_empty_strn()
+
+L_EXTERN l_bool l_strn_equal(l_strn a, l_strn b);
+L_EXTERN l_bool l_strn_contain(l_strn a, l_byte c);
 
 L_INLINE l_bool
 l_strn_nt_empty(const l_strn* s)
@@ -356,7 +361,7 @@ L_EXTERN l_mallocfunc l_malloc_func; /* note the allocated memory is not initial
 #define L_MFREE(E, p) l_malloc_func((E), (p), 0, 0)
 
 L_EXTERN l_bool l_zero_n(void* p, l_ulong size);
-L_EXTERN l_ulong l_copy_n(void* dest, void* from, l_ulong size);
+L_EXTERN l_ulong l_copy_n(void* dest, const void* from, l_ulong size);
 
 /** output stream **/
 
@@ -385,18 +390,37 @@ L_EXTERN l_ulong l_copy_n(void* dest, void* from, l_ulong size);
 
 typedef struct {
   void* out;
-  l_int size;
+  l_int osz;
+  void (*reset)(void* out);
   l_int (*write)(void* out, const void* p, l_int n);
 } l_ostream;
 
 L_INLINE l_int
 l_ostream_write(l_ostream* os, const void* p, l_int n)
 {
-  return os->write(os->out, p, n);
+  l_int a = os->write(os->out, p, n);
+  os->osz += a;
+  return a;
+}
+
+L_INLINE l_int
+l_ostream_write_strn(l_ostream* os, l_strn s)
+{
+  return l_ostream_write(os, s->p, s->n);
+}
+
+L_INLINE l_int
+l_ostream_reset(l_ostream* os, l_strn s)
+{
+  os->reset(os->out);
+  os->osz = 0;
+  return l_ostream_write(os, s->p, s->n);
 }
 
 L_EXTERN l_ostream l_stdout_ostream();
 L_EXTERN l_ostream l_stderr_ostream();
+L_EXTERN l_int l_ostream_add_path(l_ostream* os, l_strn path);
+L_EXTERN l_int l_ostream_end_path(l_ostream* os, l_strn fileanme);
 L_EXTERN l_int l_ostream_format_c(l_ostream* os, int c, l_umedit flags);
 L_EXTERN l_int l_ostream_format_d(l_ostream* os, l_long d, l_umedit flags);
 L_EXTERN l_int l_ostream_format_u(l_ostream* os, l_ulong u, l_umedit flags);
@@ -465,21 +489,109 @@ typedef struct {
   void* impl;
 } l_string;
 
-L_EXTERN l_ostream l_string_ostream(l_string* self);
+L_EXTERN l_ostream l_string_ostream(l_string* s);
+L_EXTERN l_string l_empty_string();
+L_EXTERN l_string l_string_from(l_strn from);
+L_EXTERN void l_string_set(l_string* s, l_strn from);
 
 typedef struct {
-  l_int buff_len;
-  l_int name_len;
-  l_byte s[L_MAX_FILENAME];
-} l_filename;
+  l_int total;
+  l_int n;
+  l_byte s[16];
+} l_sbuf16;
 
-L_EXTERN l_ostream l_filename_ostream(l_filename* self);
-L_EXTERN void l_filename_init(l_filename* self);
-L_INLINE l_strn l_filename_strn(l_filename* self) { return l_strn_l(self->s, self->name_len); }
-L_EXTERN l_bool l_filename_append(l_filename* self, l_strn s);
-L_EXTERN l_bool l_filename_addname(l_filename* self, l_strn name, l_strn suffix);
-L_EXTERN l_bool l_filename_addname_combine(l_filename* self, l_strn part1, l_strn part2, l_strn sep);
-L_EXTERN l_bool l_filename_addpath(l_filename* self, l_strn path);
+typedef struct {
+  l_int total;
+  l_int n;
+  l_byte s[32];
+} l_sbuf32;
+
+typedef struct {
+  l_int total;
+  l_int n;
+  l_byte s[64];
+} l_sbuf64;
+
+typedef struct {
+  l_int total;
+  l_int n;
+  l_byte s[128];
+} l_sbuf12;
+
+typedef struct {
+  l_int total;
+  l_int n;
+  l_byte s[256];
+} l_sbuf25;
+
+typedef struct {
+  l_int total;
+  l_int n;
+  l_byte s[512];
+} l_sbuf51;
+
+typedef struct {
+  l_int total;
+  l_int n;
+  l_byte s[1024];
+} l_sbuf1k;
+
+typedef struct {
+  l_int total;
+  l_int n;
+  l_byte s[1024*2];
+} l_sbuf2k;
+
+typedef struct {
+  l_int total;
+  l_int n;
+  l_byte s[1024*3];
+} l_sbuf3k;
+
+typedef struct {
+  l_int total;
+  l_int n;
+  l_byte s[1024*4];
+} l_sbuf4k;
+
+typedef struct {
+  l_int total;
+  l_int n;
+  l_byte s[1024*5];
+} l_sbuf5k;
+
+typedef struct {
+  l_int total;
+  l_int n;
+  l_byte s[1024*6];
+} l_sbuf6k;
+
+typedef struct {
+  l_int total;
+  l_int n;
+  l_byte s[1024*7];
+} l_sbuf7k;
+
+typedef struct {
+  l_int total;
+  l_int n;
+  l_byte s[1024*8];
+} l_sbuf8k;
+
+L_EXTERN l_ostream l_sbuf16_init(l_sbuf16* b);
+L_EXTERN l_ostream l_sbuf32_init(l_sbuf32* b);
+L_EXTERN l_ostream l_sbuf64_init(l_sbuf64* b);
+L_EXTERN l_ostream l_sbuf12_init(l_sbuf12* b);
+L_EXTERN l_ostream l_sbuf25_init(l_sbuf25* b);
+L_EXTERN l_ostream l_sbuf51_init(l_sbuf51* b);
+L_EXTERN l_ostream l_sbuf1k_init(l_sbuf1k* b);
+L_EXTERN l_ostream l_sbuf2k_init(l_sbuf2k* b);
+L_EXTERN l_ostream l_sbuf3k_init(l_sbuf3k* b);
+L_EXTERN l_ostream l_sbuf4k_init(l_sbuf4k* b);
+L_EXTERN l_ostream l_sbuf5k_init(l_sbuf5k* b);
+L_EXTERN l_ostream l_sbuf6k_init(l_sbuf6k* b);
+L_EXTERN l_ostream l_sbuf7k_init(l_sbuf7k* b);
+L_EXTERN l_ostream l_sbuf8k_init(l_sbuf8k* b);
 
 typedef struct {
   void* file;
@@ -587,29 +699,29 @@ typedef struct l_squeue {
 } l_squeue;
 
 L_INLINE void
-l_squeue_init(l_squeue* self)
+l_squeue_init(l_squeue* sq)
 {
-  l_smplnode_init(&self->head);
-  self->tail = &self->head;
+  l_smplnode_init(&sq->head);
+  sq->tail = &sq->head;
 }
 
 L_INLINE l_bool
-l_squeue_is_empty(l_squeue* self)
+l_squeue_is_empty(l_squeue* sq)
 {
-  return (self->head.next == &self->head);
+  return (sq->head.next == &sq->head);
 }
 
 L_INLINE l_bool
-l_squeue_nt_empty(l_squeue* self)
+l_squeue_nt_empty(l_squeue* sq)
 {
-  return (self->head.next != &self->head);
+  return (sq->head.next != &sq->head);
 }
 
 L_INLINE void
-l_squeue_push(l_squeue* self, l_smplnode* newnode)
+l_squeue_push(l_squeue* sq, l_smplnode* newnode)
 {
-  l_smplnode_insert_after(self->tail, newnode);
-  self->tail = newnode;
+  l_smplnode_insert_after(sq->tail, newnode);
+  sq->tail = newnode;
 }
 
 L_INLINE void
@@ -634,25 +746,25 @@ l_squeue_move(l_squeue* q)
 }
 
 L_INLINE l_smplnode*
-l_squeue_top(l_squeue* self)
+l_squeue_top(l_squeue* sq)
 {
-  if (l_squeue_is_empty(self)) {
+  if (l_squeue_is_empty(sq)) {
     return 0;
   } else {
-    return self->head.next;
+    return sq->head.next;
   }
 }
 
 L_INLINE l_smplnode*
-l_squeue_pop(l_squeue* self)
+l_squeue_pop(l_squeue* sq)
 {
   l_smplnode* node = 0;
-  if (l_squeue_is_empty(self)) {
+  if (l_squeue_is_empty(sq)) {
     return 0;
   }
-  node = l_smplnode_remove_next(&self->head);
-  if (node == self->tail) {
-    self->tail = &self->head;
+  node = l_smplnode_remove_next(&sq->head);
+  if (node == sq->tail) {
+    sq->tail = &sq->head;
   }
   return node;
 }
@@ -664,27 +776,27 @@ typedef struct l_dqueue {
 } l_dqueue;
 
 L_INLINE void
-l_dqueue_init(l_dqueue* self)
+l_dqueue_init(l_dqueue* dq)
 {
-  l_linknode_init(&self->head);
+  l_linknode_init(&dq->head);
 }
 
 L_INLINE l_bool
-l_dqueue_is_empty(l_dqueue* self)
+l_dqueue_is_empty(l_dqueue* dq)
 {
-  return self->head.next == &self->head;
+  return dq->head.next == &dq->head;
 }
 
 L_INLINE l_bool
-l_dqueue_nt_empty(l_dqueue* self)
+l_dqueue_nt_empty(l_dqueue* dq)
 {
-  return self->head.next != &self->head;
+  return dq->head.next != &dq->head;
 }
 
 L_INLINE void
-l_dqueue_push(l_dqueue* self, l_linknode* newnode)
+l_dqueue_push(l_dqueue* dq, l_linknode* newnode)
 {
-  l_linknode_insert_after(&self->head, newnode);
+  l_linknode_insert_after(&dq->head, newnode);
 }
 
 L_INLINE void
@@ -714,10 +826,10 @@ l_dqueue_move(l_dqueue* q)
 }
 
 L_INLINE l_linknode*
-l_dqueue_pop(l_dqueue* self)
+l_dqueue_pop(l_dqueue* dq)
 {
-  if (l_dqueue_is_empty(self)) return 0;
-  return l_linknode_remove(self->head.prev);
+  if (l_dqueue_is_empty(dq)) return 0;
+  return l_linknode_remove(dq->head.prev);
 }
 
 #endif /* LNLYLIB_CORE_BASE_H */

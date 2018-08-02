@@ -1,7 +1,125 @@
 #define LNLYLIB_API_IMPL
+#include <string.h>
+#include <stdarg.h>
 #include <lualib.h>
 #include <lauxlib.h>
 #include "core/lapi.h"
+
+/** lua state and coroutine **
+lua_State* lua_newstate(lua_Alloc f, void* ud);
+lua_State* luaL_newstate();
+void lua_close(lua_State* L);
+lua_State* lua_newthread(lua_State* L);
+---
+The lua_newstate create a new thread (or a main coroutine) running in a new,
+independent state. Returns NULL if it cannot create the thread. THe arguments
+f is the allocator function; Lua does all memory allocation for this state
+through this function. The second argument, ud, is an opaque pointer that Lua
+passes to the allocator in every call.
+luaL_newstate calls lua_newstate with an allocator based on the standard C
+realloc function and then sets a panic function (lua_atpanic) that prints an
+error message to the standard error output in case of fatal errors. Returns
+the new state, or NULL if there is a memory allocation error.
+The lua_newthread a new thread (or a new coroutine related to the main
+coroutine), pushes it on the stack, and returns a pointer represents the new
+coroutine. The returned coroutine shares with the main coroutine its global
+environment, but has an independent execution stack. There is no explicit
+function to close or to destroy a coroutine. Coroutines are subject to garbage
+collection, like any Lua object.
+---
+int lua_resume(lua_State* co, lua_State* from, int nargs);
+int lua_yield(lua_State* L, int nresults);
+int lua_yieldk(lua_State* L, int nresults, lua_KContext ctx, lua_KFunction k);
+---
+The lua_resume function start or resume a coroutine. The parameter from
+represents the coroutine that is resuming co. If there is no such coroutine,
+this parameter can be NULL.
+To start a coroutine, you push onto the stack the main function plus any
+arguments; then you call lua_resume, with nargs being the number of arguments.
+This call returns when the coroutine suspends or finishes its execution. When
+it returns, the stack contains all values passed to lua_yield, or all values
+returned by the main function. lua_resume return LUA_YIELD if the coroutine
+yields, LUA_OK if the coroutine finishes its execution without errors, or an
+error code in case of errors. In case of errors, the stack is not unwound, so
+you can use the debug API over it. The error object is on the top of the stack.
+To resume a coroutine, you remove any results from the last lua_yield, put on
+its stack only the values to be passed as results from yield, and then call
+lua_resume.
+The lua_yield function is equivalent to lua_yieldk, but it has no continuation.
+Therefore, when the thread resumes, it continues the function that called the
+function calling lua_yield.
+@nresults, number of results on the stack. These results will be returned to
+the caller who called the lua_resume to resume this coroutine.
+**********************************************************************/
+
+struct lnlylib_env;
+extern struct lnlylib_env* l_get_lnlylib_env();
+
+L_EXTERN lua_State*
+ll_new_state()
+{
+  lua_State* L = 0;
+  struct lnlylib_env* E = 0;
+
+  E = l_get_lnlylib_env();
+
+  if (E == 0) {
+    L = luaL_newstate();
+  } else {
+    L = lua_newstate(l_malloc_func, E);
+  }
+
+  if (L == 0) {
+    l_loge_s(E, "create lua state failed");
+    return 0;
+  }
+
+  return L;
+}
+
+L_EXTERN void
+ll_close_state(lua_State* L)
+{
+  if (L) {
+    lua_close(L);
+  }
+}
+
+L_EXTERN lua_State*
+ll_new_coro(lua_State* L)
+{
+  lua_State* co = 0;
+  co = lua_newthread(L);
+  if (co == 0) {
+    l_loge_s(LNUL, "create lua coro failed");
+    return 0;
+  }
+  return co;
+}
+
+L_EXTERN void*
+ll_set_extra(lua_State* L, void* p)
+{
+  /** void* lua_getextraspace(lua_State* L) **
+  Returns a pointer to a raw memory area associated with the given Lua
+  state. The application can use this area for any purpose; Lua does
+  not use it for anything. Each new thread has this area initialized
+  with a copy of the area of the main thread. By default, this area
+  has the size of a pointer to void, but you can recompile Lua with
+  a different size for this area. (See LUA_EXTRASPACE in luaconf.h)
+  ********************************************************************/
+  l_uint* extra = (l_uint*)lua_getextraspace(L);
+  l_uint oldval = *extra;
+  *extra = (l_uint)p;
+  return (void*)oldval;
+}
+
+L_EXTERN void*
+ll_get_extra(lua_State* L)
+{
+  l_uint* extra = (l_uint*)lua_getextraspace(L);
+  return (void*)*extra;
+}
 
 L_EXTERN void /* pos n emements */
 ll_pop_n(lua_State* L, int n)
@@ -84,6 +202,209 @@ ll_get_field_func(lua_State* L, l_tableindex t, const void* field)
   return func;
 }
 
+static l_bool
+ll_table_getn(lua_State* L, l_tableindex t, const void* name)
+{
+  l_filename a;
+  l_strn name_strn;
+  l_byte* key = 0;
+  l_byte* key_end = 0;
+  l_bool loop_exit = 0;
+  int tableindex = t.index;
+  int oldtop = lua_gettop(L);
+
+  if (name == 0) {
+    return false;
+  }
+
+  l_filename_init(&a);
+  name_strn = l_strn_c(name);
+  if (!l_filename_append(&a, name_strn)) {
+    l_loge_1(LNUL, "chained name string is too long %d", ld(name_strn.n));
+    return false;
+  }
+
+  key = key_end = a.s;
+
+  for (; ;) {
+    while (*key_end) {
+      if (*key_end == '.') {
+        break;
+      } else {
+        key_end += 1;
+      }
+    }
+
+    /* key_end is \0 or '.' */
+
+    loop_exit = (*key_end == 0);
+
+    if (*key_end == '.') {
+      *key_end = 0;
+    }
+
+    if (key == key_end) {
+      l_loge_s(LNUL, "empty key name string");
+      ll_pop_to(L, oldtop);
+      return false;
+    }
+
+    if (!ll_is_table(L, tableindex)) {
+      l_loge_1(LNUL, "access %s of a not-a-table", ls(key));
+      ll_pop_to(L, oldtop);
+      return false;
+    }
+
+    lua_getfield(L, tableindex, (const char*)key);
+    tableindex = -1;
+
+    if (loop_exit) {
+      break;
+    }
+
+    key_end += 1;
+    key = key_end;
+  }
+
+  if (lua_gettop(L) == oldtop + 1) {
+    return true;
+  } else {
+    lua_copy(L, -1, oldtop + 1);
+    ll_pop_to(L, oldtop + 1);
+    return true;
+  }
+}
+
+static l_bool /* if return true, the value is on the top */
+ll_table_getv(lua_State* L, l_tableindex t, int n, va_list vl)
+{
+  const char* key = 0;
+  int tableindex = t.index;
+  int oldtop = lua_gettop(L);
+
+  if (n <= 0) {
+    return false;
+  }
+
+  while (n-- > 0) {
+    key = va_arg(vl, const char*);
+    if (key == 0) {
+      l_loge_s(LNUL, "empty key name string");
+      ll_pop_to(L, oldtop);
+      return false;
+    }
+    if (!ll_is_table(L, tableindex)) {
+      l_loge_1(LNUL, "access %s of a not-a-table", ls(key));
+      ll_pop_to(L, oldtop);
+      return false;
+    }
+    lua_getfield(L, tableindex, (const char*)key);
+    tableindex = -1;
+  }
+
+  if (lua_gettop(L) == oldtop + 1) {
+    return true;
+  } else {
+    lua_copy(L, -1, oldtop + 1);
+    ll_pop_to(L, oldtop + 1);
+    return true;
+  }
+}
+
+L_EXTERN l_int
+ll_table_get_int(lua_State* L, l_tableindex t, const void* namechain)
+{
+  if (ll_table_getn(L, t, namechain)) {
+    return ll_to_int(L, -1);
+  } else {
+    return 0;
+  }
+}
+
+L_EXTERN l_strn
+ll_table_get_str(lua_State* L, l_tableindex t, const void* namechain)
+{
+  if (ll_table_getn(L, t, namechain)) {
+    return ll_to_strn(L, -1);
+  } else {
+    return L_EMPTY_STR;
+  }
+}
+
+L_EXTERN double
+ll_table_get_num(lua_State* L, l_tableindex t, const void* namechain)
+{
+  if (ll_table_getn(L, t, namechain)) {
+    return ll_to_num(L, -1);
+  } else {
+    return 0;
+  }
+}
+
+L_EXTERN l_int
+ll_table_get_intv(lua_State* L, l_tableindex t, int n, ...)
+{
+  l_int a = 0;
+  va_list vl;
+  va_start(vl, n);
+  if (ll_table_getv(L, t, n, vl)) {
+    a = ll_to_int(L, -1);
+  }
+  va_end(vl);
+  return a;
+}
+
+L_EXTERN l_strn
+ll_table_get_strv(lua_State* L, l_tableindex t, int n, ...)
+{
+  l_strn s = L_EMPTY_STR;
+  va_list vl;
+  va_start(vl, n);
+  if (ll_table_getv(L, t, n, vl)) {
+    s = ll_to_strn(L, -1);
+  }
+  va_end(vl);
+  return s;
+}
+
+L_EXTERN double
+ll_table_get_numv(lua_State* L, l_tableindex t, int n, ...)
+{
+  double f = 0;
+  va_list vl;
+  va_start(vl, n);
+  if (ll_table_getv(L, t, n, vl)) {
+    f = ll_to_num(L, -1);
+  }
+  va_end(vl);
+  return f;
+}
+
+L_EXTERN void
+ll_set_funcenv(lua_State* L, l_funcindex func, l_tableindex t)
+{
+  /** const char* lua_setupvalue(lua_State* L, int funcindex, int n); [-(0|1), +0, -]
+      const char* lua_getupvalue(lua_State* L, int funcindex, int n); [-0, +(0|1), -]
+  Sets the value of a closure's upvalue. It assigns the value at the top
+  of the stack to the upvalue and returns its name. It also pops the
+  value from the stack. Returns NULL (and pops nothing) when the index n
+  is greater than the number of upvalues.
+  Gets information about the n-th upvalue of the closure at func index.
+  It pushes the upvalue's value onto the stack and returns its name.
+  Returns NULL (and pushes nothing) when the index n is greater than the
+  number of upvalues. For C functions, this function uses the empty string
+  "" as a name for all upvalues. For Lua functions, upvalues are the
+  external local variables that the function uses, and that are consequently
+  included in its closure. Upvalues have no particular order, as they are
+  active through the whole function. They are numbered in an arbitrary order.
+  **/
+  lua_pushvalue(L, t.index);
+  if (lua_setupvalue(L, func.index, 1) == 0) {
+    l_loge_s(LNUL, "set func env failed");
+    ll_pop_n(L, 1);
+  }
+}
+
 L_EXTERN l_tableindex
 ll_new_table(lua_State* L)
 {
@@ -123,6 +444,30 @@ ll_is_num(lua_State* L, int stackindex)
 }
 
 L_EXTERN l_bool
+ll_is_table(lua_State* L, int value_at)
+{
+  return ll_type(L, value_at) == LUA_TTABLE;
+}
+
+L_EXTERN l_bool
+ll_is_func(lua_State* L, int value_at)
+{
+  return ll_type(L, value_at) == LUA_TFUNCTION;
+}
+
+L_EXTERN l_bool
+ll_is_udata(lua_State* L, int value_at)
+{
+  return ll_type(L, value_at) == LUA_TUSERDATA;
+}
+
+L_EXTERN l_bool
+ll_is_ldata(lua_State* L, int value_at)
+{
+  return ll_type(L, value_at) == LUA_TLIGHTUSERDATA;
+}
+
+L_EXTERN l_bool
 ll_is_valid(lua_State* L, int stackindex)
 {
   int n = ll_type(L, stackindex);
@@ -152,6 +497,18 @@ ll_to_strn(lua_State* L, int stackindex)
     /* TODO: consider other types */
     return l_empty_strn();
   }
+}
+
+L_EXTERN l_int
+ll_to_int(lua_State* L, int value_at)
+{
+  return (l_int)lua_tointeger(L, value_at);
+}
+
+L_EXTERN double
+ll_to_num(lua_State* L, int value_at)
+{
+  return (double)lua_tonumber(L, value_at);
 }
 
 L_EXTERN const l_byte*
