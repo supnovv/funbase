@@ -56,8 +56,8 @@ typedef struct l_thread {
 typedef struct {
   l_umedit num_workers;
   l_umedit init_stbl_size;
-  l_string start_script;
-  l_filename logfilename;
+  l_sbuf1k start_script;
+  l_sbuf1k logfilename;
 } l_config;
 
 typedef struct {

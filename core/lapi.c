@@ -205,7 +205,7 @@ ll_get_field_func(lua_State* L, l_tableindex t, const void* field)
 static l_bool
 ll_table_getn(lua_State* L, l_tableindex t, const void* name)
 {
-  l_filename a;
+  l_sbuf1k a;
   l_strn name_strn;
   l_byte* key = 0;
   l_byte* key_end = 0;
@@ -731,10 +731,10 @@ static int
 ll_file_writer_for_compile(lua_State* L, const void* p, size_t sz, void* data)
 {
   l_int n = 0;
-  l_stdfile* out = 0;
+  l_file* out = 0;
   L_UNUSED(L);
-  out = (l_stdfile*)data;
-  n = l_stdfile_write(out, p, (l_int)sz);
+  out = (l_file*)data;
+  n = l_file_write(out, p, (l_int)sz);
   return n == (l_int)sz;
 }
 
@@ -758,16 +758,16 @@ L_EXTERN l_bool
 ll_compile_to_file(lua_State* L, l_funcindex func, const void* file)
 {
   int n = 0;
-  l_stdfile outfile;
+  l_file outfile;
 
-  outfile = l_stdfile_open_write(file);
+  outfile = l_file_open_write(file);
   if (outfile.file == 0) {
     return false;
   }
 
   lua_pushvalue(L, func.index);
   n = lua_dump(L, ll_file_writer_for_compile, &outfile, true);
-  l_stdfile_close(&outfile);
+  l_file_close(&outfile);
 
   return n == 0;
 }

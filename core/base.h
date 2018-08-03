@@ -403,7 +403,7 @@ l_ostream_write(l_ostream* os, const void* p, l_int n)
 L_INLINE l_int
 l_ostream_write_strn(l_ostream* os, l_strn s)
 {
-  return l_ostream_write(os, s->p, s->n);
+  return l_ostream_write(os, s.p, s.n);
 }
 
 L_EXTERN l_ostream l_stdout_ostream();
