@@ -205,8 +205,8 @@ ll_get_field_func(lua_State* L, l_tableindex t, const void* field)
 static l_bool
 ll_table_getn(lua_State* L, l_tableindex t, const void* name)
 {
-  l_sbuf1k a;
-  l_strn name_strn;
+  l_sbuf1k name_buf;
+  l_strbuf* key_names = 0;
   l_byte* key = 0;
   l_byte* key_end = 0;
   l_bool loop_exit = 0;
@@ -217,14 +217,13 @@ ll_table_getn(lua_State* L, l_tableindex t, const void* name)
     return false;
   }
 
-  l_filename_init(&a);
-  name_strn = l_strn_c(name);
-  if (!l_filename_append(&a, name_strn)) {
-    l_loge_1(LNUL, "chained name string is too long %d", ld(name_strn.n));
+  key_names = l_sbuf1k_from(&name_buf, l_strn_c(name));
+  if (l_strbuf_is_empty(key_names)) {
+    l_loge_1(LNUL, "chained name too long or empty %d", ld(strlen((const char*)name)));
     return false;
   }
 
-  key = key_end = a.s;
+  key = key_end = l_strbuf_cstr(key_names);
 
   for (; ;) {
     while (*key_end) {

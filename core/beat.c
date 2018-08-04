@@ -95,6 +95,7 @@ typedef struct l_master {
   l_squeue* mast_frmq;
   l_squeue* mast_frsq;
   l_squeue* temp_svcq;
+  lnlylib_env* E;
   l_srvctable* stbl;
   l_umedit srvc_seed;
   l_umedit num_workers;
@@ -119,7 +120,7 @@ typedef struct l_worker {
   l_squeue* mast_rxmq;
   l_mutex* mast_rxlk;
   l_squeue msgq[4];
-  lnlylib_env ENV;
+  lnlylib_env env;
 } l_worker;
 
 typedef struct l_coroutine {
@@ -272,6 +273,28 @@ lnlylib_rawalloc(void* ud, void* p, l_ulong oldsz, l_ulong newsz)
 
 l_mallocfunc l_malloc_func = lnlylib_rawalloc;
 
+typedef struct {
+} l_thrdalloc;
+
+static void
+l_thrdalloc_init(l_thrdalloc* a)
+{
+  L_UNUSED(a);
+}
+
+static l_thrdalloc*
+l_thrdalloc_create()
+{
+  return 0;
+}
+
+static void
+l_thrdalloc_destroy(l_thrdalloc* a)
+{
+  if (a) {
+  }
+}
+
 L_EXTERN l_bool
 l_zero_n(void* p, l_ulong size)
 {
@@ -359,12 +382,14 @@ l_config_load(l_config* conf)
   lua_State* L = ll_new_state();
   l_funcindex func;
   l_tableindex env;
+  l_strbuf* script_buf = 0;
+  l_strbuf* logfile_buf = 0;
   l_strn script, logfile;
 
   conf->num_workers = 1;
   conf->init_stbl_size = L_MIN_SRVC_TABLE_SIZE;
-  conf->start_script = l_empty_string();
-  l_filename_set(&conf->logfilename, L_STR("stdout"));
+  script_buf = l_sbuf1k_init(&conf->start_script);
+  logfile_buf = l_sbuf1k_from(&conf->logfilename, L_STR("stdout"));
 
   func = ll_load_file(L, LNLYLIB_HOME_DIR "/conf/config.lua");
   if (func.index <= 0) {
@@ -395,23 +420,17 @@ l_config_load(l_config* conf)
   }
 
   script = ll_table_get_str(L, env, "script");
-  l_string_set(&conf->start_script, script);
+  l_strbuf_reset(script_buf, script);
 
   logfile = ll_table_get_str(L, env, "logfile");
-  if (!l_filename_set(&conf->logfilename, logfile)) {
-    l_filename_set(&conf->logfilename, L_STR("stdout"));
+  if (l_strbuf_reset(logfile_buf, logfile) == 0) {
+    l_strbuf_reset(logfile_buf, L_STR("stdout"));
   }
 
   ll_close_state(L);
 }
 
 L_EXTERN l_int l_impl_file_write(void* out, const void* p, l_int len);
-
-static l_ostream
-l_ostream_from(void* out, l_int (*write)(void* out, const void* p, l_int n))
-{
-  return (l_ostream){out, 0, write};
-}
 
 typedef struct l_strbuf {
   l_int total;
@@ -420,10 +439,10 @@ typedef struct l_strbuf {
 } l_strbuf;
 
 static l_int
-l_strbuf_write(void* out, const void* p, l_int len)
+l_impl_strbuf_write(void* out, const void* p, l_int len)
 {
   l_strbuf* b = (l_strbuf*)out;
-  if (p == 0 || n <= 0) {
+  if (p == 0 || len <= 0) {
     return 0;
   }
   if (b->n + len < b->total) {
@@ -436,16 +455,30 @@ l_strbuf_write(void* out, const void* p, l_int len)
   }
 }
 
-static void
-l_strbuf_init(struct l_strbuf* b, l_int total)
+static l_strbuf*
+l_strbuf_init(void* p, l_int total)
 {
+  l_strbuf* b = (l_strbuf*)p;
   b->total = total;
   b->n = 0;
   b->s[0] = 0;
+  return b;
+}
+
+L_EXTERN l_ostream
+l_strbuf_ostream(l_strbuf* b)
+{
+  return l_ostream_from(b, l_impl_strbuf_write);
 }
 
 L_EXTERN l_int
-l_strbuf_clear(struct l_strbuf* b)
+l_strbuf_write(l_strbuf* b, l_strn s)
+{
+  return l_impl_strbuf_write(b, s.p, s.n);
+}
+
+L_EXTERN l_int
+l_strbuf_clear(l_strbuf* b)
 {
   l_int n = b->n;
   b->n = 0;
@@ -454,130 +487,232 @@ l_strbuf_clear(struct l_strbuf* b)
 }
 
 L_EXTERN l_int
-l_strbuf_reset(struct l_strbuf* b, l_strn s)
+l_strbuf_reset(l_strbuf* b, l_strn s)
 {
   l_strbuf_clear(b);
-  return l_strbuf_write(b, s.p, s.n);
+  return l_strbuf_write(b, s);
 }
 
-L_EXTERN const l_byte*
-l_strbuf_cstr(struct l_strbuf* b)
+L_EXTERN l_byte*
+l_strbuf_cstr(l_strbuf* b)
 {
   return b->s;
 }
 
 L_EXTERN l_strn
-l_strbuf_strn(struct l_strbuf* b)
+l_strbuf_strn(l_strbuf* b)
 {
   return l_strn_l(b->s, b->n);
 }
 
 L_EXTERN l_int
-l_strbuf_add_path(struct l_strbuf* b, l_strn path)
+l_strbuf_add_path(l_strbuf* b, l_strn path)
 {
+  L_UNUSED(b);
+  L_UNUSED(path);
 }
 
 L_EXTERN l_int
-l_strbuf_end_path(struct l_strbuf* b, l_strn fileanme)
+l_strbuf_end_path(l_strbuf* b, l_strn filename)
 {
+  L_UNUSED(b);
+  L_UNUSED(filename);
 }
 
-L_EXTERN l_ostream
+L_EXTERN l_strbuf*
 l_sbuf16_init(l_sbuf16* b)
 {
-  l_strbuf_init(l_sbuf16_p(b), 16);
-  return l_ostream_from(b, l_impl_strbuf_write);
+  return l_strbuf_init(b, 16);
 }
 
-L_EXTERN l_ostream
+L_EXTERN l_strbuf*
 l_sbuf32_init(l_sbuf32* b)
 {
-  l_strbuf_init(l_sbuf32_p(b), 32);
-  return l_ostream_from(b, l_impl_strbuf_write);
+  return l_strbuf_init(b, 32);
 }
 
-L_EXTERN l_ostream
+L_EXTERN l_strbuf*
 l_sbuf64_init(l_sbuf64* b)
 {
-  l_strbuf_init(l_sbuf64_p(b), 64);
-  return l_ostream_from(b, l_impl_strbuf_write);
+  return l_strbuf_init(b, 64);
 }
 
-L_EXTERN l_ostream
+L_EXTERN l_strbuf*
 l_sbuf12_init(l_sbuf12* b)
 {
-  l_strbuf_init(l_sbuf12_p(b), 128);
-  return l_ostream_from(b, l_impl_strbuf_write);
+  return l_strbuf_init(b, 128);
 }
 
-L_EXTERN l_ostream
+L_EXTERN l_strbuf*
 l_sbuf25_init(l_sbuf25* b)
 {
-  l_strbuf_init(l_sbuf25_p(b), 256);
-  return l_ostream_from(b, l_impl_strbuf_write);
+  return l_strbuf_init(b, 256);
 }
 
-L_EXTERN l_ostream
+L_EXTERN l_strbuf*
 l_sbuf51_init(l_sbuf51* b)
 {
-  l_strbuf_init(l_sbuf51_p(b), 512);
-  return l_ostream_from(b, l_impl_strbuf_write);
+  return l_strbuf_init(b, 512);
 }
 
-L_EXTERN l_ostream
+L_EXTERN l_strbuf*
 l_sbuf1k_init(l_sbuf1k* b)
 {
-  l_strbuf_init(l_sbuf1k_p(b), 1024);
-  return l_ostream_from(b, l_impl_strbuf_write);
+  return l_strbuf_init(b, 1024);
 }
 
-L_EXTERN l_ostream
+L_EXTERN l_strbuf*
 l_sbuf2k_init(l_sbuf2k* b)
 {
-  l_strbuf_init(l_sbuf2k_p(b), 1024*2);
-  return l_ostream_from(b, l_impl_strbuf_write);
+  return l_strbuf_init(b, 1024*2);
 }
 
-L_EXTERN l_ostream
+L_EXTERN l_strbuf*
 l_sbuf3k_init(l_sbuf3k* b)
 {
-  l_strbuf_init(l_sbuf3k_p(b), 1024*3);
-  return l_ostream_from(b, l_impl_strbuf_write);
+  return l_strbuf_init(b, 1024*3);
 }
 
-L_EXTERN l_ostream
+L_EXTERN l_strbuf*
 l_sbuf4k_init(l_sbuf4k* b)
 {
-  l_strbuf_init(l_sbuf4k_p(b), 1024*4);
-  return l_ostream_from(b, l_impl_strbuf_write);
+  return l_strbuf_init(b, 1024*4);
 }
 
-L_EXTERN l_ostream
+L_EXTERN l_strbuf*
 l_sbuf5k_init(l_sbuf5k* b)
 {
-  l_strbuf_init(l_sbuf5k_p(b), 1024*5);
-  return l_ostream_from(b, l_impl_strbuf_write);
+  return l_strbuf_init(b, 1024*5);
 }
 
-L_EXTERN l_ostream
+L_EXTERN l_strbuf*
 l_sbuf6k_init(l_sbuf6k* b)
 {
-  l_strbuf_init(l_sbuf6k_p(b), 1024*6);
-  return l_ostream_from(b, l_impl_strbuf_write);
+  return l_strbuf_init(b, 1024*6);
 }
 
-L_EXTERN l_ostream
+L_EXTERN l_strbuf*
 l_sbuf7k_init(l_sbuf7k* b)
 {
-  l_strbuf_init(l_sbuf7k_p(b), 1024*7);
-  return l_ostream_from(b, l_impl_strbuf_write);
+  return l_strbuf_init(b, 1024*7);
 }
 
-L_EXTERN l_ostream
+L_EXTERN l_strbuf*
 l_sbuf8k_init(l_sbuf8k* b)
 {
-  l_strbuf_init(l_sbuf8k_p(b), 1024*8);
-  return l_ostream_from(b, l_impl_strbuf_write);
+  return l_strbuf_init(b, 1024*8);
+}
+
+L_EXTERN l_strbuf*
+l_sbuf16_from(l_sbuf16* b, l_strn s)
+{
+  l_strbuf* p = l_sbuf16_init(b);
+  l_strbuf_write(p, s);
+  return p;
+}
+
+L_EXTERN l_strbuf*
+l_sbuf32_from(l_sbuf32* b, l_strn s)
+{
+  l_strbuf* p = l_sbuf32_init(b);
+  l_strbuf_write(p, s);
+  return p;
+}
+
+L_EXTERN l_strbuf*
+l_sbuf64_from(l_sbuf64* b, l_strn s)
+{
+  l_strbuf* p = l_sbuf64_init(b);
+  l_strbuf_write(p, s);
+  return p;
+}
+
+L_EXTERN l_strbuf*
+l_sbuf12_from(l_sbuf12* b, l_strn s)
+{
+  l_strbuf* p = l_sbuf12_init(b);
+  l_strbuf_write(p, s);
+  return p;
+}
+
+L_EXTERN l_strbuf*
+l_sbuf25_from(l_sbuf25* b, l_strn s)
+{
+  l_strbuf* p = l_sbuf25_init(b);
+  l_strbuf_write(p, s);
+  return p;
+}
+
+L_EXTERN l_strbuf*
+l_sbuf51_from(l_sbuf51* b, l_strn s)
+{
+  l_strbuf* p = l_sbuf51_init(b);
+  l_strbuf_write(p, s);
+  return p;
+}
+
+L_EXTERN l_strbuf*
+l_sbuf1k_from(l_sbuf1k* b, l_strn s)
+{
+  l_strbuf* p = l_sbuf1k_init(b);
+  l_strbuf_write(p, s);
+  return p;
+}
+
+L_EXTERN l_strbuf*
+l_sbuf2k_from(l_sbuf2k* b, l_strn s)
+{
+  l_strbuf* p = l_sbuf2k_init(b);
+  l_strbuf_write(p, s);
+  return p;
+}
+
+L_EXTERN l_strbuf*
+l_sbuf3k_from(l_sbuf3k* b, l_strn s)
+{
+  l_strbuf* p = l_sbuf3k_init(b);
+  l_strbuf_write(p, s);
+  return p;
+}
+
+L_EXTERN l_strbuf*
+l_sbuf4k_from(l_sbuf4k* b, l_strn s)
+{
+  l_strbuf* p = l_sbuf4k_init(b);
+  l_strbuf_write(p, s);
+  return p;
+}
+
+L_EXTERN l_strbuf*
+l_sbuf5k_from(l_sbuf5k* b, l_strn s)
+{
+  l_strbuf* p = l_sbuf5k_init(b);
+  l_strbuf_write(p, s);
+  return p;
+}
+
+L_EXTERN l_strbuf*
+l_sbuf6k_from(l_sbuf6k* b, l_strn s)
+{
+  l_strbuf* p = l_sbuf6k_init(b);
+  l_strbuf_write(p, s);
+  return p;
+}
+
+L_EXTERN l_strbuf*
+l_sbuf7k_from(l_sbuf7k* b, l_strn s)
+{
+  l_strbuf* p = l_sbuf7k_init(b);
+  l_strbuf_write(p, s);
+  return p;
+}
+
+L_EXTERN l_strbuf*
+l_sbuf8k_from(l_sbuf8k* b, l_strn s)
+{
+  l_strbuf* p = l_sbuf8k_init(b);
+  l_strbuf_write(p, s);
+  return p;
 }
 
 /**
@@ -1335,6 +1470,7 @@ l_impl_ostream_format(l_ostream* os, const void* fmt, l_int n, ...)
   return nfmts;
 }
 
+#if 0
 L_EXTERN void
 l_filename_init(l_filename* nm)
 {
@@ -1430,6 +1566,7 @@ l_filename_addpath(l_filename* nm, l_strn path)
     return false;
   }
 }
+#endif
 
 static l_file
 l_impl_file_open(const void* name, const char* mode)
@@ -1667,21 +1804,13 @@ l_impl_file_write(void* out, const void* p, l_int len)
 L_EXTERN l_ostream
 l_stdout_ostream()
 {
-  l_ostream os;
-  os.out = stdout;
-  os.size = 0;
-  os.write = l_impl_file_write;
-  return os;
+  return l_ostream_from(stdout, l_impl_file_write);
 }
 
 L_EXTERN l_ostream
 l_stderr_ostream()
 {
-  l_ostream os;
-  os.out = stderr;
-  os.size = 0;
-  os.write = l_impl_file_write;
-  return os;
+  return l_ostream_from(stderr, l_impl_file_write);
 }
 
 L_EXTERN l_int
@@ -1780,39 +1909,29 @@ l_file_redirect_stdin(const void* name)
 static l_ostream
 l_config_logout(l_config* conf, l_umedit thridx)
 {
-  l_strn logfile_prefix;
+  l_strn logfileprefix;
+  logfileprefix = l_strbuf_strn(l_sbuf1k_p(&conf->logfilename));
 
-  logfile_prefix = l_filename_strn(&conf->logfilename);
-
-  if (l_strn_equal(&logfile_prefix, L_STR("stdout"))) {
+  if (l_strn_equal(&logfileprefix, L_STR("stdout"))) {
     return l_stdout_ostream();
-
-  } else if (l_strn_equal(&logfile_prefix, L_STR("stderr"))) {
+  } else if (l_strn_equal(&logfileprefix, L_STR("stderr"))) {
     return l_stderr_ostream();
-
   } else {
-    l_filename result_name;
-    l_ostream result_out;
-
-    l_filename_init(&result_name);
-    result_out = l_filename_ostream(&result_name);
-
-    if (l_ostream_format_2(&result_out, "%strn.%d.log", lstrn(&logfile_prefix), ld(thridx)) != 2) {
-      l_loge_2(LNUL, "create log ostream fail %strn %d", lstrn(&logfile_prefix), ld(thridx));
+    l_sbuf2k name_buf;
+    l_strbuf* name_str;
+    l_ostream out;
+    name_str = l_sbuf2k_init(&name_buf);
+    out = l_strbuf_ostream(name_str);
+    if (l_ostream_format_2(&out, "%strn.%d.log", lstrn(&logfileprefix), ld(thridx)) != 2) {
+      l_loge_2(LNUL, "create log ostream fail %strn %d", lstrn(&logfileprefix), ld(thridx));
       return l_stdout_ostream();
-
     } else {
       l_ostream logout;
-
-      logout.out = fopen(result_name.p, "wb");
-
+      logout = l_ostream_from(fopen((const char*)l_strbuf_cstr(name_str), "wb"), l_impl_file_write);
       if (logout.out == 0) {
-        l_loge_1(LNUL, "open log file fail %s", ls(result_name.s));
+        l_loge_1(LNUL, "open log file fail %s", ls(l_strbuf_cstr(name_str)));
         return l_stdout_ostream();
-
       } else {
-        logout.size = 0;
-        logout.write = l_impl_file_write;
         return logout;
       }
     }
@@ -1911,7 +2030,7 @@ l_srvctable_alloc_slot(l_master* M, l_srvctable* stbl)
     return slot;
   }
 
-  l_logw_2(E, "stbl is full: capacity %d num_services %d",
+  l_logw_2(M->E, "stbl is full: capacity %d num_services %d",
       ld(stbl->capacity), ld(stbl->num_services));
 
   { l_srvcslot* new_sarr = 0;
@@ -1920,11 +2039,11 @@ l_srvctable_alloc_slot(l_master* M, l_srvctable* stbl)
 
     new_size = stbl->capacity * 2;
     if (new_size <= stbl->capacity) {
-      l_loge_2(E, "current stbl is too large %d", stbl->capacity);
+      l_loge_1(M->E, "current stbl is too large %d", ld(stbl->capacity));
       return 0;
     }
 
-    l_logw_1(E, "stbl alloced to new size %d", ld(new_size));
+    l_logw_1(M->E, "stbl alloced to new size %d", ld(new_size));
     new_sarr = L_MALLOC_TYPE_N(M->E, l_srvcslot, new_size);
 
     /* copy the old slots and free the old */
@@ -1958,12 +2077,21 @@ l_srvctable_alloc_slot(l_master* M, l_srvctable* stbl)
   return 0;
 }
 
+static void
+l_parse_cmd_line(l_master* M, int argc, char** argv)
+{
+  L_UNUSED(M);
+  L_UNUSED(argc);
+  L_UNUSED(argv);
+}
+
 static lnlylib_env*
 l_master_init(int (*start)(lnlylib_env*), int argc, char** argv)
 {
   l_master* M = 0;
   l_thrdalloc thrd_alloc;
   lnlylib_env* main_env = 0;
+  l_config* conf = 0;
   l_worknode* work_node = 0;
   l_worker* worker = 0;
   l_umedit i = 0;
@@ -1973,7 +2101,7 @@ l_master_init(int (*start)(lnlylib_env*), int argc, char** argv)
   M = L_MALLOC_TYPE(LNUL, l_master);
   L_MASTER = M;
 
-  l_zero(&M, sizeof(l_master));
+  l_zero_n(&M, sizeof(l_master));
 
   M->conf = &M->config;
   M->cmds = &M->cmdline;
@@ -1991,34 +2119,36 @@ l_master_init(int (*start)(lnlylib_env*), int argc, char** argv)
   M->mast_frmq = M->queue + 1;
   M->mast_frsq = M->queue + 2;
   M->temp_svcq = M->queue + 3;
+  M->E = &M->main_env;
 
-  l_thread_init(&M->T,  L_MASTER_THRIDX, &M->main_env, 0);
+  l_thread_init(&M->T,  L_MASTER_THRIDX, M->E, 0);
   l_thrdalloc_init(&thrd_alloc);
   M->T.thrd_alloc = &thrd_alloc;
   M->T.thrhdl = l_thrhdl_self();
   M->T.start = start;
 
-  main_env = &M->main_env;
+  main_env = M->E;
   main_env->M = M;
   main_env->T = &M->T;
   main_env->LOG = &M->T.logout;
   main_env->ALLOC = M->T.thrd_alloc;
 
-  l_threadlocal_init(main_env);
+  l_threadlocal_set(main_env);
 
+  conf = M->conf;
   l_config_load(conf);
   M->T.logout = l_config_logout(conf, L_MASTER_THRIDX);
   M->T.thrd_alloc = l_thrdalloc_create();
   main_env->LOG = &M->T.logout;
   main_env->ALLOC = M->T.thrd_alloc;
 
-  l_parse_cmd_line(main_env, argc, argv);
+  l_parse_cmd_line(M, argc, argv);
 
   /* init service table */
 
   M->srvc_seed = 0;
   M->stbl = &M->srvc_tbl;
-  l_srvctable_init(main_env, M->stbl, conf->min_stbl_size);
+  l_srvctable_init(M, M->stbl, conf->init_stbl_size);
 
   /* init worker threads */
 
@@ -2032,14 +2162,14 @@ l_master_init(int (*start)(lnlylib_env*), int argc, char** argv)
     worker->work_flags = 0;
     worker->weight = i / 4 - 1;
 
-    l_squeue_init(worker->mq + 0);
-    l_squeue_init(worker->mq + 1);
-    l_squeue_init(worker->mq + 2);
-    l_squeue_init(worker->mq + 3);
-    worker->work_frmq = worker->mq + 0;
-    worker->work_txme = worker->mq + 1;
-    worker->work_txmq = worker->mq + 2;
-    worker->work_txms = worker->mq + 3;
+    l_squeue_init(worker->msgq + 0);
+    l_squeue_init(worker->msgq + 1);
+    l_squeue_init(worker->msgq + 2);
+    l_squeue_init(worker->msgq + 3);
+    worker->work_frmq = worker->msgq + 0;
+    worker->work_txme = worker->msgq + 1;
+    worker->work_txmq = worker->msgq + 2;
+    worker->work_txms = worker->msgq + 3;
 
     worker->mast_rxmq = &work_node->mast_rxmq;
     worker->mast_rxlk = &work_node->mast_rxlk;
@@ -2618,7 +2748,6 @@ l_master_create_service(l_master* M, l_service_create_req* req, l_umedit svid)
   l_srvcslot* slot = 0;
   l_srvctable* stbl = 0;
   l_service_callback* cb = 0;
-  lnlylib_env* E = M->T.E;
   l_fildhdl ioev_hdl = L_EMPTY_HDL;
   l_ushort flags = 0;
   l_ushort events = 0;
@@ -2630,7 +2759,7 @@ l_master_create_service(l_master* M, l_service_create_req* req, l_umedit svid)
   }
 
   if (cb == 0) {
-    l_loge_s(E, "service create fail due to null cb");
+    l_loge_s(M->E, "service create fail due to null cb");
     return 0;
   }
 
@@ -2638,18 +2767,18 @@ l_master_create_service(l_master* M, l_service_create_req* req, l_umedit svid)
     if (l_fildhdl_is_empty(req->ioev.hdl)) {
       l_sockaddr sa;
       if (!req->ioev.ip || !req->ioev.poart) {
-        l_loge_s(E, "service create fail due to empty ip or port");
+        l_loge_s(M->E, "service create fail due to empty ip or port");
         return 0;
       }
       if (!l_sockaddr_init(&sa, l_strn_c(req->ioev.ip), req->ioev.port)) {
-        l_loge_s(E, "service create fail due to invalid address");
+        l_loge_s(M->E, "service create fail due to invalid address");
         return 0;
       }
       if (req->ioev.listen) {
         l_socket sock;
         sock = l_socket_tcp_listen(&sa, 0);
         if (l_socket_is_empty(&sock)) {
-          l_loge_s(E, "service create fail due to listen fail");
+          l_loge_s(M->E, "service create fail due to listen fail");
           return 0;
         }
         ioev_hdl = sock;
@@ -2660,7 +2789,7 @@ l_master_create_service(l_master* M, l_service_create_req* req, l_umedit svid)
         l_bool done = false;
         sock = l_socket_tcp_connect(&sa, &done);
         if (l_socket_is_empty(&sock)) {
-          l_loge_s(E, "service create fail due to connect fail");
+          l_loge_s(M->E, "service create fail due to connect fail");
           return 0;
         }
         ioev_hdl = sock;
@@ -2677,19 +2806,19 @@ l_master_create_service(l_master* M, l_service_create_req* req, l_umedit svid)
 
   if (svid != 0) {
     if (svid >= L_MIN_USER_SERVICE_ID || svid >= stbl->capacity) {
-      l_loge_1(E, "invalid reserved service id %d", ld(svid));
+      l_loge_1(M->E, "invalid reserved service id %d", ld(svid));
       return 0;
     }
 
     slot = stbl->slot_arr + svid;
     if (slot->service || (slot->flags & L_SRVC_FLAG_ALIVE)) {
-      l_loge_1(E, "reserved service %d already created", ld(svid));
+      l_loge_1(M->E, "reserved service %d already created", ld(svid));
       return 0;
     }
   } else {
     slot = l_srvctable_alloc_slot(M, stbl);
     if (slot == 0) {
-      l_loge_s(E, "service create fail due to slot alloc");
+      l_loge_s(M->E, "service create fail due to slot alloc");
       return 0;
     }
   }
@@ -2700,7 +2829,7 @@ l_master_create_service(l_master* M, l_service_create_req* req, l_umedit svid)
   }
 
   if (S == 0) {
-    l_loge_s(E, "service create fail due to malloc");
+    l_loge_s(M->E, "service create fail due to malloc");
     return 0;
   }
 
@@ -2815,7 +2944,7 @@ l_master_insert_message(l_master* M, l_message* msg)
   srvc_slot = stbl->slot_arr + mssg_dest;
   if (mssg_dest >= stbl->capacity || (srvc_slot->flags & L_SRVC_FLAG_ALIVE) == 0) {
     /* invalid message, just insert into free q. TODO: how to free msgdata */
-    l_loge_3(E, "invalid message %d from %d to %d", ld(msg->mgid), ld(msg->mssg_from), ld(mssg_dest));
+    l_loge_3(M->E, "invalid message %d from %d to %d", ld(msg->mgid), ld(msg->mssg_from), ld(mssg_dest));
     l_squeue_push(&M->mast_frmq, &msg->node);
   } else {
     if ((S = srvc_slot->service)) {
@@ -2933,7 +3062,7 @@ l_master_stop_service(l_master* M, l_ulong srvc_id)
 
   srvc_slot = stbl->slot_arr + svid;
   if (svid >= stbl->capacity || (srvc_slot->flags & L_SRVC_FLAG_ALIVE) == 0) {
-    l_loge_1(E, "try to stop invalid service %d", ld(svid));
+    l_loge_1(M->E, "try to stop invalid service %d", ld(svid));
   } else {
     l_message* on_destroy_msg = 0;
     on_destroy_msg = l_master_create_message(M, L_MSG_SERVICE_ON_DESTROY, srvc_id, 0, 0, 0);
@@ -2952,14 +3081,14 @@ l_master_destroy_service(l_master* M, l_ulong srvc_id)
 
   srvc_slot = stbl->slot_arr + svid;
   if (svid >= stbl->capacity || (srvc_slot->flags & L_SRVC_FLAG_ALIVE) == 0) {
-    l_loge_1(E, "try to destroy invalid service %d", ld(svid));
+    l_loge_1(M->E, "try to destroy invalid service %d", ld(svid));
   } else {
     l_assert(srvc_slot->service); /* the service must docked when destroy */
     S = srvc_slot->service;
     srvc_slot->service = 0;
     srvc_slot->flags &= (~L_SRVC_FLAG_ALIVE);
     if (l_squeue_nt_empty(&S->srvc_msgq)) {
-      l_loge_1(E, "service %d destroyed with unhandled messages", ld(svid));
+      l_loge_1(M->E, "service %d destroyed with unhandled messages", ld(svid));
       while ((srvc_msg = (l_message*)l_squeue_pop(&S->srvc_msgq))) {
         l_squeue_push(&M->mast_frmq, &srvc_msg->node); /* TODO: how to free msgdata */
       }
@@ -3020,7 +3149,7 @@ l_master_handle_self_messages(l_master* M, l_squeue* txms)
       l_master_stop_service(M, msg->mssg_dest);
       break;
     default:
-      l_loge_3(E, "invalid master message %d", ld(msg->mgid));
+      l_loge_3(M->E, "invalid master message %d", ld(msg->mgid));
       break;
     }
     l_squeue_push(mast_frmq, &msg->node); /* no need to free msgdata */

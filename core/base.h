@@ -82,8 +82,8 @@ typedef struct {
 #define L_STR(s) l_const_strn(s)
 #define L_EMPTY_STR l_empty_strn()
 
-L_EXTERN l_bool l_strn_equal(l_strn a, l_strn b);
-L_EXTERN l_bool l_strn_contain(l_strn a, l_byte c);
+L_EXTERN l_bool l_strn_equal(const l_strn* a, l_strn b);
+L_EXTERN l_bool l_strn_has(l_strn a, l_byte c);
 
 L_INLINE l_bool
 l_strn_nt_empty(const l_strn* s)
@@ -394,6 +394,12 @@ typedef struct {
   l_int (*write)(void* out, const void* p, l_int n);
 } l_ostream;
 
+L_INLINE l_ostream
+l_ostream_from(void* out, l_int (*write)(void*, const void*, l_int))
+{
+  return (l_ostream){out, write};
+}
+
 L_INLINE l_int
 l_ostream_write(l_ostream* os, const void* p, l_int n)
 {
@@ -528,44 +534,64 @@ typedef struct {
   l_uint a[2 + 1024 * 8 / sizeof(l_uint)];
 } l_sbuf8k;
 
-L_EXTERN l_ostream l_sbuf16_init(l_sbuf16* b);
-L_EXTERN l_ostream l_sbuf32_init(l_sbuf32* b);
-L_EXTERN l_ostream l_sbuf64_init(l_sbuf64* b);
-L_EXTERN l_ostream l_sbuf12_init(l_sbuf12* b);
-L_EXTERN l_ostream l_sbuf25_init(l_sbuf25* b);
-L_EXTERN l_ostream l_sbuf51_init(l_sbuf51* b);
-L_EXTERN l_ostream l_sbuf1k_init(l_sbuf1k* b);
-L_EXTERN l_ostream l_sbuf2k_init(l_sbuf2k* b);
-L_EXTERN l_ostream l_sbuf3k_init(l_sbuf3k* b);
-L_EXTERN l_ostream l_sbuf4k_init(l_sbuf4k* b);
-L_EXTERN l_ostream l_sbuf5k_init(l_sbuf5k* b);
-L_EXTERN l_ostream l_sbuf6k_init(l_sbuf6k* b);
-L_EXTERN l_ostream l_sbuf7k_init(l_sbuf7k* b);
-L_EXTERN l_ostream l_sbuf8k_init(l_sbuf8k* b);
+typedef struct l_strbuf l_strbuf;
 
-struct l_strbuf;
+L_EXTERN l_strbuf* l_sbuf16_init(l_sbuf16* b);
+L_EXTERN l_strbuf* l_sbuf32_init(l_sbuf32* b);
+L_EXTERN l_strbuf* l_sbuf64_init(l_sbuf64* b);
+L_EXTERN l_strbuf* l_sbuf12_init(l_sbuf12* b);
+L_EXTERN l_strbuf* l_sbuf25_init(l_sbuf25* b);
+L_EXTERN l_strbuf* l_sbuf51_init(l_sbuf51* b);
+L_EXTERN l_strbuf* l_sbuf1k_init(l_sbuf1k* b);
+L_EXTERN l_strbuf* l_sbuf2k_init(l_sbuf2k* b);
+L_EXTERN l_strbuf* l_sbuf3k_init(l_sbuf3k* b);
+L_EXTERN l_strbuf* l_sbuf4k_init(l_sbuf4k* b);
+L_EXTERN l_strbuf* l_sbuf5k_init(l_sbuf5k* b);
+L_EXTERN l_strbuf* l_sbuf6k_init(l_sbuf6k* b);
+L_EXTERN l_strbuf* l_sbuf7k_init(l_sbuf7k* b);
+L_EXTERN l_strbuf* l_sbuf8k_init(l_sbuf8k* b);
 
-L_INLINE struct l_strbuf* l_sbuf16_p(l_sbuf16* b) { return (struct l_strbuf*)b; }
-L_INLINE struct l_strbuf* l_sbuf32_p(l_sbuf32* b) { return (struct l_strbuf*)b; }
-L_INLINE struct l_strbuf* l_sbuf64_p(l_sbuf64* b) { return (struct l_strbuf*)b; }
-L_INLINE struct l_strbuf* l_sbuf12_p(l_sbuf12* b) { return (struct l_strbuf*)b; }
-L_INLINE struct l_strbuf* l_sbuf25_p(l_sbuf25* b) { return (struct l_strbuf*)b; }
-L_INLINE struct l_strbuf* l_sbuf51_p(l_sbuf51* b) { return (struct l_strbuf*)b; }
-L_INLINE struct l_strbuf* l_sbuf1k_p(l_sbuf1k* b) { return (struct l_strbuf*)b; }
-L_INLINE struct l_strbuf* l_sbuf2k_p(l_sbuf2k* b) { return (struct l_strbuf*)b; }
-L_INLINE struct l_strbuf* l_sbuf3k_p(l_sbuf3k* b) { return (struct l_strbuf*)b; }
-L_INLINE struct l_strbuf* l_sbuf4k_p(l_sbuf4k* b) { return (struct l_strbuf*)b; }
-L_INLINE struct l_strbuf* l_sbuf5k_p(l_sbuf5k* b) { return (struct l_strbuf*)b; }
-L_INLINE struct l_strbuf* l_sbuf6k_p(l_sbuf6k* b) { return (struct l_strbuf*)b; }
-L_INLINE struct l_strbuf* l_sbuf7k_p(l_sbuf7k* b) { return (struct l_strbuf*)b; }
-L_INLINE struct l_strbuf* l_sbuf8k_p(l_sbuf8k* b) { return (struct l_strbuf*)b; }
+L_EXTERN l_strbuf* l_sbuf16_from(l_sbuf16* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf32_from(l_sbuf32* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf64_from(l_sbuf64* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf12_from(l_sbuf12* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf25_from(l_sbuf25* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf51_from(l_sbuf51* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf1k_from(l_sbuf1k* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf2k_from(l_sbuf2k* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf3k_from(l_sbuf3k* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf4k_from(l_sbuf4k* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf5k_from(l_sbuf5k* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf6k_from(l_sbuf6k* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf7k_from(l_sbuf7k* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf8k_from(l_sbuf8k* b, l_strn s);
 
-L_EXTERN l_int l_strbuf_reset(struct l_strbuf* b, l_strn s);
-L_EXTERN l_int l_strbuf_clear(struct l_strbuf* b);
-L_EXTERN const l_byte* l_strbuf_cstr(struct l_strbuf* b);
-L_EXTERN l_strn l_strbuf_strn(struct l_strbuf* b);
-L_EXTERN l_int l_strbuf_add_path(struct l_strbuf* b, l_strn path);
-L_EXTERN l_int l_strbuf_end_path(struct l_strbuf* b, l_strn fileanme);
+L_INLINE l_strbuf* l_sbuf16_p(l_sbuf16* b) { return (l_strbuf*)b; }
+L_INLINE l_strbuf* l_sbuf32_p(l_sbuf32* b) { return (l_strbuf*)b; }
+L_INLINE l_strbuf* l_sbuf64_p(l_sbuf64* b) { return (l_strbuf*)b; }
+L_INLINE l_strbuf* l_sbuf12_p(l_sbuf12* b) { return (l_strbuf*)b; }
+L_INLINE l_strbuf* l_sbuf25_p(l_sbuf25* b) { return (l_strbuf*)b; }
+L_INLINE l_strbuf* l_sbuf51_p(l_sbuf51* b) { return (l_strbuf*)b; }
+L_INLINE l_strbuf* l_sbuf1k_p(l_sbuf1k* b) { return (l_strbuf*)b; }
+L_INLINE l_strbuf* l_sbuf2k_p(l_sbuf2k* b) { return (l_strbuf*)b; }
+L_INLINE l_strbuf* l_sbuf3k_p(l_sbuf3k* b) { return (l_strbuf*)b; }
+L_INLINE l_strbuf* l_sbuf4k_p(l_sbuf4k* b) { return (l_strbuf*)b; }
+L_INLINE l_strbuf* l_sbuf5k_p(l_sbuf5k* b) { return (l_strbuf*)b; }
+L_INLINE l_strbuf* l_sbuf6k_p(l_sbuf6k* b) { return (l_strbuf*)b; }
+L_INLINE l_strbuf* l_sbuf7k_p(l_sbuf7k* b) { return (l_strbuf*)b; }
+L_INLINE l_strbuf* l_sbuf8k_p(l_sbuf8k* b) { return (l_strbuf*)b; }
+
+L_EXTERN l_ostream l_strbuf_ostream(l_strbuf* b);
+L_EXTERN l_int l_strbuf_write(l_strbuf* b, l_strn s);
+L_EXTERN l_int l_strbuf_reset(l_strbuf* b, l_strn s);
+L_EXTERN l_int l_strbuf_clear(l_strbuf* b);
+L_EXTERN l_byte* l_strbuf_cstr(l_strbuf* b);
+L_EXTERN l_int l_strbuf_size(l_strbuf* b);
+L_EXTERN l_strn l_strbuf_strn(l_strbuf* b);
+L_EXTERN l_bool l_strbuf_is_empty(l_strbuf* b);
+L_EXTERN l_bool l_strbuf_nt_empty(l_strbuf* b);
+L_EXTERN l_int l_strbuf_add_path(l_strbuf* b, l_strn path);
+L_EXTERN l_int l_strbuf_end_path(l_strbuf* b, l_strn fileanme);
 
 typedef struct {
   void* impl;
