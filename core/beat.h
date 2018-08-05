@@ -23,7 +23,6 @@ typedef struct lnlylib_env {
 } lnlylib_env;
 
 typedef struct {
-  const char* service_name;
   void* (*service_on_create)(lnlylib_env*);
   void (*service_on_destroy)(lnlylib_env*);
   void (*service_proc)(lnlylib_env*);

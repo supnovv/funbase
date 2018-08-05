@@ -117,8 +117,8 @@ l_strn_s(const void* s, l_int m, l_int n)
 
 /** memory operation **/
 
-typedef void* (*l_mallocfunc)(void* ud, void* p, l_ulong oldsz, l_ulong newsz);
-L_EXTERN l_mallocfunc l_malloc_func; /* note the allocated memory is not initialized */
+typedef void* (*l_allocfunc)(void* ud, void* p, l_ulong oldsz, l_ulong newsz);
+L_EXTERN l_allocfunc l_alloc_func; /* note the allocated memory is not initialized */
 
 #undef L_MALLOC
 #undef L_MALLOC_TYPE
@@ -126,11 +126,11 @@ L_EXTERN l_mallocfunc l_malloc_func; /* note the allocated memory is not initial
 #undef L_RALLOC
 #undef L_MFREE
 
-#define L_MALLOC(E, size) l_malloc_func((E), 0, 0, (size))
+#define L_MALLOC(E, size) l_alloc_func((E), 0, 0, (size))
 #define L_MALLOC_TYPE(E, type) (type*)L_MALLOC((E), sizeof(type))
 #define L_MALLOC_TYPE_N(E, type, n) (type*)L_MALLOC((E), sizeof(type) * (n))
-#define L_RALLOC(E, p, newsz) l_malloc_func((E), (p), 0, (newsz))
-#define L_MFREE(E, p) l_malloc_func((E), (p), 0, 0)
+#define L_RALLOC(E, p, newsz) l_alloc_func((E), (p), 0, (newsz))
+#define L_MFREE(E, p) l_alloc_func((E), (p), 0, 0)
 
 L_EXTERN l_bool l_zero_n(void* p, l_ulong size);
 L_EXTERN l_ulong l_copy_n(void* dest, const void* from, l_ulong size);
@@ -478,6 +478,8 @@ l_ostream_format_9(l_ostream* os, const void* fmt, l_value a, l_value b, l_value
   return l_impl_ostream_format(os, fmt, 9, a, b, c, d, e, f, g, h, i);
 }
 
+/** fixed length string buffer **/
+
 typedef struct {
   l_uint a[2 + 16 / sizeof(l_uint)];
 } l_sbuf16;
@@ -551,20 +553,20 @@ L_EXTERN l_strbuf* l_sbuf6k_init(l_sbuf6k* b);
 L_EXTERN l_strbuf* l_sbuf7k_init(l_sbuf7k* b);
 L_EXTERN l_strbuf* l_sbuf8k_init(l_sbuf8k* b);
 
-L_EXTERN l_strbuf* l_sbuf16_from(l_sbuf16* b, l_strn s);
-L_EXTERN l_strbuf* l_sbuf32_from(l_sbuf32* b, l_strn s);
-L_EXTERN l_strbuf* l_sbuf64_from(l_sbuf64* b, l_strn s);
-L_EXTERN l_strbuf* l_sbuf12_from(l_sbuf12* b, l_strn s);
-L_EXTERN l_strbuf* l_sbuf25_from(l_sbuf25* b, l_strn s);
-L_EXTERN l_strbuf* l_sbuf51_from(l_sbuf51* b, l_strn s);
-L_EXTERN l_strbuf* l_sbuf1k_from(l_sbuf1k* b, l_strn s);
-L_EXTERN l_strbuf* l_sbuf2k_from(l_sbuf2k* b, l_strn s);
-L_EXTERN l_strbuf* l_sbuf3k_from(l_sbuf3k* b, l_strn s);
-L_EXTERN l_strbuf* l_sbuf4k_from(l_sbuf4k* b, l_strn s);
-L_EXTERN l_strbuf* l_sbuf5k_from(l_sbuf5k* b, l_strn s);
-L_EXTERN l_strbuf* l_sbuf6k_from(l_sbuf6k* b, l_strn s);
-L_EXTERN l_strbuf* l_sbuf7k_from(l_sbuf7k* b, l_strn s);
-L_EXTERN l_strbuf* l_sbuf8k_from(l_sbuf8k* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf16_init_from(l_sbuf16* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf32_init_from(l_sbuf32* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf64_init_from(l_sbuf64* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf12_init_from(l_sbuf12* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf25_init_from(l_sbuf25* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf51_init_from(l_sbuf51* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf1k_init_from(l_sbuf1k* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf2k_init_from(l_sbuf2k* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf3k_init_from(l_sbuf3k* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf4k_init_from(l_sbuf4k* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf5k_init_from(l_sbuf5k* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf6k_init_from(l_sbuf6k* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf7k_init_from(l_sbuf7k* b, l_strn s);
+L_EXTERN l_strbuf* l_sbuf8k_init_from(l_sbuf8k* b, l_strn s);
 
 L_INLINE l_strbuf* l_sbuf16_p(l_sbuf16* b) { return (l_strbuf*)b; }
 L_INLINE l_strbuf* l_sbuf32_p(l_sbuf32* b) { return (l_strbuf*)b; }
@@ -593,17 +595,62 @@ L_EXTERN l_bool l_strbuf_nt_empty(l_strbuf* b);
 L_EXTERN l_int l_strbuf_add_path(l_strbuf* b, l_strn path);
 L_EXTERN l_int l_strbuf_end_path(l_strbuf* b, l_strn fileanme);
 
+/** variable length string **/
+
 typedef struct {
-  void* impl;
+  l_allocfunc alloc;
+  l_int implsz;
+  l_int impltt;
+  l_byte* lnstr;
 } l_string;
 
-L_EXTERN l_string l_empty_string();
-L_EXTERN l_string l_string_init(l_strn from);
+L_EXTERN l_string l_string_init(l_allocfunc alloc, l_int size);
+L_EXTERN l_string l_string_init_from(l_allocfunc alloc, l_int size, l_strn from);
+L_EXTERN l_ostream l_string_ostream(l_string* s);
+L_EXTERN l_int l_string_capacity(l_string* s);
+L_EXTERN l_int l_string_write(l_string* s, l_strn from);
 L_EXTERN l_int l_string_reset(l_string* s, l_strn from);
 L_EXTERN l_int l_string_clear(l_string* s);
-L_EXTERN const l_byte* l_string_cstr(l_string* s);
-L_EXTERN l_strn l_string_strn(l_string* s);
-L_EXTERN l_ostream l_string_ostream(l_string* s);
+
+L_INLINE l_byte*
+l_string_cstr(l_string* s)
+{
+  if (s->implsz <= 0) {
+    return (l_byte*)&s->impltt;
+  } else {
+    return s->lnstr;
+  }
+}
+
+L_INLINE l_int
+l_string_size(l_string* s)
+{
+  if (s->implsz <= 0) {
+    return -s->implsz;
+  } else {
+    return s->implsz;
+  }
+}
+
+L_INLINE l_strn
+l_string_strn(l_string* s)
+{
+  return l_strn_l(l_string_cstr(s), l_string_size(s));
+}
+
+L_INLINE l_bool
+l_string_is_empty(l_string* s)
+{
+  return s->implsz == 0;
+}
+
+L_INLINE l_bool
+l_string_nt_empty(l_string* s)
+{
+  return s->implsz != 0;
+}
+
+/** standard file stream **/
 
 typedef struct {
   void* file;
