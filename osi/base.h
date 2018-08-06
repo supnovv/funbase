@@ -192,4 +192,13 @@ L_DEFINE_STRUCT_OF_SIZE(l_ioevmgr, L_IMPL_IOEVMGR_TYPE_SIZE);
 
 typedef l_filehdl l_socket;
 
+L_EXTERN void l_ioevmgr_init(l_ioevmgr* thiz);
+L_EXTERN void l_ioevmgr_free(l_ioevmgr* thiz);
+L_EXTERN l_bool l_ioevmgr_add(l_ioevmgr* thiz, l_filehdl fd, l_ulong ud, l_ushort masks);
+L_EXTERN l_bool l_ioevmgr_mod(l_ioevmgr* thiz, l_filehdl fd, l_ulong ud, l_ushort masks);
+L_EXTERN l_bool l_ioevmgr_del(l_ioevmgr* thiz, l_filehdl fd);
+L_EXTERN int l_ioevmgr_timed_wait(l_ioevmgr* thiz, int ms, void (*cb)(l_ulong, l_umedit));
+L_EXTERN int l_ioevmgr_wait(l_iovemgr* thiz, void (*cb)(l_ulong, l_umedit));
+L_EXTERN int l_ioevmgr_try_wait(l_ioevmgr* thiz, void (*cb)(l_ulong, l_umedit));
+
 #endif /* LNLYLIB_OSI_BASE_H */
