@@ -147,8 +147,9 @@ L_EXTERN l_thrhdl l_thrhdl_self();
 L_EXTERN int l_thrhdl_create(l_thrhdl* thrhdl, void* (*start)(void*), void* para);
 L_EXTERN int l_thrhdl_cancel(l_thrhdl* thrhdl);
 L_EXTERN int l_thrhdl_join(l_thrhdl* thrhdl);
-L_EXTERN void l_thrhdl_sleep(l_long us);
 L_EXTERN void l_thrhdl_exit();
+L_EXTERN void l_thread_sleep_us(l_long us);
+L_EXTERN void l_thread_sleep_ms(l_long ms);
 
 L_EXTERN void l_thrkey_init(l_thrkey* self);
 L_EXTERN void l_thrkey_free(l_thrkey* self);
@@ -178,9 +179,6 @@ L_EXTERN int l_condv_broadcast(l_condv* self);
 
 /** socket **/
 
-L_DEFINE_STRUCT_OF_SIZE(l_sockaddr, L_IMPL_SOCKADDR_TYPE_SIZE);
-L_DEFINE_STRUCT_OF_SIZE(l_ioevmgr, L_IMPL_IOEVMGR_TYPE_SIZE);
-
 #define L_IO_EVENT_READ   0x01
 #define L_IO_EVENT_WRITE  0x02
 #define L_IO_EVENT_RDWR   0x03
@@ -190,15 +188,37 @@ L_DEFINE_STRUCT_OF_SIZE(l_ioevmgr, L_IMPL_IOEVMGR_TYPE_SIZE);
 #define L_IO_EVENT_ERR    0x20
 #define L_IO_EVENT_MASK 0xffff
 
+L_DEFINE_STRUCT_OF_SIZE(l_sockaddr, L_IMPL_SOCKADDR_TYPE_SIZE);
+L_DEFINE_STRUCT_OF_SIZE(l_ioevmgr, L_IMPL_IOEVMGR_TYPE_SIZE);
+
 typedef l_filehdl l_socket;
 
-L_EXTERN void l_ioevmgr_init(l_ioevmgr* thiz);
-L_EXTERN void l_ioevmgr_free(l_ioevmgr* thiz);
-L_EXTERN l_bool l_ioevmgr_add(l_ioevmgr* thiz, l_filehdl fd, l_ulong ud, l_ushort masks);
-L_EXTERN l_bool l_ioevmgr_mod(l_ioevmgr* thiz, l_filehdl fd, l_ulong ud, l_ushort masks);
-L_EXTERN l_bool l_ioevmgr_del(l_ioevmgr* thiz, l_filehdl fd);
-L_EXTERN int l_ioevmgr_timed_wait(l_ioevmgr* thiz, int ms, void (*cb)(l_ulong, l_umedit));
-L_EXTERN int l_ioevmgr_wait(l_iovemgr* thiz, void (*cb)(l_ulong, l_umedit));
-L_EXTERN int l_ioevmgr_try_wait(l_ioevmgr* thiz, void (*cb)(l_ulong, l_umedit));
+typedef struct {
+  l_socket sock;
+  l_sockaddr remote;
+} l_socketconn;
+
+L_EXTERN l_bool l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port);
+L_EXTERN l_sockaddr l_sockaddr_local(l_socket* sock);
+L_EXTERN l_bool l_sockaddr_getip(l_sockaddr* self, void* out, l_int bfsz);
+L_EXTERN l_ushort l_sockaddr_port(l_sockaddr* self);
+L_EXTERN void l_socket_init();
+L_EXTERN void l_socket_close(l_socket* sock);
+L_EXTERN void l_socket_shutdown(l_socket* sock, l_byte r_w_a);
+L_EXTERN l_socket l_socket_tcp_listen(const l_sockaddr* addr, int backlog);
+L_EXTERN void l_socket_accept(l_socket skt, void (*cb)(void*, l_socketconn*), void* ud);
+L_EXTERN l_socket l_socket_tcp_connect(const l_sockaddr* addr, l_bool* done);
+L_EXTERN l_bool l_socket_cmpl_connect(l_socket sock);
+L_EXTERN l_int l_data_read(l_filehdl hdl, void* out, l_int size);
+L_EXTERN l_int l_data_write(l_filehdl hdl, const void* from, l_int size);
+
+L_EXTERN void l_ioevmgr_init(l_ioevmgr* mgr);
+L_EXTERN void l_ioevmgr_free(l_ioevmgr* mgr);
+L_EXTERN l_bool l_ioevmgr_add(l_ioevmgr* mgr, l_filehdl fd, l_ulong ud, l_ushort masks);
+L_EXTERN l_bool l_ioevmgr_mod(l_ioevmgr* mgr, l_filehdl fd, l_ulong ud, l_ushort masks);
+L_EXTERN l_bool l_ioevmgr_del(l_ioevmgr* mgr, l_filehdl fd);
+L_EXTERN int l_ioevmgr_timed_wait(l_ioevmgr* mgr, int ms, void (*cb)(l_ulong, l_ushort));
+L_EXTERN int l_ioevmgr_wait(l_ioevmgr* mgr, void (*cb)(l_ulong, l_ushort));
+L_EXTERN int l_ioevmgr_try_wait(l_ioevmgr* mgr, void (*cb)(l_ulong, l_ushort));
 
 #endif /* LNLYLIB_OSI_BASE_H */

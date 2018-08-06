@@ -252,7 +252,7 @@ l_thrhdl_join(l_thrhdl* thrhdl)
 }
 
 L_EXTERN void
-l_thrhdl_sleep(l_long us)
+l_thread_sleep_us(l_long us)
 {
   struct timespec req;
   req.tv_sec = (time_t)(us / 1000000);
@@ -260,6 +260,12 @@ l_thrhdl_sleep(l_long us)
   if (nanosleep(&req, 0) != 0) {
     if (errno != EINTR) l_loge_1(LNUL, "nanosleep %s", lserror(errno));
   }
+}
+
+L_EXTERN void
+l_thread_sleep_ms(l_long ms)
+{
+  l_thread_sleep_us(ms * 1000);
 }
 
 L_EXTERN void
@@ -768,7 +774,7 @@ l_sockaddr_local(l_socket* sock)
   return sockaddr;
 }
 
-static l_ushort
+L_EXTERN l_ushort
 l_sockaddr_port(l_sockaddr* self)
 {
   l_impl_sockaddr* sa = (l_impl_sockaddr*)self;
@@ -783,7 +789,7 @@ l_sockaddr_family(l_sockaddr* self)
 }
 
 L_EXTERN l_bool
-l_sockaddr_ipstr(l_sockaddr* self, void* out, l_int bfsz)
+l_sockaddr_getip(l_sockaddr* self, void* out, l_int bfsz)
 {
   /** inet_ntop - convert ipv4 and ipv6 addresses from binary to text form **
   #include <arpa/inet.h>
@@ -1425,7 +1431,7 @@ caused connection abort）。POSIX作出修正的理由在于，流子系统（s
 页到达处理，导致tcp_close被调用。*/
 
 L_EXTERN void
-l_socket_accept(l_socket* skt, void (*cb)(void*, l_socketconn*), void* ud)
+l_socket_accept(l_socket skt, void (*cb)(void*, l_socketconn*), void* ud)
 {
   int n = 0, sock = 0;
   l_socketconn conn;
@@ -1437,7 +1443,7 @@ l_socket_accept(l_socket* skt, void (*cb)(void*, l_socketconn*), void* ud)
 
   for (; ;) {
     sa->len = provided_len;
-    sock = accept(skt->unifd, &(sa->sa), &(sa->len));
+    sock = accept(skt.unifd, &(sa->sa), &(sa->len));
     if (sock != -1) {
       if (sa->len > provided_len) {
         l_loge_s(LNUL, "accept address truncated");
@@ -2560,7 +2566,7 @@ l_ioevmgr_del(l_ioevmgr* thiz, l_filehdl fd)
 }
 
 L_EXTERN int
-l_ioevmgr_timed_wait(l_ioevmgr* thiz, int ms, void (*cb)(l_ulong, l_umedit))
+l_ioevmgr_timed_wait(l_ioevmgr* thiz, int ms, void (*cb)(l_ulong, l_ushort))
 {
   l_epollmgr* mgr = (l_impl_ioevmgr*)thiz;
   struct epoll_event* pcur = 0;
@@ -2608,13 +2614,13 @@ l_ioevmgr_timed_wait(l_ioevmgr* thiz, int ms, void (*cb)(l_ulong, l_umedit))
 }
 
 L_EXTERN int
-l_ioevmgr_wait(l_iovemgr* thiz, void (*cb)(l_ulong, l_umedit))
+l_ioevmgr_wait(l_ioevmgr* thiz, void (*cb)(l_ulong, l_ushort))
 {
   return l_ioevmgr_timed_wait(thiz, -1, cb);
 }
 
 L_EXTERN int
-l_ioevmgr_try_wait(l_ioevmgr* thiz, void (*cb)(l_ulong, l_umedit))
+l_ioevmgr_try_wait(l_ioevmgr* thiz, void (*cb)(l_ulong, l_ushort))
 {
   return l_ioevmgr_timed_wait(thiz, 0, cb);
 }

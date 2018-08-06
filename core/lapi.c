@@ -66,7 +66,7 @@ ll_new_state()
   if (E == 0) {
     L = luaL_newstate();
   } else {
-    L = lua_newstate(l_malloc_func, E);
+    L = lua_newstate(l_alloc_func, E);
   }
 
   if (L == 0) {
@@ -217,7 +217,7 @@ ll_table_getn(lua_State* L, l_tableindex t, const void* name)
     return false;
   }
 
-  key_names = l_sbuf1k_from(&name_buf, l_strn_c(name));
+  key_names = l_sbuf1k_init_from(&name_buf, l_strn_c(name));
   if (l_strbuf_is_empty(key_names)) {
     l_loge_1(LNUL, "chained name too long or empty %d", ld(strlen((const char*)name)));
     return false;
