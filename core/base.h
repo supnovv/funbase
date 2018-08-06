@@ -586,7 +586,7 @@ L_INLINE l_strbuf* l_sbuf8k_p(l_sbuf8k* b) { return (l_strbuf*)b; }
 L_EXTERN l_ostream l_strbuf_ostream(l_strbuf* b);
 L_EXTERN l_int l_strbuf_write(l_strbuf* b, l_strn s);
 L_EXTERN l_int l_strbuf_reset(l_strbuf* b, l_strn s);
-L_EXTERN l_int l_strbuf_clear(l_strbuf* b);
+L_EXTERN void l_strbuf_clear(l_strbuf* b);
 L_EXTERN l_byte* l_strbuf_cstr(l_strbuf* b);
 L_EXTERN l_int l_strbuf_size(l_strbuf* b);
 L_EXTERN l_strn l_strbuf_strn(l_strbuf* b);
@@ -610,7 +610,7 @@ L_EXTERN l_ostream l_string_ostream(l_string* s);
 L_EXTERN l_int l_string_capacity(l_string* s);
 L_EXTERN l_int l_string_write(l_string* s, l_strn from);
 L_EXTERN l_int l_string_reset(l_string* s, l_strn from);
-L_EXTERN l_int l_string_clear(l_string* s);
+L_EXTERN void l_string_clear(l_string* s);
 
 L_INLINE l_byte*
 l_string_cstr(l_string* s)

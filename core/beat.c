@@ -48,12 +48,23 @@
 #define L_MSG_WORKER_EXIT_RSP    0x09
 #define L_MSG_SERVICE_EXIT_REQ   0x0a
 #define L_MSG_SERVICE_RESTART    0x0b
-#define L_MSG_SOCK_ACCEPT_IND    0x0c
-#define L_MSG_SOCK_CONNECTED     0x0d
-#define L_MSG_SOCK_DISCONNECTED  0x0e
-#define L_MSG_DATA_READY_TX      0x0f
-#define L_MSG_DATA_READY_RX      0x10
-#define L_MSG_SOCK_ERROR         0x11
+
+#define L_MSG_SOCK_ACCEPT_IND    0x10
+#define L_MSG_SOCK_CONNECT_IND   0x11
+#define L_MSG_SOCK_CONNECTED     0x12
+#define L_MSG_SOCK_DISCONNECTED  0x13
+#define L_MSG_DATA_READY_TX      0x14
+#define L_MSG_DATA_READY_RX      0x15
+#define L_MSG_SOCK_ERROR         0x16
+
+#define L_MSG_SOCK_CONN_NTF      0x20
+#define L_MSG_SOCK_DISC_REQ      0x21
+#define L_MSG_SOCK_DISC_NTF      0x22
+#define L_MSG_READ_DATA_IND      0x23
+#define L_MSG_READ_DATA_REQ      0x24
+#define L_MSG_READ_DATA_RSP      0x25
+#define L_MSG_WRITE_DATA_REQ     0x26
+#define L_MSG_WRITE_DATA_RSP     0x27
 
 typedef struct l_thread {
   l_thrhdl thrhdl;
@@ -214,7 +225,7 @@ static void l_send_message_impl(lnlylib_env* E, l_message* msg);
 static void l_send_lua_message(lnlylib_env* E, l_ulong dest_srvc, l_ulong dest_sess, l_umedit mgid, l_umedit mgid_cust, void* data, l_umedit size);
 static void l_message_free_data(lnlylib_env* E, l_message* msg);
 
-static l_service* l_master_create_service(l_master* M, l_umedit svid, l_service_create_para para, void* svud);
+static l_service* l_master_create_service(l_master* M, l_medit svid, l_service_create_para para, void* svud);
 static void l_master_stop_service(l_master* M, l_ulong srvc_id);
 static void l_master_destroy_service(l_master* M, l_ulong srvc_id);
 
@@ -582,8 +593,8 @@ l_master_init(int (*start)(lnlylib_env*), int argc, char** argv)
   main_env = M->E;
   main_env->M = M;
   main_env->T = &M->T;
-  main_env->LOG = &M->T.logout;
   main_env->ALLOC = M->T.thrd_alloc;
+  main_env->LOG = &M->T.logout;
 
   l_threadlocal_set(main_env);
 
@@ -632,11 +643,11 @@ l_master_init(int (*start)(lnlylib_env*), int argc, char** argv)
     worker->env.T = &worker->T;
     worker->env.S = 0;
     worker->env.MSG = 0;
-    worker->env.LOG = &worker->T.logout;
     worker->env.SVUD = 0;
     worker->env.ALLOC = worker->T.thrd_alloc;
     worker->env.CT = 0;
     worker->env.CO = 0;
+    worker->env.LOG = &worker->T.logout;
 
     work_node->worker = worker;
   }
@@ -932,7 +943,7 @@ l_master_loop(lnlylib_env* main_env)
     if (l_squeue_nt_empty(&svcq)) {
       l_mutex_lock(QLOCK);
       global_q_is_empty = l_squeue_is_empty(Q);
-      l_squeue_push_queue(Q, &svcq.node);
+      l_squeue_push_queue(Q, &svcq);
       l_mutex_unlock(QLOCK);
 
       if (global_q_is_empty) {
@@ -990,7 +1001,7 @@ l_master_loop(lnlylib_env* main_env)
         }}
         break;
       default:
-        l_loge_1(E, "unrecognized master message %d", ld(MSG->mssg_id));
+        l_loge_1(main_env, "unrecognized master message %d", ld(MSG->mssg_id));
         break;
       }
 
@@ -1113,7 +1124,7 @@ l_worker_loop(lnlylib_env* ENV)
       if (MSG->mssg_flags & L_MSSG_FLAG_DONT_FREE_MSSG) {
         MSG->mssg_flags &= (~L_MSSG_FLAG_DONT_FREE_MSSG);
       } else {
-        l_message_free_data(ENV, &MSG->node);
+        l_message_free_data(ENV, MSG);
         l_squeue_push(W->work_frmq, &MSG->node);
       }
     }
@@ -1201,18 +1212,11 @@ l_master_create_message(l_master* M, l_ulong dest_svid, l_umedit mgid, void* dat
   return msg;
 }
 
-static l_message*
-l_create_message(lnlylib_env* E, l_ulong dest_svid, l_umedit mgid, l_umedit flags, void* data, l_umedit size)
+static void
+l_message_reset(lnlylib_env* E, l_message* msg, l_ulong dest_svid, l_umedit mgid, l_umedit flags, void* data, l_umedit size)
 {
-  l_worker* W = (l_worker*)E->T;
   l_service* S = E->S;
-  l_message* msg = 0;
-  l_bool is_remote = 0;
-
-  msg = (l_message*)l_squeue_pop(W->work_frmq);
-  if (msg == 0) {
-    msg = L_MALLOC_TYPE(E, l_message);
-  }
+  l_message_free_data(E, msg);
 
   if (l_service_is_remote(dest_svid)) {
     msg->mssg_flags |= L_MSSG_FLAG_REMOTE_MSSG;
@@ -1237,7 +1241,7 @@ l_create_message(lnlylib_env* E, l_ulong dest_svid, l_umedit mgid, l_umedit flag
       msg->mssg_data = data;
       msg->mssg_flags |= L_MSSG_FLAG_FREE_MSSG_DATA;
     } else {
-      l_loge_2("move invalid message data %p %d", lp(data), ld(size));
+      l_loge_2(E, "move invalid message data %p %d", lp(data), ld(size));
       msg->data_size = 0;
       msg->mssg_data = 0;
     }
@@ -1248,7 +1252,7 @@ l_create_message(lnlylib_env* E, l_ulong dest_svid, l_umedit mgid, l_umedit flag
         msg->mssg_data = &msg->extra;
         l_copy_n(msg->mssg_data, data, size);
       } else {
-        l_logd_2("message data %d > %d", ld(size), ld(sizeof(l_msgdata)));
+        l_logd_2(E, "message data %d > %d", ld(size), ld(sizeof(l_msgdata)));
         msg->mssg_data = L_MALLOC(E, size);
         l_copy_n(msg->mssg_data, data, size);
         msg->mssg_flags |= L_MSSG_FLAG_FREE_MSSG_DATA;
@@ -1258,7 +1262,23 @@ l_create_message(lnlylib_env* E, l_ulong dest_svid, l_umedit mgid, l_umedit flag
       msg->mssg_data = 0;
     }
   }
+}
 
+static l_message*
+l_create_message(lnlylib_env* E, l_ulong dest_svid, l_umedit mgid, l_umedit flags, void* data, l_umedit size)
+{
+  l_worker* W = (l_worker*)E->T;
+  l_message* msg = 0;
+
+  msg = (l_message*)l_squeue_pop(W->work_frmq);
+  if (msg == 0) {
+    msg = L_MALLOC_TYPE(E, l_message);
+  }
+
+  msg->data_size = 0;
+  msg->mssg_data = 0;
+
+  l_message_reset(E, msg, dest_svid, mgid, flags, data, size);
   return msg;
 }
 
@@ -1267,11 +1287,7 @@ l_send_message_to_master(lnlylib_env* E, l_umedit mgid, void* data, l_umedit siz
 {
   l_message* msg = 0;
   l_worker* W = (l_worker*)E->T;
-
   msg = l_create_message(E, 0, mgid, 0, data, size);
-
-  l_assert(E, dest_svid != msg->from_srvc);
-  l_assert(E, l_service_nt_remote(dest_svid));
   l_squeue_push(W->work_txms, &msg->node);
 }
 
@@ -1323,7 +1339,7 @@ l_send_data_moved_message(lnlylib_env* E, l_ulong dest_svid, l_umedit mgid, void
   if (mgid < L_MIN_USER_MSG_ID) {
     l_loge_1(E, "invalid message id %d", ld(mgid));
   } else {
-    l_send_message_impl(E, l_create_message(E, dest_svid, mgid, L_MSSG_FLAG_MOVE_MSSG_DATA, data, size);
+    l_send_message_impl(E, l_create_message(E, dest_svid, mgid, L_MSSG_FLAG_MOVE_MSSG_DATA, data, size));
   }
 }
 
@@ -1608,33 +1624,38 @@ l_service_init(l_service* S, l_medit svid, l_umedit seed, l_service_callback* cb
 static void
 l_service_free_co(l_service* S)
 {
+  L_UNUSED(S);
 }
 
 static l_service_callback*
-l_master_load_service_module(const char* module)
+l_master_load_service_module(const void* module)
 {
+  L_UNUSED(module);
+  return 0;
+#if 0
   l_service_callback* cb = 0;
-  l_dynlib hdl = l_empty_dynlib();
+  l_dynhdl hdl = l_empty_dynlib();
 
-  hdl = l_dynlib_open2(l_const_strn(LNLYLIB_CLIB_DIR), module_name); /* TODO: 1. do module cache? 2. multiple service can exist in one module */
-  if (l_dynlib_is_empty(&hdl)) {
+  hdl = l_dynhdl_open2(l_const_strn(LNLYLIB_CLIB_DIR), module_name); /* TODO: 1. do module cache? 2. multiple service can exist in one module */
+  if (l_dynhdl_is_empty(&hdl)) {
     l_loge_1(LNUL, "open library %strn failed", lstrn(&module_name));
     return 0;
   }
 
-#if 0
-  cb.service_proc = (void (*)(lnlylib_env*))l_dynlib_sym2(&hdl, module_name, l_const_strn("service_proc"));
+/*
+  cb.service_proc = (void (*)(lnlylib_env*))l_dynhdl_sym2(&hdl, module_name, l_const_strn("service_proc"));
   if (cb.service_proc == 0) {
     l_loge_1("load %strn_service_proc failed", l_strn(&module_name));
     return 0;
   }
 
-  cb.service_on_create = (void* (*)(lnlylib_env*))l_dynlib_sym2(&hdl, module_name, l_const_strn("service_on_create"));
-  cb.service_on_destroy = (void (*)(lnlylib_env*))l_dynlib_sym2(&hdl, module_name, l_const_strn("service_on_destroy"));
-#endif
+  cb.service_on_create = (void* (*)(lnlylib_env*))l_dynhdl_sym2(&hdl, module_name, l_const_strn("service_on_create"));
+  cb.service_on_destroy = (void (*)(lnlylib_env*))l_dynhdl_sym2(&hdl, module_name, l_const_strn("service_on_destroy"));
+*/
 
-  cb = (l_service_callback*)l_dynlib_sym2(&hdl, module_name, l_const_strn("callback"));
+  cb = (l_service_callback*)l_dynhdl_sym2(&hdl, module_name, l_const_strn("callback"));
   return cb;
+#endif
 }
 
 static l_service*
@@ -1644,7 +1665,7 @@ l_master_create_service(l_master* M, l_medit svid, l_service_create_para para, v
   l_srvcslot* slot = 0;
   l_srvctable* stbl = 0;
   l_service_callback* cb = 0;
-  l_fildhdl ioev_hdl = L_EMPTY_HDL;
+  l_filehdl ioev_hdl = L_EMPTY_HDL;
   l_ushort flags = 0;
   l_ushort events = 0;
 
@@ -1659,8 +1680,8 @@ l_master_create_service(l_master* M, l_medit svid, l_service_create_para para, v
     return 0;
   }
 
-  if (para.ioev.enable) {
-    if (l_fildhdl_is_empty(para.hdl)) {
+  if (para.enable) {
+    if (l_filehdl_is_empty(&para.hdl)) {
       l_sockaddr sa;
       if (!para.ip || !para.port) {
         l_loge_s(M->E, "service create fail due to empty ip/port");
@@ -1734,7 +1755,7 @@ l_master_create_service(l_master* M, l_medit svid, l_service_create_para para, v
   S->ioev_hdl = ioev_hdl;
   S->ud = svud;
 
-  slot->service = service; /* dock the service to the table */
+  slot->service = S; /* dock the service to the table */
   slot->flags |= L_SRVC_FLAG_ALIVE | flags;
   slot->events |= events;
 
@@ -1747,7 +1768,7 @@ l_master_create_service(l_master* M, l_medit svid, l_service_create_para para, v
     slot->events = 0; /* clear and prepare to receive incoming events */
   }
 
-  return service;
+  return S;
 }
 
 L_EXTERN void
@@ -1775,8 +1796,8 @@ l_stop_service(lnlylib_env* E)
 static void
 l_master_stop_service(l_master* M, l_ulong srvc_id)
 {
-  l_srvctable* stbl = &M->stbl;
-  l_srvcslot* svc_slot = 0;
+  l_srvctable* stbl = M->stbl;
+  l_srvcslot* srvc_slot = 0;
   l_medit svid = l_service_get_slot_index(srvc_id);
 
   srvc_slot = stbl->slot_arr + svid;
@@ -1792,7 +1813,7 @@ l_master_stop_service(l_master* M, l_ulong srvc_id)
 static void
 l_master_destroy_service(l_master* M, l_ulong srvc_id)
 {
-  l_srvctable* stbl = &M->stbl;
+  l_srvctable* stbl = M->stbl;
   l_srvcslot* srvc_slot = 0;
   l_service* S = 0;
   l_message* srvc_msg = 0;
@@ -1838,6 +1859,34 @@ typedef struct {
   l_dqueue freeq;
 } l_socket_listen_svud;
 
+typedef struct {
+  l_uint s[128/sizeof(l_uint)];
+} l_ipaddr;
+
+typedef struct {
+  l_linknode node;
+  l_socket_listen_svud* listen_svud;
+  l_ulong listen_svid;
+  l_ulong upper_svid;
+  l_ipaddr rmt_ip;
+  l_ushort rmt_port;
+  l_squeue wrmq;
+  l_squeue rdmq;
+  l_umedit wrid;
+  l_umedit rdid;
+} l_socket_inconn_svud;
+
+static void* l_socket_inconn_service_on_create(lnlylib_env* E);
+static void l_socket_inconn_service_on_destroy(lnlylib_env* E);
+static void l_socket_inconn_service_proc(lnlylib_env* E);
+
+static l_service_callback
+l_socket_inconn_service_cb = {
+  l_socket_inconn_service_on_create,
+  l_socket_inconn_service_on_destroy,
+  l_socket_inconn_service_proc
+};
+
 static void*
 l_socket_listen_service_on_create(lnlylib_env* E)
 {
@@ -1877,13 +1926,13 @@ l_socket_listen_service_accept_conn(void* ud, l_socketconn* conn)
   }
 
   remote = &conn->remote;
-  inconn_svud.listen_srvc_data = data;
-  inconn_svud.listen_svid = E->S->srvc_id;
-  inconn_svud.upper_svid = 0;
-  inconn_svud.rmt_port = l_sockaddr_port(remote);
-  l_socketaddr_getip(remote, &inconn_svud.rmt_ip, sizeof(l_ipaddr));
+  inconn_svud->listen_svud = data;
+  inconn_svud->listen_svid = E->S->srvc_id;
+  inconn_svud->upper_svid = 0;
+  inconn_svud->rmt_port = l_sockaddr_port(remote);
+  l_sockaddr_getip(remote, &inconn_svud->rmt_ip, sizeof(l_ipaddr));
 
-  l_create_service(E, L_USEHDL_SERVICE(conn->sock, &l_socket_inconn_service_callback), inconn_svud);
+  l_create_service(E, L_USEHDL_SERVICE(conn->sock, &l_socket_inconn_service_cb), inconn_svud);
 }
 
 static void
@@ -1911,7 +1960,7 @@ l_socket_listen_service_proc(lnlylib_env* E)
       l_subsrvc_create_rsp* rsp = 0;
       rsp = (l_subsrvc_create_rsp*)E->MSG->mssg_data;
       if (rsp->succ) {
-        l_send_message(E, L_MSG_SOCK_CONNECTED, 0, rsp->svid, 0, 0, 0);
+        l_send_message(E, rsp->svid, L_MSG_SOCK_CONNECTED, 0, 0);
       } else {
         l_socket_inconn_svud* inconn_svud = 0;
         inconn_svud = (l_socket_inconn_svud*)rsp->svud;
@@ -1929,19 +1978,6 @@ l_socket_listen_service_proc(lnlylib_env* E)
 
 /** socket inconn service **/
 
-typedef struct {
-  l_linknode node;
-  l_socket_listen_svud* listen_svud;
-  l_ulong listen_svid;
-  l_ulong upper_svid;
-  l_ipaddr rmt_ip;
-  l_ushort rmt_port;
-  l_squeue wrmq;
-  l_squeue rdmq;
-  l_umedit wrid;
-  l_umedit rdid;
-} l_socket_inconn_svud;
-
 static void*
 l_socket_inconn_service_on_create(lnlylib_env* E)
 {
@@ -1949,6 +1985,12 @@ l_socket_inconn_service_on_create(lnlylib_env* E)
   svud = (l_socket_inconn_svud*)E->SVUD;
   l_create_service(E, L_SERVICE(svud->listen_svud->inconn_cb), 0);
   return 0;
+}
+
+static void
+l_socket_inconn_service_on_destroy(lnlylib_env* E)
+{
+  L_UNUSED(E);
 }
 
 static void
@@ -1999,10 +2041,10 @@ l_socket_inconn_service_proc(lnlylib_env* E)
   case L_MSG_SOCK_ERROR: /* send L_MSG_SOCK_DISC_NTF to upper */
     break;
   case L_MSG_DATA_READY_RX: /* read data and may send L_MSG_READ_DATA_RSP to upper */
-    if ((msg = l_squeue_top(&svud->rdmq))) {
+    if ((msg = (l_message*)l_squeue_top(&svud->rdmq))) {
       data = msg->mssg_data + msg->mgid_cust;
       size = msg->data_size - msg->mgid_cust;
-      done = l_data_read(svud->fd, data, size);
+      done = l_data_read(S->ioev_hdl, data, size);
       if (done == size) {
         l_squeue_pop(&svud->wrmq);
         /* TODO */
@@ -2012,14 +2054,13 @@ l_socket_inconn_service_proc(lnlylib_env* E)
     }
     break;
   case L_MSG_DATA_READY_TX: /* write data and may send L_MSG_WRITE_DATA_RSP to upper */
-    if ((msg = l_squeue_top(&svud->wrmq))) {
+    if ((msg = (l_message*)l_squeue_top(&svud->wrmq))) {
       data = msg->mssg_data + msg->mgid_cust;
       size = msg->data_size - msg->mgid_cust;
-      done = l_data_write(svud->fd, data, size);
+      done = l_data_write(S->ioev_hdl, data, size);
       if (done == size) {
         l_squeue_pop(&svud->wrmq);
-        l_message_free_data(msg);
-        l_message_init(msg, S->srvc_id, svud->up_srvc, L_MSG_WRITE_DATA_DONE, 0);
+        l_message_reset(E, msg, svud->upper_svid, L_MSG_WRITE_DATA_RSP, 0, 0, 0);
         msg->extra.a = ++svud->wrid;
         l_send_message_impl(E, msg);
       } else {
@@ -2065,14 +2106,15 @@ l_socket_outconn_service_proc(lnlylib_env* E)
   l_socket_outconn_svud* outconn = 0;
 
   outconn = (l_socket_outconn_svud*)E->SVUD;
+  L_UNUSED(outconn);
 
   switch (mgid) {
   case L_MSG_SOCK_CONNECT_IND:
-    if (l_socket_cmpl_connect(slot->iohdl)) {
+    if (l_socket_cmpl_connect(S->ioev_hdl)) {
       /* socket connected success */
-      l_send_message(E, L_MSG_DATA_READY_TX, 0, S->srvc_id, 0, 0, 0);
+      l_send_message(E, S->srvc_id, L_MSG_DATA_READY_TX, 0, 0);
     } else {
-      l_send_message(E, L_MSG_SOCK_DISCONNECTED, 0, S->srvc_id, 0, 0, 0);
+      l_send_message(E, S->srvc_id, L_MSG_SOCK_DISCONNECTED, 0, 0);
     }
     break;
   default:
@@ -2158,13 +2200,26 @@ l_copy_n(void* dest, const void* from, l_ulong size)
 
 /** debug and logging **/
 
-static void
-l_start_logging(lnlylib_env* E, const l_byte* tag)
+static int l_global_loglevel = 3;
+
+static l_ostream*
+l_start_logging(lnlylib_env* E, const l_byte* tag, l_ostream* temp_out)
 {
   l_ostream* out = 0;
-  int thridx = 0;
 
-  l_ostream_format_2(out, "%s %2x ", ls(tag), ld(thridx));
+  if (E == 0) {
+    E = l_get_lnlylib_env();
+  }
+
+  if (E == 0) {
+    *temp_out = l_stdout_ostream();
+    out = temp_out;
+    l_ostream_format_2(out, "%s %4x ", ls(tag), lx(9999));
+  } else {
+    out = E->LOG;
+    l_ostream_format_2(out, "%s %4x ", ls(tag), lx(E->T->thridx));
+  }
+
   return out;
 }
 
@@ -2175,14 +2230,15 @@ l_impl_logger_func(lnlylib_env* E, const void* tag, const void* fmt, ...)
 {
   int level = l_cstr(tag)[0] - '0';
   int nargs = l_cstr(tag)[1];
+  l_ostream temp_out;
   l_ostream* out = 0;
   va_list vl;
 
-  if (!fmt || level > l_cur_log_level()) {
+  if (!fmt || level > l_global_loglevel) {
     return;
   }
 
-  out = l_start_logging(E, l_cstr(tag) + 2);
+  out = l_start_logging(E, l_cstr(tag) + 2, &temp_out);
 
   if (nargs == 'n') {
     va_start(vl, fmt);
@@ -3001,13 +3057,11 @@ l_strbuf_write(l_strbuf* b, l_strn s)
   return l_impl_strbuf_write(b, s.p, s.n);
 }
 
-L_EXTERN l_int
+L_EXTERN void
 l_strbuf_clear(l_strbuf* b)
 {
-  l_int n = b->n;
   b->n = 0;
   b->s[0] = 0;
-  return n;
 }
 
 L_EXTERN l_int
@@ -3034,6 +3088,7 @@ l_strbuf_add_path(l_strbuf* b, l_strn path)
 {
   L_UNUSED(b);
   L_UNUSED(path);
+  return 0;
 }
 
 L_EXTERN l_int
@@ -3041,6 +3096,7 @@ l_strbuf_end_path(l_strbuf* b, l_strn filename)
 {
   L_UNUSED(b);
   L_UNUSED(filename);
+  return 0;
 }
 
 #if 0
@@ -3356,20 +3412,21 @@ l_string_init(l_allocfunc alloc, l_int size)
 {
   l_string s = {l_rawalloc_func, 0, 0, 0};
   if (alloc) {
-    s->alloc = alloc;
+    s.alloc = alloc;
   }
-  if (size > L_STRING_FIXLEN_CAP) {
+  if (size > (l_int)L_STRING_FIXLEN_CAP) {
     l_byte* newp = 0;
     l_int capacity = (L_STRING_FIXLEN_CAP + 1) * 2 - 1;
     if (size > capacity) {
       capacity = size;
     }
-    newp = s->alloc(0, 0, 0, capacity + 1);
+    newp = s.alloc(0, 0, 0, capacity + 1);
     newp[0] = 0;
-    s->implsz = 0;
-    s->impltt = capacity;
-    s->lnstr = newp;
-  } 
+    s.implsz = 0;
+    s.impltt = capacity;
+    s.lnstr = newp;
+  }
+  return s;
 }
 
 static l_int
@@ -3383,7 +3440,7 @@ l_impl_string_write(void* out, const void* p, l_int len)
     l_byte* oldp = l_string_cstr(s);
     if (size <= 0) {
       size = -size;
-      if (size + len <= L_STRING_FIXLEN_CAP) {
+      if (size + len <= (l_int)L_STRING_FIXLEN_CAP) {
         l_copy_n(oldp + size, p, len);
         size += len;
         oldp[size] = 0;

@@ -15,9 +15,9 @@ typedef struct lnlylib_env {
   struct l_thread* T;
   struct l_service* S;
   struct l_message* MSG;
-  l_ostream* LOG;
   void* SVUD;
   void* ALLOC;
+  l_ostream* LOG;
   struct l_corotable* CT;
   struct l_coroutine* CO;
 } lnlylib_env;
@@ -69,7 +69,7 @@ L_EXTERN void* l_service_data(struct l_service* S);
 L_EXTERN l_ulong l_get_svid(lnlylib_env* E);
 L_EXTERN void* l_get_svud(lnlylib_env* E);
 
-L_EXTERN int lnlylib_main(void (*start)(lnlylib_env*), int argc, char** argv);
+L_EXTERN int lnlylib_main(int (*start)(lnlylib_env*), int argc, char** argv);
 
 #endif /* LNLYLIB_CORE_BEAT_H */
 

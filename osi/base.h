@@ -192,6 +192,8 @@ L_DEFINE_STRUCT_OF_SIZE(l_sockaddr, L_IMPL_SOCKADDR_TYPE_SIZE);
 L_DEFINE_STRUCT_OF_SIZE(l_ioevmgr, L_IMPL_IOEVMGR_TYPE_SIZE);
 
 typedef l_filehdl l_socket;
+#define l_socket_is_empty l_filehdl_is_empty
+#define l_socket_nt_empty l_filehdl_nt_empty
 
 typedef struct {
   l_socket sock;
