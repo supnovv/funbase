@@ -136,7 +136,7 @@ l_impl_dynhdl_open(l_strn fullname)
     l_dynhdl hdl;
     char* errmsg = 0;
     dlerror(); /* clear old error */
-    hdl.impl = dlopen(fullname.p, RTLD_NOW);
+    hdl.impl = dlopen((const char*)fullname.p, RTLD_NOW);
     if (hdl.impl == 0 && (errmsg = dlerror())) { /* if the library file is not exist, it is no error just return 0 */
       l_loge_1(LNUL, "dlopen %s", ls(errmsg));
     }
@@ -149,11 +149,13 @@ l_impl_dynhdl_open(l_strn fullname)
 L_EXTERN l_dynhdl
 l_dynhdl_open(l_strn name)
 {
-  l_filename fn;
-  l_filename_init(&fn);
+  l_sbuf4k name_buf;
+  l_strbuf* name_str = 0;
 
-  if (l_filename_addname(&fn, name, l_const_strn(".so"))) {
-    return l_impl_dynhdl_open(l_filename_strn(&fn));
+  name_str = l_sbuf4k_init_from(&name_buf, name);
+
+  if (l_strbuf_write(name_str, L_STR(".so")) > 0) {
+    return l_impl_dynhdl_open(l_strbuf_strn(name_str));
   } else {
     return l_empty_dynhdl();
   }
@@ -162,19 +164,21 @@ l_dynhdl_open(l_strn name)
 L_EXTERN l_dynhdl
 l_dynhdl_open_from(l_strn path, l_strn lib_name)
 {
-  l_filename fn;
-  l_filename_init(&fn);
+  l_sbuf4k buffer;
+  l_strbuf* name = 0;
 
   /** void* dlopen(const char *filename, int flags) **
   If filename is NULL, then the returned handle is for the main
   program. If filename contains a slash ("/"), then it is interpreted
   as a (relative or absolute) pathname. Otherwise, the dynamic linker
-  searches for the object. The fn.s is not NULL, and l_filename_addpath
+  searches for the object. The fn.s is not NULL, and l_strbuf_add_path
   add the path separator "/" automatically, therefore dlopen here only
   lookup in the folder specified. **/
 
-  if (l_filename_addpath(&fn, path) && l_filename_addname(&fn, lib_name, l_const_strn(".so"))) {
-    return l_impl_dynhdl_open(l_strn_l(fn.s, fn.name_len));
+  name = l_sbuf4k_init(&buffer);
+
+  if (l_strbuf_add_path(name, path) > 0 && l_strbuf_end_path_x(name, lib_name, L_STR(".so"))) {
+    return l_impl_dynhdl_open(l_strbuf_strn(name));
   } else {
     return l_empty_dynhdl();
   }
