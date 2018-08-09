@@ -83,7 +83,7 @@ typedef struct {
 #define L_EMPTY_STR l_empty_strn()
 
 L_EXTERN l_bool l_strn_equal(const l_strn* a, l_strn b);
-L_EXTERN l_bool l_strn_has(l_strn a, l_byte c);
+L_EXTERN l_bool l_strn_has(const l_strn* a, l_byte c);
 
 L_INLINE l_bool
 l_strn_nt_empty(const l_strn* s)
@@ -193,10 +193,10 @@ L_EXTERN l_ulong l_copy_n(void* dest, const void* from, l_ulong size);
 #undef l_logd_8
 #undef l_logd_9
 
-#define l_impl_assert_pass(E,expr) l_impl_logger_func(E, "41[D] " L_FILE_LINE, "assert pass: %s", ls(expr))
-#define l_impl_assert_fail(E,expr) l_impl_logger_func(E, "01[E] " L_FILE_LINE, "assert fail: %s", ls(expr))
+#define l_impl_assert_pass(E,expr) l_impl_logger_func(E, "51[V] " L_FILE_LINE, "assert pass: %s", ls(expr))
+#define l_impl_assert_fail(E,expr) l_impl_logger_func(E, "01[F] " L_FILE_LINE, "assert fail: %s", ls(expr))
 
-#define l_assert(E,e) ((e) ? l_impl_assert_pass(E, #e) : l_impl_assert_fail(E, #e)) /* 0:assert */
+#define l_assert(E,e) ((e) ? l_impl_assert_pass(E, #e) : l_impl_assert_fail(E, #e)) /* 0:assert or fatal */
 #define l_loge_s(E,s)                   l_impl_logger_s(E, "10[E] " L_FILE_LINE, (s)) /* 1:error */
 #define l_loge_1(E,fmt,a)               l_impl_logger_1(E, "11[E] " L_FILE_LINE, (fmt), a)
 #define l_loge_n(E,fmt,n,a)             l_impl_logger_n(E, "1n[E] " L_FILE_LINE, (fmt), n,a)
@@ -219,17 +219,17 @@ L_EXTERN l_ulong l_copy_n(void* dest, const void* from, l_ulong size);
 #define l_logw_7(E,fmt,a,b,c,d,e,f,g)   l_impl_logger_7(E, "27[W] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g)
 #define l_logw_8(E,fmt,a,b,c,d,e,f,g,h) l_impl_logger_8(E, "28[W] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g,h)
 #define l_logw_9(E,t,a,b,c,d,e,f,g,h,i) l_impl_logger_9(E, "29[W] " L_FILE_LINE, (t), a,b,c,d,e,f,g,h,i)
-#define l_logm_s(E,s)                   l_impl_logger_s(E, "30[L] " L_FILE_LINE, (s)) /* 3:main flow */
-#define l_logm_1(E,fmt,a)               l_impl_logger_1(E, "31[L] " L_FILE_LINE, (fmt), a)
-#define l_logm_n(E,fmt,n,a)             l_impl_logger_n(E, "3n[L] " L_FILE_LINE, (fmt), n,a)
-#define l_logm_2(E,fmt,a,b)             l_impl_logger_2(E, "32[L] " L_FILE_LINE, (fmt), a,b)
-#define l_logm_3(E,fmt,a,b,c)           l_impl_logger_3(E, "33[L] " L_FILE_LINE, (fmt), a,b,c)
-#define l_logm_4(E,fmt,a,b,c,d)         l_impl_logger_4(E, "34[L] " L_FILE_LINE, (fmt), a,b,c,d)
-#define l_logm_5(E,fmt,a,b,c,d,e)       l_impl_logger_5(E, "35[L] " L_FILE_LINE, (fmt), a,b,c,d,e)
-#define l_logm_6(E,fmt,a,b,c,d,e,f)     l_impl_logger_6(E, "36[L] " L_FILE_LINE, (fmt), a,b,c,d,e,f)
-#define l_logm_7(E,fmt,a,b,c,d,e,f,g)   l_impl_logger_7(E, "37[L] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g)
-#define l_logm_8(E,fmt,a,b,c,d,e,f,g,h) l_impl_logger_8(E, "38[L] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g,h)
-#define l_logm_9(E,t,a,b,c,d,e,f,g,h,i) l_impl_logger_9(E, "39[L] " L_FILE_LINE, (t), a,b,c,d,e,f,g,h,i)
+#define l_logm_s(E,s)                   l_impl_logger_s(E, "30[m] " L_FILE_LINE, (s)) /* 3:main flow */
+#define l_logm_1(E,fmt,a)               l_impl_logger_1(E, "31[m] " L_FILE_LINE, (fmt), a)
+#define l_logm_n(E,fmt,n,a)             l_impl_logger_n(E, "3n[m] " L_FILE_LINE, (fmt), n,a)
+#define l_logm_2(E,fmt,a,b)             l_impl_logger_2(E, "32[m] " L_FILE_LINE, (fmt), a,b)
+#define l_logm_3(E,fmt,a,b,c)           l_impl_logger_3(E, "33[m] " L_FILE_LINE, (fmt), a,b,c)
+#define l_logm_4(E,fmt,a,b,c,d)         l_impl_logger_4(E, "34[m] " L_FILE_LINE, (fmt), a,b,c,d)
+#define l_logm_5(E,fmt,a,b,c,d,e)       l_impl_logger_5(E, "35[m] " L_FILE_LINE, (fmt), a,b,c,d,e)
+#define l_logm_6(E,fmt,a,b,c,d,e,f)     l_impl_logger_6(E, "36[m] " L_FILE_LINE, (fmt), a,b,c,d,e,f)
+#define l_logm_7(E,fmt,a,b,c,d,e,f,g)   l_impl_logger_7(E, "37[m] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g)
+#define l_logm_8(E,fmt,a,b,c,d,e,f,g,h) l_impl_logger_8(E, "38[m] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g,h)
+#define l_logm_9(E,t,a,b,c,d,e,f,g,h,i) l_impl_logger_9(E, "39[m] " L_FILE_LINE, (t), a,b,c,d,e,f,g,h,i)
 #define l_logd_s(E,s)                   l_impl_logger_s(E, "40[D] " L_FILE_LINE, (s)) /* 4:debug log */
 #define l_logd_1(E,fmt,a)               l_impl_logger_1(E, "41[D] " L_FILE_LINE, (fmt), a)
 #define l_logd_n(E,fmt,n,a)             l_impl_logger_n(E, "4n[D] " L_FILE_LINE, (fmt), n,a)
@@ -241,6 +241,17 @@ L_EXTERN l_ulong l_copy_n(void* dest, const void* from, l_ulong size);
 #define l_logd_7(E,fmt,a,b,c,d,e,f,g)   l_impl_logger_7(E, "47[D] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g)
 #define l_logd_8(E,fmt,a,b,c,d,e,f,g,h) l_impl_logger_8(E, "48[D] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g,h)
 #define l_logd_9(E,t,a,b,c,d,e,f,g,h,i) l_impl_logger_9(E, "49[D] " L_FILE_LINE, (t), a,b,c,d,e,f,g,h,i)
+#define l_logv_s(E,s)                   l_impl_logger_s(E, "50[V] " L_FILE_LINE, (s)) /* 5:verbose */
+#define l_logv_1(E,fmt,a)               l_impl_logger_1(E, "51[V] " L_FILE_LINE, (fmt), a)
+#define l_logv_n(E,fmt,n,a)             l_impl_logger_n(E, "5n[V] " L_FILE_LINE, (fmt), n,a)
+#define l_logv_2(E,fmt,a,b)             l_impl_logger_2(E, "52[V] " L_FILE_LINE, (fmt), a,b)
+#define l_logv_3(E,fmt,a,b,c)           l_impl_logger_3(E, "53[V] " L_FILE_LINE, (fmt), a,b,c)
+#define l_logv_4(E,fmt,a,b,c,d)         l_impl_logger_4(E, "54[V] " L_FILE_LINE, (fmt), a,b,c,d)
+#define l_logv_5(E,fmt,a,b,c,d,e)       l_impl_logger_5(E, "55[V] " L_FILE_LINE, (fmt), a,b,c,d,e)
+#define l_logv_6(E,fmt,a,b,c,d,e,f)     l_impl_logger_6(E, "56[V] " L_FILE_LINE, (fmt), a,b,c,d,e,f)
+#define l_logv_7(E,fmt,a,b,c,d,e,f,g)   l_impl_logger_7(E, "57[V] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g)
+#define l_logv_8(E,fmt,a,b,c,d,e,f,g,h) l_impl_logger_8(E, "58[V] " L_FILE_LINE, (fmt), a,b,c,d,e,f,g,h)
+#define l_logv_9(E,t,a,b,c,d,e,f,g,h,i) l_impl_logger_9(E, "59[V] " L_FILE_LINE, (t), a,b,c,d,e,f,g,h,i)
 
 #undef ls
 #undef lc
@@ -587,8 +598,12 @@ L_EXTERN l_ostream l_strbuf_ostream(l_strbuf* b);
 L_EXTERN l_int l_strbuf_write(l_strbuf* b, l_strn s);
 L_EXTERN l_int l_strbuf_reset(l_strbuf* b, l_strn s);
 L_EXTERN void l_strbuf_clear(l_strbuf* b);
-L_EXTERN l_byte* l_strbuf_cstr(l_strbuf* b);
+L_EXTERN const l_byte* l_strbuf_cstr(l_strbuf* b);
 L_EXTERN l_int l_strbuf_size(l_strbuf* b);
+L_EXTERN l_int l_strbuf_capacity(l_strbuf* b);
+L_EXTERN l_byte* l_strbuf_getp(l_strbuf* b);
+L_EXTERN void l_strbuf_add_len(l_strbuf* b, l_int n);
+L_EXTERN void l_strbuf_adjust_len(l_strbuf* b);
 L_EXTERN l_strn l_strbuf_strn(l_strbuf* b);
 L_EXTERN l_bool l_strbuf_is_empty(l_strbuf* b);
 L_EXTERN l_bool l_strbuf_nt_empty(l_strbuf* b);

@@ -223,7 +223,7 @@ ll_table_getn(lua_State* L, l_tableindex t, const void* name)
     return false;
   }
 
-  key = key_end = l_strbuf_cstr(key_names);
+  key = key_end = l_strbuf_getp(key_names);
 
   for (; ;) {
     while (*key_end) {

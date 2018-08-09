@@ -2,7 +2,503 @@
 #include "osi/lnxdefs.h"
 #include "osi/base.h"
 
-/** Open shared object and resolve symbols **
+/** The software clock, HZ, and jiffies **
+The accuracy of various time related system calls is limited
+by the resolution of the software clock, a clock maintained
+by the kernel which measures time in jiffies. The size of a
+jiffy is determined by the value of the kernel constant HZ.
+The value of HZ varies across kernel versions and hardware
+platforms. On i386 the situation is as follows: on kernels up
+to and including 2.4.x, HZ was 100, giving a jiffy value of
+0.01 seconds; starting with 2.6.0, HZ was raised to 1000,
+giving a jiffy of 0.001 seconds. Since kernel 2.6.13, the HZ
+value is a kernel configuration parameter and can be 100, 250
+(the default) or 1000. Since kernel 2.6.20, a further frequency
+is available: 300, a number that divides evently for the common
+video frame rates (PAL, 25HZ; NTSC, 30HZ).
+ ** High-resolution timers **
+Before Linux 2.6.21, the accuraccy of timer and sleep system
+calls was limited by the size of the jiffy.
+Since Linux 2.6.21, Linux supports high-resolution timers (HRTs),
+optionally configuration via CONFIG_HIGH_RES_TIMERS. On a system
+that supports HRTs, the accuracy of sleep and timer system calls
+is *no longer* constrained by the jiffy, but instead can be as
+accurate as the hardware allows (microsecond accuracy is typical
+of modern hardware). You can determine whether high-resolution
+timers are supported by checking the resolution returned by a call
+to clock_getres() or looking at the "resolution" entries in
+/proc/timer_list.
+HRTs are not supported on all hardware architectures. (Support is
+provided on x86, arm, and powerpc, among others.)
+ ** The Epoch and calendar time **
+UNIX systems represent time in seconds since the Epoch, 1970/01/01
+00:00:00 +0000 (UTC). A program can determine the calendar time
+using gettimeofday(), which returns time (in seconds and microseconds)
+that have elapsed since the Epoch; time() provides similar information,
+but only with accuracy to the nearest second.
+// Epoch in microseconds since 1970/01/01 00:00:00.
+static const uint64_t EPOCH_DELTA = 0x00dcddb30f2f8000ULL;
+在32位Linux系统中，time_t是一个有符号整数，可以表示的日期范围从
+1901年12月13日20时45分52秒至2038年1月19日03:14:07（SUSv3未定义
+time_t值为负值的含义）。因此当前许多32位UNIX系统都面临一个2038
+年的理论问题，如果执行的计算涉及未来日期，那么问题会在2038年之前
+就会遭遇。事实上，到了2038年可能所有UNIX系统都早已升级为64位或更
+高位系统，这一问题也随之缓解。但32为嵌入式系统，由于其寿命较之台
+式机硬件更长，故而仍然会受此问题困扰。此外对于依然以32位time_t格
+式保存时间的历史数据和应用程序，仍然是一个问题。
+ ** Sleeping, timer and timer slack **
+Various system calls and functions (nanosleep, clock_nanosleep, sleep)
+allow a program to sleep for a specified period of time. And various
+system calls (alarm, getitimer, timerfd_create, timer_create) allow a
+process to set a timer that expires at some point in the future, and
+optionally at repeated intervals.
+Since Linux 2.6.28, it is possible to control the "timer slack" value
+for a thread. The timer slack is the length of time by which the kernel
+may delay the wake-up of certain system calls that block with a timeout.
+Permitting this delay allows the kernel to coalesce wake-up events, thus
+possibly reducing the number of system wake-ups and saving power. For
+more description of PR_SET_TIMERSLACK in prctl().
+ ** Clock function on MAC OSX **
+The function clock_gettime() is not available on OSX. The mach kernel
+provides three clocks: SYSTEM_CLOCK returns the time since boot time,
+CALENDAR_CLOCK returns the UTC time since 1970/01/01, REALTIME_CLOCK is
+deprecated and is the same as SYSTEM_CLOCK in its current implementation.
+The documentation for clock_get_time() on OSX says the clocks are
+monotonically incrementing unless someone calls clock_set_time(). Calls
+to clock_set_time() are discouraged as it could break the monotonic
+property of the clocks, and in fact, the current implementation returns
+KERN_FAILURE without doing anything.
+stackoverflow.com/questions/11680461/monotonic-clock-on-osx
+opensource.apple.com/source/xnu/xnu-344.2/osfmk/mach/clock_types.h
+#include <mach/clock.h>
+#include <mach/mach.h>
+clock_serv_t cclock;
+mach_timespec_t mts;
+host_get_clock_service(mach_host_self(), SYSTEM_CLOCK, &cclock);
+clock_get_time(cclock, &mts);
+mach_port_deallocate(mach_task_self(), cclock); **/
+
+static l_time
+l_impl_get_time(clockid_t id)
+{
+  l_time time = {0};
+  struct timespec spec = {0};
+
+  if (clock_gettime(id, &spec) != 0) {
+    l_loge_2("clock_gettime %d %s", ld(id), lserror(errno));
+    return time;
+  }
+
+  time.sec = (l_long)spec.tv_sec;
+  time.nsec = (l_umedit)spec.tv_nsec;
+  time.zone = 0;
+
+  return time;
+}
+
+L_EXTERN l_time
+l_system_time()
+{
+  return l_impl_get_time(CLOCK_REALTIME);
+}
+
+L_EXTERN l_time
+l_mono_time()
+{
+  /** clock_gettime **
+  #include <sys/time.h>
+  int clock_gettime(clockid_t id, struct timespec* out);
+  @CLOCK_REALTIME时clock_gettime提供了与time函数相同的功能，不
+  过当系统支持高精度时间时，clock_gettime返回精度更高的实时系统时间；
+  System-wide clock that measures real (i.e., wall-clock) time.
+  Setting this clock requires appropriate privilege. This clock is
+  affected by discontinuous jumps in the system time (e.g., if the
+  system adaministrator manually changes the clock), and by the
+  incremental adjustments performed by adjtime and NTP.
+  @CLOCK_MONOTONIC cannot be set and represents monotonic time
+  since some unspecified starting point. This clock is not
+  affected by discontinuous jumps in the system time, but is
+  affected by the incremental adjustments performed by adjtime
+  and NTP.
+  @CLOCK_BOOTTIME (since Linux 2.6.39, Linux-specific) is
+  identical to CLOCK_MONOTONIC, except it also includes any time
+  that the system is suspended. This allows applications to get
+  a suspend-aware monotonic clock without having to deal with
+  the complications of CLOCK_REALTIME, which may have discontinuities
+  if the time is changed using settimeofday or similar.
+  @@OSX doesn't support this function */
+
+  clockid_t id;
+
+#if defined(CLOCK_BOOTTIME)
+  id = CLOCK_BOOTTIME;
+#else
+  id = CLOCK_MONOTONIC;
+#endif
+
+  return l_impl_get_time(id);
+}
+
+L_EXTERN l_date
+l_system_date()
+{
+  return l_date_from_time(l_system_time());
+}
+
+L_EXTERN l_date
+l_date_from_secs(l_long utcsecs)
+{
+  struct tm st;
+  l_date date = {0};
+  time_t secs = utcsecs;
+  l_zero_n(&st, sizeof(struct tm));
+
+  /* struct tm* gmtime_r(const time_t* secs, struct tm* out);
+  The function converts the time secs to broken-down time representation,
+  expressed in Coordinated Universal Time (UTC), i.e. since Epoch.
+  EPOCH_DELTA = 0x00dcddb30f2f8000; ms since 0000/01/01 to 1970-01-01 00:00:00 +0000
+  struct tm {
+    int tm_sec;    // Seconds (0-60)
+    int tm_min;    // Minutes (0-59)
+    int tm_hour;   // Hours (0-23)
+    int tm_mday;   // Day of the month (1-31)
+    int tm_mon;    // Month (0-11)
+    int tm_year;   // Year - 1900
+    int tm_wday;   // Day of the week (0-6, Sunday = 0)
+    int tm_yday;   // Day in the year (0-365, 1 Jan = 0)
+    int tm_isdst;  // Daylight saving time
+  }; */
+
+  if (gmtime_r(&secs, &st) != &st) { /* gmtime_r needs _POSIX_C_SOURCE >= 1 */
+    l_loge_1("gmtime_r %s", lserror(errno));
+    return date;
+  }
+
+  /* Single UNIX Specification 的以前版本允许双闰秒，于是tm_sec值的有效范围是
+  0到61。但是UTC的正式定义不允许双闰秒，所以现在tm_sec值的有效范围是0到60。*/
+
+  date.yhms = ((l_long)(st.tm_year + 1900) << 17); /* tm_year - number of years since 1900 */
+  date.yhms |= ((((l_long)st.tm_hour) & 0x1f) << 12); /* tm_hour - from 0 to 23 */
+  date.yhms |= ((((l_long)st.tm_min) & 0x3f) << 6); /* tm_min - from 0 to 59 */
+  date.yhms |= (((l_long)st.tm_sec) & 0x3f); /* tm_sec - from 0 to 60, 60 can be leap second */
+
+  /* in many implementations, including glibc, a 0 in tm_mday is
+  interpreted as meaning the last day of the preceding month.
+  这里的意思是，在将分解结构tm转换成time_t时（例如mktime），如果将
+  tm_mday设为0则表示当前天数是前一个月的最后一天 */
+
+  date.rest = ((((l_long)(0)) & 0x1f) << 21); /* timezone */
+  date.rest |= ((((l_long)(st.tm_yday + 1)) & 0x1ff) << 12); /* tm_yday - from 0 to 365 */
+  date.rest |= ((((l_long)(st.tm_wday)) & 0x07) << 9); /* tm_wday - from 0 to 6, 0 is Sunday */
+  date.rest |= ((((l_long)(st.tm_mon + 1)) & 0x0f) << 5); /* tm_mon - from 0 to 11 */
+  date.rest |= (((l_long)(st.tm_mday)) & 0x1f); /* tm_mday - from 1 to 31 */
+
+  if (st.tm_isdst != 0) {
+    /* daylight saving time is in effect. gmtime_r将时间转换成协调统一时间的分解
+    结构，不会像localtime_r那样考虑本地时区和夏令时，该值应该在此处无效.
+    A flag that indicates whether daylight saving time is in
+    effect at the time described.  The value is positive if
+    daylight saving time is in effect, zero if it is not, and
+    negative if the information is not available. */
+    l_logw_s("gmtime_r invalid tm_isdst");
+  }
+
+  return date;
+}
+
+static l_strn l_weekday_abbr[] = {
+  L_STR("Sun"), L_STR("Mon"), L_STR("Tue"), L_STR("Wed"),
+  L_STR("Thu"), L_STR("Fri"), L_STR("Sat"), L_STR("Sun")
+};
+
+static l_strn l_month_abbr[] = {
+  L_STR("Nul"), L_STR("Jan"), L_STR("Feb"), L_STR("Mar"), L_STR("Apr"), L_STR("May"), L_STR("Jun"),
+  L_STR("Jul"), L_STR("Aug"), L_STR("Sep"), L_STR("Oct"), L_STR("Nov"), L_STR("Dec")
+};
+
+L_EXTERN l_medit
+l_utcsec_offset()
+{
+  /** struct tm* localtime_r(const time_t* timep, struct tm* result); **
+  Take utc time seconds, convert it to local time structure **/
+
+#if defined(ANDROID) || defined(L_PLAT_BSD)
+  time_t t = time(0);
+  struct tm local;
+
+  if (localtime_r(&t, &local) != &local) {
+    l_loge_1("localtime_r %s", lserror(errno));
+    return 0;
+  }
+
+  if (st.tm_isdst != 0) {
+    /* daylight saving time is in effect. gmtime_r将时间转换成协调统一时间的分解
+    结构，不会像localtime_r那样考虑本地时区和夏令时，该值应该在此处无效.
+    A flag that indicates whether daylight saving time is in
+    effect at the time described.  The value is positive if
+    daylight saving time is in effect, zero if it is not, and
+    negative if the information is not available. */
+    l_logw_s("localtime_r invalid tm_isdst");
+  }
+
+  /* long tm_gmtoff; // offset from UTC in seconds
+  The field tm_gmtoff is the offset (in seconds) of the time represented
+  from UTC, with positive values indicating locations east of the Prime
+  Meridian. */
+
+  return (l_medit)local.tm_gmtoff;
+#else
+  l_medit offset = 0;
+  time_t utcsecs = 24 * 3600; /* 1970-01-02 00:00:00 +0000 */
+  struct tm local;
+
+  if (localtime_r(&utcsecs, &local) != &local) {
+    l_loge_1("localtime_r %s", lserror(errno));
+    return 0;
+  }
+
+  if (st.tm_isdst != 0) {
+    /* daylight saving time is in effect. gmtime_r将时间转换成协调统一时间的分解
+    结构，不会像localtime_r那样考虑本地时区和夏令时，该值应该在此处无效.
+    A flag that indicates whether daylight saving time is in
+    effect at the time described.  The value is positive if
+    daylight saving time is in effect, zero if it is not, and
+    negative if the information is not available. */
+    l_logw_s("localtime_r invalid tm_isdst");
+  }
+
+  offset = (l_medit)(local.tm_hour * 3600 + local.tm_min * 60 + local.tm_sec);
+  if (local.tm_mday < 2) {
+    offset -= 24 * 3600;
+  }
+
+  return offset;
+#endif
+}
+
+L_EXTERN l_date
+l_date_from_time(l_time utctime)
+{
+  l_date date = l_date_from_secs(utctime.sec);
+  date.nsec = utctime.nsec;
+  return date;
+}
+
+/** file operations **/
+
+L_EXTERN l_bool
+l_file_exist(const void* name)
+{
+  /** access, faccessat - check user's permission for a file **
+  #include <fcntl.h>
+  #include <unistd.h>
+  int access(const char* pathname, int mode);
+  int faccessat(int dirfd, const char* pathname, int mode, int flags);
+  ---
+  The mode specifies the accessibility checks to be performed,
+  and is either the value F_OK,
+  or a mask consisting of the bitwise OR of one or more of R_OK, W_OK, and X_OK.
+  F_OK tests for the existence of the file.
+  R_OK, W_OK, and X_OK test whether the file exists and grants read, write,
+  and execute permission, resectively.
+  The faccessat() system call operates in exactly the same way as access(),
+  except for the differences described here.
+  If the patchname given is relative, then it is interpreted relateve to the
+  directory referred to by the file descriptor dirfd.
+  If the pathname is related, and dirfd is the special value AT_FDCWD,
+  then pathname is related to the current working directory like access().
+  If pathname is absolute, then dirfd is ignored.
+  The flags is constructed by OR togother zero of more following values:
+  AT_EACCESS - perform access checks using the effective user and group IDs,
+  by default, faccessat() uses the calling process's real user and group IDs
+  like access(). In other words, AT_EACCESS answers the "can I read/write/exe
+  this file?". Without AT_EACCESS, it answers a slightly different question:
+  "(assuming I'm a setuid binary) can the user who invoked me read/write/exe this
+  file?", which gives set-user-ID programs the possibility to prevent malicious
+  users from causing them to read files which users shouldn't be able to read.
+  AT_SYMLINK_NOFOLLOW - if pathname is a symbolic link, do not dereference it;
+  instead return information about the link itself.
+  On success, zero is returned; on error, -1 is returned and errno is set. **/
+
+  return (name && faccessat(AT_FDCWD, (const char*)name, F_OK, AT_SYMLINK_NOFOLLOW) == 0);
+}
+
+L_EXTERN l_bool
+l_file_exist_in(l_filehdl* dir, const void* name)
+{
+  if (l_filehdl_is_empty(dir) || name == 0) {
+    return false;
+  } else {
+    return (faccessat(dir->fd, (const char*)name, F_OK, AT_SYMLINK_NOFOLLOW) == 0);
+  }
+}
+
+L_EXTERN l_bool
+l_file_attr(l_fileattr* attr, const void* name)
+{
+  struct stat st;
+  if (lstat((const char*)name, &st) != 0) return false;
+  attr->size = (l_long)st.st_size;
+  attr->ctime = (l_long)st.st_ctime;
+  attr->atime = (l_long)st.st_atime;
+  attr->mtime = (l_long)st.st_mtime;
+  attr->isfile = (l_byte)(S_ISREG(st.st_mode) != 0);
+  attr->isdir = (l_byte)(S_ISDIR(st.st_mode) != 0);
+  attr->islink = (l_byte)(S_ISLNK(st.st_mode) != 0);
+  return true;
+}
+
+L_EXTERN l_bool
+l_file_dir_exist(const void* dirname)
+{
+  if (dirname == 0) {
+    return false;
+  } else {
+    struct stat st;
+    return (lstat((const char*)dirname, &st) == 0 && S_ISDIR(st.st_mode));
+  }
+}
+
+L_EXTERN l_bool
+l_file_is_dir(const void* name)
+{
+  if (name == 0) {
+    return false;
+  } else {
+    struct stat st;
+    if (lstat((const char*)name, &st) != 0) {
+      l_loge_1(LNUL, "lstat %s", lserror(errno));
+      return false;
+    } else {
+      return (S_ISDIR(st.st_mode) != 0);
+    }
+  }
+}
+
+L_EXTERN l_filehdl
+l_file_open_dir(const void* name)
+{
+  l_filehdl dir;
+  dir.fd = open((const char*)name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOATIME);
+  return dir;
+}
+
+L_EXTERN l_dirstm
+l_dirstm_open(const void* name)
+{
+  /** directory stream **
+  #include <sys/types.h>
+  #include <dirent.h>
+  DIR* opendir(const char* name);
+  It opens a directory stream corresponding to the name,
+  and returns a pointer to the directory stream.
+  The stream is positioned at the first entry in the directory.
+  Filename entries can be read from a directory stream using readdir(3).
+  ---
+  ## struct dirent* readdir(DIR* d);
+  It returns a pointer to a dirent structure representing the next
+  directory entry in the directory stream pointed by d.
+  It returns NULL on reaching the end of the directory or if an error occurred.
+      struct dirent {
+        ino_t d_ino; // Inode number
+        off_t d_off; // current location, should treat as an opaque value
+        unsigned short d_reclen; // length of this record
+        unsigned char d_type; // type of file, not supported in all filesystem
+        char d_name[256]; // null-terminated filename
+      };
+  The only fields in the dirent structure that are managed by POSIX.1 is d_name and d_ino.
+  The other fields are unstandardized, and no present on all systems.
+  The d_name can be at most NAME_MAX characters preceding the terminating null byte.
+  It is recommanded that application use readdir(3) instead of readdir_r().
+  Furthermore, since version 2.24, glibc deprecates readdir_r().
+  The reasons are: on systems where NAME_MAX is undefined, calling readdir_r() may
+  be unsafe because the interface doesn't allow the caller to specify the length
+  of the buffer used for the returned directory entry;
+  On some systems, readdir_r() cann't read directory entries with very long names.
+  When the glibc implementation encounters such a name, readdir_r() fails with
+  the error ENAMETOOLONG after the final directory entry has been read.
+  On some other systems, readdir_r() may return a success status,
+  but the returned d_name field may not be null terminated or may be truncated;
+  In the current POSIX.1 specification (POSIX.1-2008), readdir(3) is not required to be thread-safe.
+  However, in modern implementation (including glibc), concurrent calls to readdir(3)
+  that specify different directory streams are thread-safe.
+  Therefore, the use of readdir_r() is generally unneccessary in multithreaded programs.
+  In cases where multiple threads must read from the same stream, using readdir(3) with
+  external sychronization is still preferable to the use of readdir_r(). **/
+
+  l_dirstm stm;
+  if (name == 0) {
+    stm.impl = 0;
+  } else {
+    stm.impl = opendir((const char*)name);
+  }
+  return stm;
+}
+
+L_EXTERN l_bool
+l_dirstm_is_empty(const l_dirstm* stm)
+{
+  return stm->impl == 0;
+}
+
+L_EXTERN l_bool
+l_dirstm_nt_empty(const l_dirstm* stm)
+{
+  return stm->impl != 0;
+}
+
+L_EXTERN void
+l_dirstm_close(l_dirstm* stm)
+{
+  if (stm->impl == 0) {
+    return;
+  } else {
+    if (closedir((DIR*)stm->impl) != 0) {
+      l_loge_1(LNUL, "closedir %s", lserror(errno));
+    }
+    stm->impl = 0;
+    return;
+  }
+}
+
+L_EXTERN const l_byte*
+l_dirstm_read(l_dirstm* stm)
+{
+  struct dirent* entry = 0;
+  errno = 0;
+  if ((entry = readdir((DIR*)stm->impl)) == 0) {
+    if (errno != 0) l_loge_1(LNUL, "readdir %s", lserror(errno));
+    return 0;
+  }
+  return l_cstr(entry->d_name);
+}
+
+L_EXTERN const l_byte*
+l_dirstm_read_x(l_dirstm* stm, int* isdir)
+{
+  struct dirent* entry = 0;
+  if (isdir) *isdir = 0;
+  errno = 0;
+  if ((entry = readdir((DIR*)stm->impl)) == 0) {
+    if (errno != 0) l_loge_1(LNUL, "readdir %s", lserror(errno));
+    return 0;
+  }
+  if (isdir) {
+#if defined(DT_DIR) && defined(DT_UNKNOWN)
+    *isdir = (entry->d_type == DT_DIR);
+    if (entry->d_type != DT_UNKNOWN) {
+      *isdir = (entry->d_type == DT_DIR);
+    } else {
+      *isdir = l_file_is_dir(entry->d_name);
+    }
+#else
+    *isdir = l_file_is_dir(entry->d_name);
+#endif
+  }
+  return l_cstr(entry->d_name);
+}
+
+/** dynamic library loading **
 #include <dlfcn.h> // link with -ldl
 void* dlopen(const char* filename, int flags);
 int dlclose(void* handle);
@@ -98,8 +594,7 @@ Since the value of the synbol could actually be NULL, so that a NULL
 return from dlsym() need not indicate an error. The correct way to
 test for an error is to call dlerror(3) to clear any error conditions,
 then call dlsym(), and then call dlerror(3) again, and check whether
-dlerror() returned value is not NULL.
-**********************************************************************/
+dlerror() returned value is not NULL. **/
 
 #define l_dynhdl_logerr(tag) { \
   char* errmsg = 0; \
@@ -177,7 +672,7 @@ l_dynhdl_open_from(l_strn path, l_strn lib_name)
 
   name = l_sbuf4k_init(&buffer);
 
-  if (l_strbuf_add_path(name, path) > 0 && l_strbuf_end_path_x(name, lib_name, L_STR(".so"))) {
+  if (l_strbuf_add_path(name, path) > 0 && l_strbuf_end_path_x(name, lib_name, L_STR(".so")) > 0) {
     return l_impl_dynhdl_open(l_strbuf_strn(name));
   } else {
     return l_empty_dynhdl();
@@ -191,9 +686,9 @@ l_dynhdl_load(l_dynhdl* hdl, l_strn sym_name)
   if (sym_name.p && sym_name.n > 0) {
     char* errstr = 0;
     dlerror(); /* clear old error */
-    sym = dlsym(hdl->impl, sym_name.p);
+    sym = dlsym(hdl->impl, (const char*)sym_name.p);
     if (sym == 0 && (errstr = dlerror())) {
-      l_loge_1(LNUL, "dlsym %s", ld(errstr));
+      l_loge_1(LNUL, "dlsym %s", ls(errstr));
     }
   }
   return sym;
@@ -209,6 +704,8 @@ l_dynhdl_close(l_dynhdl* hdl)
     hdl->impl = 0;
   }
 }
+
+/** concurrency **/
 
 L_EXTERN int
 l_thrhdl_create(l_thrhdl* thrhdl, void* (*start)(void*), void* para)
@@ -273,7 +770,7 @@ l_thread_sleep_ms(l_long ms)
 }
 
 L_EXTERN void
-l_thrhdl_exit()
+l_thread_exit()
 {
   pthread_exit((void*)1);
 }
@@ -456,7 +953,7 @@ l_condv_timed_wait(l_condv* self, l_mutex* mutex, l_long ns)
 
   /* caculate the absolute time */
   ns += curtime.nsec + curtime.sec *  L_NSEC_PERSEC;
-  if (ns < 0) { ns = 0; l_loge_s(LNUL, "EINVAL %d", ld(ns)); }
+  if (ns < 0) { ns = 0; l_loge_1(LNUL, "EINVAL %d", ld(ns)); }
   tm.tv_sec = (time_t)(ns / L_NSEC_PERSEC);
   tm.tv_nsec = (long)(ns - tm.tv_sec * L_NSEC_PERSEC);
 
@@ -497,199 +994,7 @@ l_condv_broadcast(l_condv* self)
   return false;
 }
 
-/** access, faccessat - check user's permission for a file **
-#include <fcntl.h>
-#include <unistd.h>
-int access(const char* pathname, int mode);
-int faccessat(int dirfd, const char* pathname, int mode, int flags);
----
-The mode specifies the accessibility checks to be performed,
-and is either the value F_OK,
-or a mask consisting of the bitwise OR of one or more of R_OK, W_OK, and X_OK.
-F_OK tests for the existence of the file.
-R_OK, W_OK, and X_OK test whether the file exists and grants read, write,
-and execute permission, resectively.
-The faccessat() system call operates in exactly the same way as access(),
-except for the differences described here.
-If the patchname given is relative, then it is interpreted relateve to the
-directory referred to by the file descriptor dirfd.
-If the pathname is related, and dirfd is the special value AT_FDCWD,
-then pathname is related to the current working directory like access().
-If pathname is absolute, then dirfd is ignored.
-The flags is constructed by OR togother zero of more following values:
-AT_EACCESS - perform access checks using the effective user and group IDs,
-by default, faccessat() uses the calling process's real user and group IDs
-like access(). In other words, AT_EACCESS answers the "can I read/write/exe
-this file?". Without AT_EACCESS, it answers a slightly different question:
-"(assuming I'm a setuid binary) can the user who invoked me read/write/exe this
-file?", which gives set-user-ID programs the possibility to prevent malicious
-users from causing them to read files which users shouldn't be able to read.
-AT_SYMLINK_NOFOLLOW - if pathname is a symbolic link, do not dereference it;
-instead return information about the link itself.
-On success, zero is returned; on error, -1 is returned and errno is set.
-**********************************************************************/
-
-L_EXTERN int
-l_file_isexist(const void* name)
-{
-  return (name && faccessat(AT_FDCWD, (const char*)name, F_OK, AT_SYMLINK_NOFOLLOW) == 0);
-}
-
-L_EXTERN int
-l_file_isexistat(l_filedesc* dirfd, const void* name)
-{
-  l_lnxfiledesc* pdir = (l_lnxfiledesc*)dirfd;
-  if (pdir->fd == -1 || !name) return false;
-  return (faccessat(pdir->fd, (const char*)name, F_OK, AT_SYMLINK_NOFOLLOW) == 0);
-}
-
-L_EXTERN int
-l_file_getattr(l_fileaddr* fa, const void* name)
-{
-  struct stat st;
-  if (lstat((const char*)name, &st) != 0) return false;
-  fa->size = (l_long)st.st_size;
-  fa->ctime = (l_long)st.st_ctime;
-  fa->atime = (l_long)st.st_atime;
-  fa->mtime = (l_long)st.st_mtime;
-  fa->isfile = (l_byte)(S_ISREG(st.st_mode) != 0);
-  fa->isdir = (l_byte)(S_ISDIR(st.st_mode) != 0);
-  fa->islink = (l_byte)(S_ISLNK(st.st_mode) != 0);
-  return true;
-}
-
-L_EXTERN int
-l_file_folderexist(const void* foldername)
-{
-  struct stat st;
-  return (lstat((const char*)name, &st) == 0 && S_ISDIR(st.st_mode));
-}
-
-L_EXTERN int
-l_file_opendir(l_filedesc* self, const void* name)
-{
-  l_lnxfiledesc* p = (l_lnxfiledesc*)self;
-  p->fd = open((const char*)name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOATIME);
-  return (p->fd != -1);
-}
-
-L_EXTERN void
-l_file_closefd(l_filedesc* self)
-{
-  l_lnxfiledesc* p = (l_lnxfiledesc*)self;
-  if (p->fd == -1) return;
-  if (close(p->fd) != 0) {
-    l_loge_1(LNUL, "close %d", lserror(errno));
-  }
-  p->fd = -1;
-}
-
-/** directory stream
-#include <sys/types.h>
-#include <dirent.h>
-DIR* opendir(const char* name);
-It opens a directory stream corresponding to the name,
-and returns a pointer to the directory stream.
-The stream is positioned at the first entry in the directory.
-Filename entries can be read from a directory stream using readdir(3).
----
-## struct dirent* readdir(DIR* d);
-It returns a pointer to a dirent structure representing the next
-directory entry in the directory stream pointed by d.
-It returns NULL on reaching the end of the directory or if an error occurred.
-    struct dirent {
-      ino_t d_ino; // Inode number
-      off_t d_off; // current location, should treat as an opaque value
-      unsigned short d_reclen; // length of this record
-      unsigned char d_type; // type of file, not supported in all filesystem
-      char d_name[256]; // null-terminated filename
-    };
-The only fields in the dirent structure that are managed by POSIX.1 is d_name and d_ino.
-The other fields are unstandardized, and no present on all systems.
-The d_name can be at most NAME_MAX characters preceding the terminating null byte.
-It is recommanded that application use readdir(3) instead of readdir_r().
-Furthermore, since version 2.24, glibc deprecates readdir_r().
-The reasons are: on systems where NAME_MAX is undefined, calling readdir_r() may
-be unsafe because the interface doesn't allow the caller to specify the length
-of the buffer used for the returned directory entry;
-On some systems, readdir_r() cann't read directory entries with very long names.
-When the glibc implementation encounters such a name, readdir_r() fails with
-the error ENAMETOOLONG after the final directory entry has been read.
-On some other systems, readdir_r() may return a success status,
-but the returned d_name field may not be null terminated or may be truncated;
-In the current POSIX.1 specification (POSIX.1-2008), readdir(3) is not required to be thread-safe.
-However, in modern implementation (including glibc), concurrent calls to readdir(3)
-that specify different directory streams are thread-safe.
-Therefore, the use of readdir_r() is generally unneccessary in multithreaded programs.
-In cases where multiple threads must read from the same stream, using readdir(3) with
-external sychronization is still preferable to the use of readdir_r().
-*/
-
-typedef struct {
-  DIR* stream;
-} l_lnxdirstream;
-
-L_EXTERN int
-l_dirstream_opendir(l_dirstream* self, const void* name)
-{
-  l_lnxdirstream* d = (l_lnxdirstream*)self;
-  if ((d->stream = opendir((const char*)name)) == 0) {
-    l_loge_1(LNUL, "opendir %s", lserror(errno));
-  }
-  return (d->stream != 0);
-}
-
-L_EXTERN void
-l_dirstream_close(l_dirstream* self)
-{
-  l_lnxdirstream* d = (l_lnxdirstream*)self;
-  if (d->stream == 0) return;
-  if (closedir(d->stream) != 0) {
-    l_loge_1(LNUL, "closedir %s", lserror(errno));
-  }
-  d->stream = 0;
-}
-
-L_EXTERN const l_byte*
-l_dirstream_read(l_dirstream* self)
-{
-  l_lnxdirstream* d = (l_lnxdirstream*)self;
-  struct dirent* entry = 0;
-  errno = 0;
-  if ((entry = readdir(d->stream)) == 0) {
-    if (errno != 0) l_loge_1(LNUL, "readdir %s", lserror(errno));
-    return 0;
-  }
-  return l_strz(entry->d_name);
-}
-
-L_EXTERN const l_byte*
-l_dirstream_read2(l_dirstream* self, int* isdir)
-{
-  l_lnxdirstream* d = (l_lnxdirstream*)self;
-  struct dirent* entry = 0;
-  if (isdir) *isdir = 0;
-  errno = 0;
-  if ((entry = readdir(d->stream)) == 0) {
-    if (errno != 0) l_loge_1(LNUL, "readdir %s", lserror(errno));
-    return 0;
-  }
-  if (isdir) {
-#if 0
-    *isdir = (entry->d_type == DT_DIR);
-#else
-    struct stat st;
-    if (lstat(entry->d_name, &st) != 0) {
-      l_loge_1(LNUL, "lstat %s", lserror(errno));
-      return 0;
-    }
-    isdir = S_ISDIR(st.st_mode);
-#endif
-  }
-  return l_strz(entry->d_name);
-}
-
-/** socket and io events **/
+/** socket **/
 
 L_EXTERN l_bool
 l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port)
@@ -723,21 +1028,21 @@ l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port)
     return false;
   } else {
     int retn = 0;
-    l_impl_sockaddr* sa = sockaddr;
-    if (l_strn_contains(&ip, ':')) {
-      retn = inet_pton(AF_INET6, (const char*)ip.p, &(sa->in6.sin6_addr));
+    l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)sockaddr;
+    if (l_strn_has(&ip, ':')) {
+      retn = inet_pton(AF_INET6, (const char*)ip.p, &(sa->addr.sa6.sin6_addr));
       if (retn == 1) {
         sa->len = sizeof(struct sockaddr_in6);
-        sa->in6.sin6_family = AF_INET6;
-        sa->in6.sin6_port = htons(port);
+        sa->addr.sa6.sin6_family = AF_INET6;
+        sa->addr.sa6.sin6_port = htons(port);
         return true;
       }
     } else {
-      retn = inet_pton(AF_INET, (const char*)ip.p, &(sa->in6.sin6_addr));
+      retn = inet_pton(AF_INET, (const char*)ip.p, &(sa->addr.sa6.sin6_addr));
       if (retn == 1) {
         sa->len = sizeof(struct sockaddr_in);
-        sa->in.sin_family = AF_INET;
-        sa->in.sin_port = htons(port);
+        sa->addr.sa4.sin_family = AF_INET;
+        sa->addr.sa4.sin_port = htons(port);
         return true;
       }
     }
@@ -762,13 +1067,13 @@ l_sockaddr_local(l_socket* sock)
   the returned address is truncated if the buffer provided is too small; in
   this case, addrlen will return a value greater than was supplied to the call. */
   l_sockaddr sockaddr;
-  l_impl_sockaddr* sa = &sockaddr;
+  l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)&sockaddr;
   socklen_t provided_len = sizeof(struct sockaddr_in6);
   sa->len = provided_len;
-  if (getsockname(sock->unifd, &(sa->sa), &(sa->len)) != 0) {
+  if (getsockname(sock->fd, &(sa->addr.sa), &(sa->len)) != 0) {
     l_loge_1(LNUL, "getsockname %s", lserror(errno));
     sa->len = 0;
-    sa->sa.sa_family = 0;
+    sa->addr.sa.sa_family = 0;
   } else {
     if (sa->len > provided_len) {
       l_loge_s(LNUL, "getsockname address truncated");
@@ -781,19 +1086,19 @@ l_sockaddr_local(l_socket* sock)
 L_EXTERN l_ushort
 l_sockaddr_port(l_sockaddr* self)
 {
-  l_impl_sockaddr* sa = (l_impl_sockaddr*)self;
-  return ntohs(sa->in.sin_port);
+  l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)self;
+  return ntohs(sa->addr.sa4.sin_port);
 }
 
 static l_ushort
 l_sockaddr_family(l_sockaddr* self)
 {
-  l_impl_sockaddr* sa = (l_impl_sockaddr*)self;
-  return sa->sa.sa_family;
+  l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)self;
+  return sa->addr.sa.sa_family;
 }
 
-L_EXTERN l_bool
-l_sockaddr_getip(l_sockaddr* self, void* out, l_int bfsz)
+L_EXTERN l_sbuf64
+l_sockaddr_getip(l_sockaddr* self)
 {
   /** inet_ntop - convert ipv4 and ipv6 addresses from binary to text form **
   #include <arpa/inet.h>
@@ -811,34 +1116,36 @@ l_sockaddr_getip(l_sockaddr* self, void* out, l_int bfsz)
   INET6_ADDRSTRLEN bytes long.
   On success, inet_ntop() returns a non-null pointer to dst. NULL is returned if
   there was an error, with errno set to indicate the error. */
-  l_impl_sockaddr* sa = (l_impl_sockaddr*)self;
-  if (sa->sa.sa_family == AF_INET) {
-    if (out && bfsz >= INET_ADDRSTRLEN) {
-      if (inet_ntop(AF_INET, &(sa->in.sin_addr), (char*)out, INET_ADDRSTRLEN) != 0) {
-        return true;
+
+  l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)self;
+  l_sbuf64 buffer;
+  l_strbuf* ipstr = 0;
+  l_byte* out = 0;
+
+  ipstr = l_sbuf64_init(&buffer);
+  out = l_strbuf_getp(ipstr);
+
+  l_assert(LNUL, l_strbuf_capacity(ipstr) >= INET6_ADDRSTRLEN);
+
+  if (sa->addr.sa.sa_family == AF_INET) {
+      if (inet_ntop(AF_INET, &(sa->addr.sa4.sin_addr), (char*)out, INET_ADDRSTRLEN) != 0) {
+        l_strbuf_adjust_len(ipstr);
+        return buffer;
       } else {
         l_loge_1(LNUL, "inet_ntop 4 %s", lserror(errno));
       }
-    } else {
-      l_loge_s(LNUL, "inet_ntop 4 invalid buffer");
-    }
-  } else if (sa->sa.sa_family == AF_INET6) {
-    if (out && bfsz >= INET6_ADDRSTRLEN) {
-      if (inet_ntop(AF_INET6, &(sa->in6.sin6_addr), (char*)out, INET6_ADDRSTRLEN) != 0) {
-        return true;
+  } else if (sa->addr.sa.sa_family == AF_INET6) {
+      if (inet_ntop(AF_INET6, &(sa->addr.sa6.sin6_addr), (char*)out, INET6_ADDRSTRLEN) != 0) {
+        l_strbuf_adjust_len(ipstr);
+        return buffer;
       } else {
         l_loge_1(LNUL, "inet_ntop 6 %s", lserror(errno));
       }
-    } else {
-      l_loge_s(LNUL, "inet_ntop 6 invalid buffer");
-    }
   } else {
     l_loge_s(LNUL, "inet_ntop invalid family");
   }
-  if (bfsz >= 1) {
-    out[0] = 0;
-  }
-  return false;
+
+  return buffer;
 }
 
 static l_bool
@@ -957,17 +1264,16 @@ l_socket_create(int domain, int type, int protocol)
   EPROTONOSUPPORT - the protocol type or the specified protocol is not supported.
   Other errors may be generated by the underlying protocol modules. */
   l_socket sock;
-  sock.unifd = socket(domain, type, protocol);
-  if (unifd == -1) {
+  if ((sock.fd = socket(domain, type, protocol)) == -1) {
     l_loge_1(LNUL, "socket %s", lserror(errno));
   } else {
-    l_set_non_block(sock->unifd);
+    l_set_non_block(sock.fd);
   }
   return sock;
 }
 
 L_EXTERN void
-l_socket_close(l_socket* sock)
+l_filehdl_close(l_filehdl* hdl)
 {
   /** close - close a file descriptor **
   #include <unistd.h>
@@ -993,12 +1299,18 @@ l_socket_close(l_socket* sock)
   关闭套接字只是导致相应描述符的引用计数减1，如果引用计数仍大于0，这个close调用
   并不会引发TCP断连流程。如果我们确实想在某个TCP连接上发送一个FIN，可以调用
   shutdown函数以代替close()，我们将在6.5节阐述这么做的动机。*/
-  if (sock->unifd != -1) {
-    if (close(sock->unifd) != 0) {
-      l_loge_1(LNUL, "close socket %s", lserror(errno));
+  if (hdl->fd != -1) {
+    if (close(hdl->fd) != 0) {
+      l_loge_1(LNUL, "close filehdl %s", lserror(errno));
     }
-    sock->unifd = -1;
+    hdl->fd = -1;
   }
+}
+
+L_EXTERN void
+l_socket_close(l_socket* sock)
+{
+  l_filehdl_close(sock);
 }
 
 L_EXTERN void
@@ -1024,7 +1336,7 @@ l_socket_shutdown(l_socket* sock, l_byte r_w_a)
   case 'a': case 'A': flag = SHUT_RDWR; break;
   default: l_loge_s(LNUL, "shutdone EINVAL"); break;
   }
-  if (shutdown(sock->unifd, flag) != 0) {
+  if (shutdown(sock->fd, flag) != 0) {
     l_loge_1(LNUL, "shutdown %s", lserror(errno));
   }
 }
@@ -1073,12 +1385,12 @@ l_impl_socket_bind(int sock, const l_sockaddr* addr)
   49152小（以免与临时端口号的“正确”范围冲突）。
   从bind返回的一个常见错误是EADDRINUSE，到7.5节讨论SO_REUSEADDR和SO_REUSEPORT
   这两个套接字选项时在详细讨论。*/
-  l_impl_sockaddr* sa = (l_impl_sockaddr*)addr;
+  l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)addr;
   if (sa->len == 0 || sock == -1) {
     l_loge_2(LNUL, "bind EINVAL %d %d", ld(sa->len), ld(sock));
     return false;
   }
-  if (bind(sock, &(sa->sa), sa->len) != 0) {
+  if (bind(sock, &(sa->addr.sa), sa->len) != 0) {
     l_loge_1(LNUL, "bind %s", lserror(errno));
     return false;
   } else {
@@ -1157,11 +1469,11 @@ L_EXTERN l_socket
 l_socket_tcp_listen(const l_sockaddr* addr, int backlog)
 {
   l_socket sock;
-  const l_impl_sockaddr* sa = 0;
+  const l_impl_lnxsaddr* sa = 0;
   int domain = 0;
 
-  sa = (const l_impl_sockaddr*)addr;
-  domain = (sa == 0 ? AF_INET : sa->sa.sa_family);
+  sa = (const l_impl_lnxsaddr*)addr;
+  domain = (sa == 0 ? AF_INET : sa->addr.sa.sa_family);
 
   if (domain != AF_INET && domain != AF_INET6) {
     l_loge_s(LNUL, "listen wrong address family");
@@ -1174,7 +1486,7 @@ l_socket_tcp_listen(const l_sockaddr* addr, int backlog)
   }
 
   if (addr) {
-    if (!l_impl_socket_bind(sock.unifd, addr)) {
+    if (!l_impl_socket_bind(sock.fd, addr)) {
       l_socket_close(&sock);
       return l_empty_socket();
     }
@@ -1183,7 +1495,7 @@ l_socket_tcp_listen(const l_sockaddr* addr, int backlog)
   /* 如果一个TCP客户或服务器未曾调用bind绑定一个端口，当使用connect或
   listen 时，内核会为相应的套接字选择一个临时端口 */
 
-  if (l_impl_socket_listen(sock.unifd, (backlog <= 0 ? L_SOCKET_BACKLOG : backlog))) {
+  if (l_impl_socket_listen(sock.fd, (backlog <= 0 ? L_SOCKET_BACKLOG : backlog))) {
     return sock;
   } else {
     l_socket_close(&sock);
@@ -1191,86 +1503,86 @@ l_socket_tcp_listen(const l_sockaddr* addr, int backlog)
   }
 }
 
-/** POSIX signal interrupt process's execution **
-信号（signal）是告知某个进程发生了某个事件的通知，也称谓软中断
-（software interrupt）。信号通常是异步发生的，也就是说进程预先
-不知道信号的准确发生时机。信号可以有一个进程发送给另一个进程或
-进程自身，或者由内核发给某个进程。例如SIGCHLD信号是由内核在任
-何子进程终止时发给它的父进程的一个信号。
-每个信号都有一个与之关联的处置（disposition），也称为行为
-（action），我们通过调用sigaction函数来设定一个信号的处置，并有
-三种选择。其一，可以提供一个函数，只要有特定信号发生时它就会调用。
-这样的函数称为信号处理函数（signal handler），这种行为称为捕获
-（catching）信号。有两个信号不能被捕获，它们是SIGKILL和SIGSTOP。
-信号处理函数的原型为 void (*handle)(int signo) 。对于大多数信号
-来说，调用sigaction函数并指定信号发生时所调用的函数就是捕获信号
-所需要的全部工作。不过稍后可以看到，SIGIO、SIGPOLL和SIGURG这些
-信号还要求捕获它们的进程做些额外工作。
-其二，可以把某个信号的处置设定为SIG_IGN来忽略它，SIGKILL和SIGSTOP
-这两个信号不能被忽略。其三，可以把某个信号的处置设定为SIG_DFL启用
-默认处置。默认处置通常是在收到信号后终止进程，某些信号还在当前工作
-目录产生一个core dump。另有个别信号的默认处置是忽略，SIGCHLD和
-SIGURG（带外数据到达时发送）是默认处置为忽略的两个信号。
-POSIX允许我们指定一组信号，它们在信号处理函数被调用时阻塞，任何阻塞
-的信号都不能递交给进程。如果将sa_mask成员设为空集，意味着在该信号处
-理期间，不阻塞额外的信号。POSIX会保证被捕获的信号在其信号处理期间总
-是阻塞的。因此在信号处理函数执行期间，被捕获的信号和sa_mask中的信号
-是被阻塞的。如果一个信号在被阻塞期间产生了一次或多次，那么该信号被
-解阻塞之后通常只递交一次，即Unix信号默认是不排队的。利用sigprocmask
-函数选择性的阻塞或解阻塞一组信号是可能的。这使得我们可以做到在一段
-临界区代码执行期间，防止捕获某些信号，以保护这段代码。
-警告：在信号处理函数中调用诸如printf这样的标准I/O函数是不合适的，其原
-因将在11.18中讨论。在System V和Unix 98标准下，如果一个进程把SIGCHLD
-设为SIG_IGN，它的子进程就不会变成僵死进程。不幸的是，这种做法仅仅适用
-于System V和Unix 98，而POSIX明确表示没有这样的规定。处理僵死进程的可
-移植方法是捕获SIGCHLD信号，并调用wait或waitpid。
-从子进程终止SIGCHLD信号递交时，父进程阻塞于accept调用，然后SIGCHLD的
-处理函数会执行，其wait调用取到子进程的PID和终止状态，最后返回。既然
-该信号实在父进程阻塞于慢系统调用（accept）时由父进程捕获的，内核会使
-accept返回一个EINTR错误（被中断的系统调用）。
-我们用术语慢系统调用（slow system call）描述accept函数，该术语也适用
-于那些可能永远阻塞的系统调用。举例来说，如果没有客户连接到服务器上，
-那么服务器的accept就没有返回的机会。类似的如果客户没有发送数据给服务
-器，那么服务器的read调用也将永不返回。适用于慢系统调用的基本规则是：
-当阻塞于某个慢系统调用的一个进程捕获某个信号且相应相应信号处理函数返回
-时，该系统调用可能返回一个EINTR错误。有些内核自动重启某些被中断的系统
-调用。不过为了便于移植，当我们编写捕获信号的程序时，必须对慢系统调用
-返回EINTR有所准备。移植性问题是由早期使用的修饰词“可能”、“有些”和对
-POSIX的SA_RESTART标志的支持是可选的这一事实造成的。即使某个实现支持
-SA_RESTART标志，也并非所有被中断的系统调用都可以自动重启。例如大多数
-源自Berkeley的实现从不自动重启select，其中有些实现从不重启accept和
-recvfrom。
-为了处理被中断的accept，需要判断错误是否是EINTR，如果是则重新调用accept
-函数，而不是直接错误返回。对于accept以及诸如read、write、select和open
-之类的函数来说，这是合适的。不过有一个函数我们不能重启：connect。如果该函数
-返回EINTR，我们就不能再次调用它，否则立即返回一个错误。当connect被一个捕获
-的信号中断而且不自动重启时（TCPv2第466页），我们必须调用select来等待连接
-完成。如16.3节所述。
- ** 服务器进程终止 **
-当服务器进程终止时会关闭所有打开的文件描述符，这回导致向客户端发送一个FIN，
-而客户端TCP响应一个ACK，这就是TCP连接终止工作的前半部分。如果此时客户不理会
-读取数据时返回的错误，反而写入更多的数据到服务器上会发生什么呢？这种情况是
-可能发生的，例如客户可能在读回任何数据之前执行两次针对服务器的写操作，而第
-一次写引发了RST。适用于此的规则是：当一个进程向某个已收到RST的套接字执行写
-操作时，内核会向该进程发送一个SIGPIPE信号。该信号的默认行为是终止进程，因此
-进程必须捕获以免不情愿的被终止。不论该进程是捕获该信号并从其信号处理函数返回，
-还是简单地忽略该信号，写操作都将返回EPIPE错误。
-一个在Usenet上经常问及的问题是如何在第一次写操作时而不是在第二次写操作时捕获
-该信号。这是不可能的，第一次写操作引发RST，第二次写引发SIGPIPE信号。因为写一个
-已接收了FIN的套接字不成问题，但写一个已接收了RST的套接字是一个错误。
-处理SIGPIPE的建议方法取决于它发生时应用进程想做什么。如果没有特殊的事情要做，
-那么将信号处理方法直接设置为SIG_IGN，并假设后续的输出操作将检查EPIPE错误并终止。
-如果信号出现时需采取特殊措施（可能需要在日志文件中记录），那么就必须捕获该信号，
-以便在信号处理函数中执行所有期望的动作。但是必须意识到，如果使用了多个套接字，
-该信号的递交无法告诉我们是哪个套接字出的错。如果我们确实需要知道是哪个write
-出错，那么必须不理会该信号，那么从信号处理函数返回后再处理EPIPE错误。*/
-
 typedef void (*l_sigfunc)(int);
 
 static l_sigfunc
 l_impl_sigact(int sig, l_sigfunc func)
 {
-  /** sigaction - examine and change a signal action **
+  /** POSIX signal interrupt process's execution **
+  信号（signal）是告知某个进程发生了某个事件的通知，也称谓软中断
+  （software interrupt）。信号通常是异步发生的，也就是说进程预先
+  不知道信号的准确发生时机。信号可以有一个进程发送给另一个进程或
+  进程自身，或者由内核发给某个进程。例如SIGCHLD信号是由内核在任
+  何子进程终止时发给它的父进程的一个信号。
+  每个信号都有一个与之关联的处置（disposition），也称为行为
+  （action），我们通过调用sigaction函数来设定一个信号的处置，并有
+  三种选择。其一，可以提供一个函数，只要有特定信号发生时它就会调用。
+  这样的函数称为信号处理函数（signal handler），这种行为称为捕获
+  （catching）信号。有两个信号不能被捕获，它们是SIGKILL和SIGSTOP。
+  信号处理函数的原型为 void (*handle)(int signo) 。对于大多数信号
+  来说，调用sigaction函数并指定信号发生时所调用的函数就是捕获信号
+  所需要的全部工作。不过稍后可以看到，SIGIO、SIGPOLL和SIGURG这些
+  信号还要求捕获它们的进程做些额外工作。
+  其二，可以把某个信号的处置设定为SIG_IGN来忽略它，SIGKILL和SIGSTOP
+  这两个信号不能被忽略。其三，可以把某个信号的处置设定为SIG_DFL启用
+  默认处置。默认处置通常是在收到信号后终止进程，某些信号还在当前工作
+  目录产生一个core dump。另有个别信号的默认处置是忽略，SIGCHLD和
+  SIGURG（带外数据到达时发送）是默认处置为忽略的两个信号。
+  POSIX允许我们指定一组信号，它们在信号处理函数被调用时阻塞，任何阻塞
+  的信号都不能递交给进程。如果将sa_mask成员设为空集，意味着在该信号处
+  理期间，不阻塞额外的信号。POSIX会保证被捕获的信号在其信号处理期间总
+  是阻塞的。因此在信号处理函数执行期间，被捕获的信号和sa_mask中的信号
+  是被阻塞的。如果一个信号在被阻塞期间产生了一次或多次，那么该信号被
+  解阻塞之后通常只递交一次，即Unix信号默认是不排队的。利用sigprocmask
+  函数选择性的阻塞或解阻塞一组信号是可能的。这使得我们可以做到在一段
+  临界区代码执行期间，防止捕获某些信号，以保护这段代码。
+  警告：在信号处理函数中调用诸如printf这样的标准I/O函数是不合适的，其原
+  因将在11.18中讨论。在System V和Unix 98标准下，如果一个进程把SIGCHLD
+  设为SIG_IGN，它的子进程就不会变成僵死进程。不幸的是，这种做法仅仅适用
+  于System V和Unix 98，而POSIX明确表示没有这样的规定。处理僵死进程的可
+  移植方法是捕获SIGCHLD信号，并调用wait或waitpid。
+  从子进程终止SIGCHLD信号递交时，父进程阻塞于accept调用，然后SIGCHLD的
+  处理函数会执行，其wait调用取到子进程的PID和终止状态，最后返回。既然
+  该信号实在父进程阻塞于慢系统调用（accept）时由父进程捕获的，内核会使
+  accept返回一个EINTR错误（被中断的系统调用）。
+  我们用术语慢系统调用（slow system call）描述accept函数，该术语也适用
+  于那些可能永远阻塞的系统调用。举例来说，如果没有客户连接到服务器上，
+  那么服务器的accept就没有返回的机会。类似的如果客户没有发送数据给服务
+  器，那么服务器的read调用也将永不返回。适用于慢系统调用的基本规则是：
+  当阻塞于某个慢系统调用的一个进程捕获某个信号且相应相应信号处理函数返回
+  时，该系统调用可能返回一个EINTR错误。有些内核自动重启某些被中断的系统
+  调用。不过为了便于移植，当我们编写捕获信号的程序时，必须对慢系统调用
+  返回EINTR有所准备。移植性问题是由早期使用的修饰词“可能”、“有些”和对
+  POSIX的SA_RESTART标志的支持是可选的这一事实造成的。即使某个实现支持
+  SA_RESTART标志，也并非所有被中断的系统调用都可以自动重启。例如大多数
+  源自Berkeley的实现从不自动重启select，其中有些实现从不重启accept和
+  recvfrom。
+  为了处理被中断的accept，需要判断错误是否是EINTR，如果是则重新调用accept
+  函数，而不是直接错误返回。对于accept以及诸如read、write、select和open
+  之类的函数来说，这是合适的。不过有一个函数我们不能重启：connect。如果该函数
+  返回EINTR，我们就不能再次调用它，否则立即返回一个错误。当connect被一个捕获
+  的信号中断而且不自动重启时（TCPv2第466页），我们必须调用select来等待连接
+  完成。如16.3节所述。
+   ** 服务器进程终止 **
+  当服务器进程终止时会关闭所有打开的文件描述符，这回导致向客户端发送一个FIN，
+  而客户端TCP响应一个ACK，这就是TCP连接终止工作的前半部分。如果此时客户不理会
+  读取数据时返回的错误，反而写入更多的数据到服务器上会发生什么呢？这种情况是
+  可能发生的，例如客户可能在读回任何数据之前执行两次针对服务器的写操作，而第
+  一次写引发了RST。适用于此的规则是：当一个进程向某个已收到RST的套接字执行写
+  操作时，内核会向该进程发送一个SIGPIPE信号。该信号的默认行为是终止进程，因此
+  进程必须捕获以免不情愿的被终止。不论该进程是捕获该信号并从其信号处理函数返回，
+  还是简单地忽略该信号，写操作都将返回EPIPE错误。
+  一个在Usenet上经常问及的问题是如何在第一次写操作时而不是在第二次写操作时捕获
+  该信号。这是不可能的，第一次写操作引发RST，第二次写引发SIGPIPE信号。因为写一个
+  已接收了FIN的套接字不成问题，但写一个已接收了RST的套接字是一个错误。
+  处理SIGPIPE的建议方法取决于它发生时应用进程想做什么。如果没有特殊的事情要做，
+  那么将信号处理方法直接设置为SIG_IGN，并假设后续的输出操作将检查EPIPE错误并终止。
+  如果信号出现时需采取特殊措施（可能需要在日志文件中记录），那么就必须捕获该信号，
+  以便在信号处理函数中执行所有期望的动作。但是必须意识到，如果使用了多个套接字，
+  该信号的递交无法告诉我们是哪个套接字出的错。如果我们确实需要知道是哪个write
+  出错，那么必须不理会该信号，那么从信号处理函数返回后再处理EPIPE错误.
+  ---
+  ** sigaction - examine and change a signal action **
   #include <signal.h>
   int sigaction(int signum, const struct sigaction* act, struct sigaction* oldact);
   It is used to change the action taken by a process on receipt of a specific signal.
@@ -1330,20 +1642,21 @@ l_impl_sigact(int sig, l_sigfunc func)
   0 if not a member, and -1 on error. On error, the errno is set.
   When creating a filled signal set, the glibc sigfillset() function doesn't include
   the two real-time signals used internally by the NPTL threading implementation. See
-  nptl(7) for details.
-  */
+  nptl(7) for details. **/
+
   struct sigaction act, oldact;
   act.sa_handler = func;
   sigemptyset(&act.sa_mask);
   act.sa_flags = 0;
+
   /* SA_RESTART标志可可选的。如果设置，由相应信号中断的系统调用将由内核自动重启。
   如果被捕获的信号不是SIGALRM且SA_RESTART有定义，我们就设置标志。对SIGALRM进行特殊
   处理的原因在于，产生该信号的目的正如14.2节讨论的那样，通常是为I/O操作设置超时，
   这种情况下我们希望受阻塞的系统调用被该信号中端掉从内核返回到用户进程。一些较早的
   系统（如SunOS 4.x）默认设置为自动重启被中断的系统调用（内核自动重启系统调用不会返
   回用户进程），并定义了与SA_RESTART互补的SA_INTERRUPT标志。如果定义了该标志，我们
-  就在被捕获的信号是SIGALRM时设置它。
-  */
+  就在被捕获的信号是SIGALRM时设置它。*/
+
   if (sig == SIGALRM) {
   #ifdef SA_INTERRUPT
     act.sa_flags |= SA_INTERRUPT; /* SunOS 4.x */
@@ -1353,10 +1666,12 @@ l_impl_sigact(int sig, l_sigfunc func)
     act.sa_flags |= SA_RESTART; /* SVR4, 4.4BSD */
   #endif
   }
+
   if (sigaction(sig, &act, &oldact) != 0) {
     l_loge_1(LNUL, "sigaction %s", lserror(errno));
     return SIG_ERR;
   }
+
   return oldact.sa_handler;
 }
 
@@ -1367,94 +1682,94 @@ l_sigign(int sig)
 }
 
 L_EXTERN void
-l_socket_init()
+l_socket_prepare()
 {
   l_sigign(SIGPIPE);
 }
 
-/** accept - accept a connection on a socket **
-#include <sys/types.h>
-#include <sys/socket.h>
-int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen);
-It is used with connection-based socket types (SOCK_STREAM,
-SOCK_SEQPACKET). It extracts the first connection request on the
-queue of pending connections for the listening sockfd, and creates
-a new connected socket, and returns a new fd referring to it. The
-newly created socket is not in the listening state. The original
-sockfd is unaffected by this call.
-The addr is a pointer to a sockaddr structure. This structure is
-filled in with the address of the peer socket, as known to the
-communications layer. The exact format of the address returned is
-determined by the socket's address family. When addr is NULL, nothing
-is filled in; in this case, addrlen is not used, and should also
-be NULL. The addrlen argument is a valud-result argument: the caller
-must initialize it to contain the size in bytes of the structure
-pointed to by addr; on return it will contain the acutal size of
-the peer address. The returned address is truncated if the buffer
-provided is too small; in this case, addrlen will return a value
-greater than was supplied to the call.
-If no pending connections are present on the queue, and the socket
-is not marked as nonblocking, accept() blocks the caller until a
-connection is present. If the socket is marked nonblocking and no
-pending connections are present on the queue, accept() fails with
-the error EAGIN or EWOULDBLOCK.
-on success, it returns a nonnegative interger that is a fd for the accepted
-socket. on error, -1 is returned, and errno is set appropriately.
-Error handling - linux accept passes already-pending network errors on the
-new socket as an error code from accept(). this behavior differs from other
-BSD socket implementations. for reliable operation the application should
-detect the network errors defined for the protocol after accept() and treat
-them like EAGAIN by retrying. in the case of TCP/IP, these are ENETDOWN,
-EPROTO, ENOPROTOOPT, EHOSTDOWN, ENONET, EHOSTUNREACH, EOPNOTSUPP, and
-ENETUNREACH.
-当有一个已完成的连接准备好被accept时，如果使用select会将其作为可读描述符
-返回该连接的监听套接字。因此如果我们使用select在某个监听套接字上等待一个
-外来连接，那就没必要把该监听套接字设置为非阻塞的，这是因为如果select告诉我
-们该套接字上已有连接就绪，那么随后的accept调用不应该阻塞。不幸的是，这里存在
-一个可能让我们掉入陷阱的定时问题(Gierth 1996）。为了查看这个问题，我们使TCP
-客户端建立连接后发送一个RST到服务器。然后在服务器端当select返回监听套接字
-可读后睡一段时间，然后才调用accept来模拟一个繁忙的服务器。此时客户在服务器调
-用accept之前就中止了连接时，源自Berkeley的实现不把这个中止的连接返回给服务器
-进程，而其他实现应该返回ECONNABORTED错误，却往往代之以返回EPROTO错误。考虑
-源自Berkeley的实现，在TCP收到RST后会将已完成的连接移除出队列，假设队列中没有
-其他已完成的连接，此时调用accept时会被阻塞，直到其他某个客户建立一个连接为止。
-但是在此期间服务器单纯阻塞在accept调用上，无法处理任何其他以就绪的描述符。本
-问题的解决方法是：当使用select获悉某个监听套接字上有已完成的连接准备好时，总
-是把这个监听套接字设为非阻塞；在后续的accept调用中忽略以下错误继续执行直到队
-列为空返回EAGIN或EWOULDBLOCK为止：ECONNABORTED（POSIX实现，客户中止了连接）、
-EPROTO(SVR4实现，客户中止了连接）和EINTR（有信号被捕获）。
-以上在accept之前收到RST的情况，不同实现可能以不同的方式处理这种中止的连接。
-源自Berkeley的实现完全在内核中处理中止的连接，服务器进程根本看不到。然而大多数
-SVR4实现返回一个错误给服务其进程作为accept的返回结果，不过错误本身取决于实现。
-这些SVR4实现返回一个EPROTO，而POSIX指出返回的必须是ECONNABORTED（software
-caused connection abort）。POSIX作出修正的理由在于，流子系统（streams subsystem）
-中发生某些致命的协议相关事件时，也会返回EPROTO。要是对于客户引起的一个已建立连接
-的非致命中止也返回同样的错误，那么服务器就不知道该再次调用accept还是不该。换成
-是ECONNABORTED错误，服务器可以忽略它，再次调用accept即可。源自Berkeley的内核从
-不把该错误传递给进程的做法所涉及的步骤在TCPv2中得到阐述，引发该错误的RST在第964
-页到达处理，导致tcp_close被调用。*/
-
 L_EXTERN void
 l_socket_accept(l_socket skt, void (*cb)(void*, l_socketconn*), void* ud)
 {
+  /** accept - accept a connection on a socket **
+  #include <sys/types.h>
+  #include <sys/socket.h>
+  int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen);
+  It is used with connection-based socket types (SOCK_STREAM,
+  SOCK_SEQPACKET). It extracts the first connection request on the
+  queue of pending connections for the listening sockfd, and creates
+  a new connected socket, and returns a new fd referring to it. The
+  newly created socket is not in the listening state. The original
+  sockfd is unaffected by this call.
+  The addr is a pointer to a sockaddr structure. This structure is
+  filled in with the address of the peer socket, as known to the
+  communications layer. The exact format of the address returned is
+  determined by the socket's address family. When addr is NULL, nothing
+  is filled in; in this case, addrlen is not used, and should also
+  be NULL. The addrlen argument is a valud-result argument: the caller
+  must initialize it to contain the size in bytes of the structure
+  pointed to by addr; on return it will contain the acutal size of
+  the peer address. The returned address is truncated if the buffer
+  provided is too small; in this case, addrlen will return a value
+  greater than was supplied to the call.
+  If no pending connections are present on the queue, and the socket
+  is not marked as nonblocking, accept() blocks the caller until a
+  connection is present. If the socket is marked nonblocking and no
+  pending connections are present on the queue, accept() fails with
+  the error EAGIN or EWOULDBLOCK.
+  on success, it returns a nonnegative interger that is a fd for the accepted
+  socket. on error, -1 is returned, and errno is set appropriately.
+  Error handling - linux accept passes already-pending network errors on the
+  new socket as an error code from accept(). this behavior differs from other
+  BSD socket implementations. for reliable operation the application should
+  detect the network errors defined for the protocol after accept() and treat
+  them like EAGAIN by retrying. in the case of TCP/IP, these are ENETDOWN,
+  EPROTO, ENOPROTOOPT, EHOSTDOWN, ENONET, EHOSTUNREACH, EOPNOTSUPP, and
+  ENETUNREACH.
+  当有一个已完成的连接准备好被accept时，如果使用select会将其作为可读描述符
+  返回该连接的监听套接字。因此如果我们使用select在某个监听套接字上等待一个
+  外来连接，那就没必要把该监听套接字设置为非阻塞的，这是因为如果select告诉我
+  们该套接字上已有连接就绪，那么随后的accept调用不应该阻塞。不幸的是，这里存在
+  一个可能让我们掉入陷阱的定时问题(Gierth 1996）。为了查看这个问题，我们使TCP
+  客户端建立连接后发送一个RST到服务器。然后在服务器端当select返回监听套接字
+  可读后睡一段时间，然后才调用accept来模拟一个繁忙的服务器。此时客户在服务器调
+  用accept之前就中止了连接时，源自Berkeley的实现不把这个中止的连接返回给服务器
+  进程，而其他实现应该返回ECONNABORTED错误，却往往代之以返回EPROTO错误。考虑
+  源自Berkeley的实现，在TCP收到RST后会将已完成的连接移除出队列，假设队列中没有
+  其他已完成的连接，此时调用accept时会被阻塞，直到其他某个客户建立一个连接为止。
+  但是在此期间服务器单纯阻塞在accept调用上，无法处理任何其他以就绪的描述符。本
+  问题的解决方法是：当使用select获悉某个监听套接字上有已完成的连接准备好时，总
+  是把这个监听套接字设为非阻塞；在后续的accept调用中忽略以下错误继续执行直到队
+  列为空返回EAGIN或EWOULDBLOCK为止：ECONNABORTED（POSIX实现，客户中止了连接）、
+  EPROTO(SVR4实现，客户中止了连接）和EINTR（有信号被捕获）。
+  以上在accept之前收到RST的情况，不同实现可能以不同的方式处理这种中止的连接。
+  源自Berkeley的实现完全在内核中处理中止的连接，服务器进程根本看不到。然而大多数
+  SVR4实现返回一个错误给服务其进程作为accept的返回结果，不过错误本身取决于实现。
+  这些SVR4实现返回一个EPROTO，而POSIX指出返回的必须是ECONNABORTED（software
+  caused connection abort）。POSIX作出修正的理由在于，流子系统（streams subsystem）
+  中发生某些致命的协议相关事件时，也会返回EPROTO。要是对于客户引起的一个已建立连接
+  的非致命中止也返回同样的错误，那么服务器就不知道该再次调用accept还是不该。换成
+  是ECONNABORTED错误，服务器可以忽略它，再次调用accept即可。源自Berkeley的内核从
+  不把该错误传递给进程的做法所涉及的步骤在TCPv2中得到阐述，引发该错误的RST在第964
+  页到达处理，导致tcp_close被调用。**/
+
   int n = 0, sock = 0;
   l_socketconn conn;
-  l_impl_sockaddr* sa = 0;
+  l_impl_lnxsaddr* sa = 0;
   socklen_t provided_len = 0;
 
-  sa = (l_impl_sockaddr*)&(conn.remote);
+  sa = (l_impl_lnxsaddr*)&(conn.remote);
   provided_len = sizeof(struct sockaddr_in6);
 
   for (; ;) {
     sa->len = provided_len;
-    sock = accept(skt.unifd, &(sa->sa), &(sa->len));
+    sock = accept(skt.fd, &(sa->addr.sa), &(sa->len));
     if (sock != -1) {
       if (sa->len > provided_len) {
         l_loge_s(LNUL, "accept address truncated");
         sa->len = provided_len;
       }
       l_set_non_block(sock);
-      conn.sock.unifd = sock;
+      conn.sock.fd = sock;
       cb(ud, &conn);
       continue;
     }
@@ -1527,7 +1842,7 @@ SIGKILL信号（该信号不能被捕获）。这么做留给所有运行进程�
 其他的函数中而不能快速知道TCP已经断连了。*/
 
 static int
-l_impl_socket_connect(int sock, const l_impl_sockaddr* sa)
+l_impl_socket_connect(int sock, const l_impl_lnxsaddr* sa)
 {
   /** connect - initiate a conneciton on a socket **
   #include <sys/types.h>
@@ -1633,7 +1948,7 @@ l_impl_socket_connect(int sock, const l_impl_sockaddr* sa)
   int status = 0;
 
   for (; ;) {
-    if (connect(sock, &(sa->sa), sa->len) == 0) {
+    if (connect(sock, &(sa->addr.sa), sa->len) == 0) {
       return 0;
     }
 
@@ -1663,12 +1978,12 @@ l_socket_tcp_connect(const l_sockaddr* addr, l_bool* done)
   reconnecting. **/
 
   l_socket sock;
-  const l_impl_sockaddr* sa = 0;
+  const l_impl_lnxsaddr* sa = 0;
   int domain = 0;
   int status = 0;
 
-  sa = (const l_impl_sockaddr*)addr;
-  domain = sa->sa.sa_family;
+  sa = (const l_impl_lnxsaddr*)addr;
+  domain = sa->addr.sa.sa_family;
 
   if (domain != AF_INET && domain != AF_INET6) {
     l_loge_s(LNUL, "listen wrong address family");
@@ -1680,7 +1995,7 @@ l_socket_tcp_connect(const l_sockaddr* addr, l_bool* done)
     return sock;
   }
 
-  status = l_impl_socket_connect(sock.unifd, sa);
+  status = l_impl_socket_connect(sock.fd, sa);
   if (status == 0) {
     *done = true;
     return sock;
@@ -1749,7 +2064,7 @@ l_impl_read(int fd, void* out, l_int size)
   ssize_t n = 0;
   int status = 0;
 
-  if (size < 0 || size > L_MAX_RWSIZE) {
+  if (size < 0 || size > L_MAX_INT_IO) {
     l_loge_s(LNUL, "read EINVAL");
     return -2;
   }
@@ -1845,7 +2160,7 @@ l_impl_write(int fd, const void* data, l_int size)
   ssize_t n = 0;
   int status = 0;
 
-  if (size < 0 || size > L_MAX_RWSIZE) {
+  if (size < 0 || size > L_MAX_INT_IO) {
     l_loge_s(LNUL, "write EINVAL");
     return -2;
   }
@@ -1891,7 +2206,7 @@ continue_to_read:
     return done;
   }
 
-  n = l_impl_read(hdl.unifd, buff, left);
+  n = l_impl_read(hdl.fd, buff, left);
 
   if (n > 0) {
     done += n;
@@ -1919,7 +2234,7 @@ continue_to_write:
     return done;
   }
 
-  n = l_impl_write(hdl.unifd, data, left);
+  n = l_impl_write(hdl.fd, data, left);
 
   if (n > 0) {
     done += n;
@@ -1930,12 +2245,12 @@ continue_to_write:
   }
 }
 
-/** io events management **/
+/** io events **/
 
 #define l_filehdl_from(fd) (l_filehdl){fd}
 
 static l_filehdl
-l_evfd_create()
+l_eventfd_create()
 {
   /** eventfd - create a file descriptor for event notification **
   #include <sys/eventfd.h>
@@ -2034,38 +2349,40 @@ l_evfd_create()
 }
 
 static void
-l_evfd_close(l_hanlde* hdl)
+l_eventfd_close(int* hdl)
 {
-  if (hdl->unifd != -1) {
-    if (close(hdl->unifd) != 0) {
+  if (*hdl == -1) {
+    return;
+  } else {
+    if (close(*hdl) != 0) {
       l_loge_1(LNUL, "eventfd close %s", lserror(errno));
     }
-    hdl->unifd = -1;
+    *hdl = -1;
   }
 }
 
 static l_bool
-l_evfd_write(l_filehdl* hdl)
+l_eventfd_write(l_filehdl* hdl)
 {
   l_ulong count = 1;
-  int n = l_impl_write(hdl->unifd, &count, sizeof(l_ulong));
+  int n = l_impl_write(hdl->fd, &count, sizeof(l_ulong));
   if (n == sizeof(l_ulong)) {
     return true;
   } else {
-    l_loge_1(LNUL, "evfd write fail %s", lserror(errno));
+    l_loge_1(LNUL, "eventfd write fail %s", lserror(errno));
     return false;
   }
 }
 
 static l_bool
-l_evfd_read(l_filehdl* hdl)
+l_eventfd_read(l_filehdl* hdl)
 {
   l_ulong count = 0;
-  int n = l_impl_read(hdl->unifd, &count, sizeof(l_ulong));
+  int n = l_impl_read(hdl->fd, &count, sizeof(l_ulong));
   if (n == sizeof(l_ulong)) {
     return true;
   } else {
-    l_loge_1(LNUL, "evfd read fail %s", lserror(errno));
+    l_loge_1(LNUL, "eventfd read fail %s", lserror(errno));
     return false;
   }
 }
@@ -2087,7 +2404,7 @@ l_ioevmgr_init(l_ioevmgr* thiz)
   l_zero_n(mgr, sizeof(l_epollmgr));
   l_mutex_init(&mgr->wklk);
   mgr->ephl = l_epoll_create();
-  mgr->wake_hdl = l_evfd_create();
+  mgr->wake_hdl = l_eventfd_create();
 }
 
 L_EXTERN void
@@ -2099,7 +2416,7 @@ l_ioevmgr_free(l_ioevmgr* thiz)
   mgr->nready = 0;
   l_mutex_free(&mgr->wklk);
   l_epoll_close(&mgr->ephl);
-  l_evfd_close(&mgr->wake_hdl);
+  l_eventfd_close(&mgr->wake_hdl);
 }
 
 L_EXTERN l_bool
@@ -2125,7 +2442,7 @@ l_ioevmgr_wakeup(l_ioevmgr* thiz)
   mgr->wake_count = 1;
   l_mutex_unlock(wklk);
 
-  return l_evfd_write(&mgr->wake_hdl);
+  return l_eventfd_write(&mgr->wake_hdl);
 }
 
 /** epoll - I/O event notification facility **
@@ -2262,18 +2579,18 @@ l_epoll_create()
 static void
 l_epoll_close(l_filehdl* hdl)
 {
-  if (hdl->unifd != -1) {
-    if (close(hdl->unifd) != 0) {
+  if (hdl->fd != -1) {
+    if (close(hdl->fd) != 0) {
       l_loge_1(LNUL, "close epoll %s", lserror(errno));
     }
-    hdl->unifd = -1;
+    hdl->fd = -1;
   }
 }
 
 static l_bool
 l_epoll_ctl(l_filehdl* hdl, int op, int fd, struct epoll_event* ev)
 {
-  if (hdl->unifd == -1 || fd == -1 || hdl->unifd == fd) {
+  if (hdl->fd == -1 || fd == -1 || hdl->fd == fd) {
     l_loge_s(LNUL, "l_epoll_ctl EINVAL");
   }
 
@@ -2314,7 +2631,7 @@ l_epoll_ctl(l_filehdl* hdl, int op, int fd, struct epoll_event* ev)
   EPERM - the target file fd does not support epoll. this can occur if fd
   refers to, for example, a regular file or a directory. */
 
-  return epoll_ctl(hdl->unifd, op, fd, ev) == 0;
+  return epoll_ctl(hdl->fd, op, fd, ev) == 0;
 }
 
 static l_bool
@@ -2408,7 +2725,7 @@ l_epollmgr_wait(l_epollmgr* mgr, int ms)
   examination has wrong checksum and is discarded. There may be other circumstances in which
   a fd is spuriously reported as ready. Thus it may be safer to use O_NONBLOCK on sockets that
   should not block. */
-  int n = epoll_wait(mgr->ephl.unifd, mgr->ready_arr, L_EPOLL_MAX_EVENTS, ms);
+  int n = epoll_wait(mgr->ephl.fd, mgr->ready_arr, L_EPOLL_MAX_EVENTS, ms);
   if (n == -1) {
     if (errno == EINTR) { /* the call was interrupted by a signal handler */
       l_epollmgr_wait(mgr, 0);
@@ -2559,14 +2876,14 @@ l_ioevmgr_mod(l_ioevmgr* thiz, l_filehdl fd, l_ulong ud, l_ushort masks)
   struct epoll_event ev;
   ev.events = l_get_epoll_masks(masks);
   ev.data.u64 = ud;
-  return l_epoll_mod(&mgr->ephl, fd.unifd, &ev);
+  return l_epoll_mod(&mgr->ephl, fd.fd, &ev);
 }
 
 L_EXTERN l_bool
 l_ioevmgr_del(l_ioevmgr* thiz, l_filehdl fd)
 {
   l_epollmgr* mgr = (l_epollmgr*)thiz;
-  return l_epoll_del(&mgr->ephl, fd.unifd);
+  return l_epoll_del(&mgr->ephl, fd.fd);
 }
 
 L_EXTERN int
@@ -2588,8 +2905,8 @@ l_ioevmgr_timed_wait(l_ioevmgr* thiz, int ms, void (*cb)(l_ulong, l_ushort))
     struct epoll_event e;
     mgr->wake_hdl_added = true;
     e.events = EPOLLERR | EPOOLIN;
-    e.data.u64 = mgr->wake_hdl.unifd;
-    if (!l_epoll_add(&mgr->ephl, mgr->wake_hdl.unifd, &e)) {
+    e.data.u64 = mgr->wake_hdl.fd;
+    if (!l_epoll_add(&mgr->ephl, mgr->wake_hdl.fd, &e)) {
       l_loge_s(LNUL, "epoll_wait add wake fd fail");
     }
   }
@@ -2604,8 +2921,8 @@ l_ioevmgr_timed_wait(l_ioevmgr* thiz, int ms, void (*cb)(l_ulong, l_ushort))
 
   for (; pcur < pend; ++pcur) {
     /* l_assert(sizeof(l_filehdl) == 4) && svid high 32 bit cannot be 0 */
-    if (pcur->data.u64 == mgr->wake_hdl.unifd) {
-      l_evfd_read(&mgr->wake_hdl); /* return > 0 success, -1 block, -2 error */
+    if (pcur->data.u64 == mgr->wake_hdl.fd) {
+      l_eventfd_read(&mgr->wake_hdl); /* return > 0 success, -1 block, -2 error */
       l_mutex_lock(&mgr->wklk);
       mgr->wake_count = 0;
       l_mutex_unlock(&mgr->wklk);

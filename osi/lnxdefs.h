@@ -60,8 +60,8 @@ typedef struct {
   socklen_t len;
   union {
   struct sockaddr sa;
-  struct sockaddr_in in;
-  struct sockaddr_in6 in6;
+  struct sockaddr_in sa4;
+  struct sockaddr_in6 sa6;
   } addr;
 } l_impl_lnxsaddr;
 

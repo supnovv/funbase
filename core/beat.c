@@ -930,13 +930,13 @@ l_master_loop(lnlylib_env* main_env)
   l_squeue_init(&rxms);
   l_squeue_init(&svcq);
 
-  /* launcher is the 1st service to bang the whole new world */
-
   launcher = l_master_create_service(M, L_SERVICE_LAUNCHER, L_SERVICE(&l_launcher_service_cb), 0);
   on_create = l_master_create_message(M, launcher->srvc_id, L_MSG_SERVICE_ON_CREATE, 0, 0);
   l_squeue_push(&launcher->srvc_msgq, &on_create->node);
   stbl->slot_arr[l_service_get_slot_index(launcher->srvc_id)].service = 0; /* need detach the service from the table first before insert into global q */
   l_squeue_push(&svcq, &launcher->node);
+
+  l_socket_prepare();
 
   for (; ;) {
 
@@ -1868,7 +1868,7 @@ typedef struct {
   l_socket_listen_svud* listen_svud;
   l_ulong listen_svid;
   l_ulong upper_svid;
-  l_ipaddr rmt_ip;
+  l_sbuf64 rmt_ip;
   l_ushort rmt_port;
   l_squeue wrmq;
   l_squeue rdmq;
@@ -1930,7 +1930,7 @@ l_socket_listen_service_accept_conn(void* ud, l_socketconn* conn)
   inconn_svud->listen_svid = E->S->srvc_id;
   inconn_svud->upper_svid = 0;
   inconn_svud->rmt_port = l_sockaddr_port(remote);
-  l_sockaddr_getip(remote, &inconn_svud->rmt_ip, sizeof(l_ipaddr));
+  inconn_svud->rmt_ip = l_sockaddr_getip(remote);
 
   l_create_service(E, L_USEHDL_SERVICE(conn->sock, &l_socket_inconn_service_cb), inconn_svud);
 }
@@ -2094,7 +2094,7 @@ l_socket_inconn_service_proc(lnlylib_env* E)
 
 typedef struct {
   l_sockaddr local;
-  l_ipaddr rmt_ip;
+  l_sbuf64 rmt_ip;
   l_ushort rmt_port;
 } l_socket_outconn_svud;
 
@@ -2229,29 +2229,31 @@ L_EXTERN void
 l_impl_logger_func(lnlylib_env* E, const void* tag, const void* fmt, ...)
 {
   int level = l_cstr(tag)[0] - '0';
-  int nargs = l_cstr(tag)[1];
-  l_ostream temp_out;
-  l_ostream* out = 0;
-  va_list vl;
 
   if (!fmt || level > l_global_loglevel) {
     return;
-  }
-
-  out = l_start_logging(E, l_cstr(tag) + 2, &temp_out);
-
-  if (nargs == 'n') {
-    va_start(vl, fmt);
-    nargs = va_arg(vl, l_int);
-    l_ostream_format_n(out, fmt, nargs, va_arg(vl, l_value*));
-    va_end(vl);
   } else {
-    va_start(vl, fmt);
-    l_impl_ostream_format_v(out, fmt, nargs - '0', vl);
-    va_end(vl);
-  }
 
-  l_ostream_write(out, L_NEWLINE, L_NL_SIZE);
+    int nargs = l_cstr(tag)[1];
+    l_ostream temp_out;
+    l_ostream* out = 0;
+    va_list vl;
+
+    out = l_start_logging(E, l_cstr(tag) + 2, &temp_out);
+
+    if (nargs == 'n') {
+      va_start(vl, fmt);
+      nargs = va_arg(vl, l_int);
+      l_ostream_format_n(out, fmt, nargs, va_arg(vl, l_value*));
+      va_end(vl);
+    } else {
+      va_start(vl, fmt);
+      l_impl_ostream_format_v(out, fmt, nargs - '0', vl);
+      va_end(vl);
+    }
+
+    l_ostream_write(out, L_NEWLINE, L_NL_SIZE);
+  }
 }
 
 /** output stream **/
@@ -3039,7 +3041,7 @@ static l_strbuf*
 l_strbuf_init(void* p, l_int total)
 {
   l_strbuf* b = (l_strbuf*)p;
-  b->total = total;
+  b->total = total - 1;
   b->n = 0;
   b->s[0] = 0;
   return b;
@@ -3071,10 +3073,40 @@ l_strbuf_reset(l_strbuf* b, l_strn s)
   return l_strbuf_write(b, s);
 }
 
-L_EXTERN l_byte*
+L_EXTERN const l_byte*
 l_strbuf_cstr(l_strbuf* b)
 {
   return b->s;
+}
+
+L_EXTERN l_int
+l_strbuf_size(l_strbuf* b)
+{
+  return b->n;
+}
+
+L_EXTERN l_int
+l_strbuf_capacity(l_strbuf* b)
+{
+  return b->total;
+}
+
+L_EXTERN l_byte*
+l_strbuf_getp(l_strbuf* b)
+{
+  return b->s;
+}
+
+L_EXTERN void
+l_strbuf_add_len(l_strbuf* b, l_int n)
+{
+  b->n += n;
+}
+
+L_EXTERN void
+l_strbuf_adjust_len(l_strbuf* b)
+{
+  b->n = strlen((const char*)b->s);
 }
 
 L_EXTERN l_strn

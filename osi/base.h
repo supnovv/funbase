@@ -23,7 +23,7 @@
 typedef struct {
   l_long sec;
   l_medit nsec;
-  l_byte zone;
+  l_medit zsec;
 } l_time;
 
 typedef struct {
@@ -53,7 +53,7 @@ l_date_hour(const l_date* d)
 L_INLINE l_long
 l_date_year(const l_date* d)
 {
-  return ((d->yhms >> 17) & 0x3ffff);
+  return (d->yhms >> 17);
 }
 
 L_INLINE l_byte
@@ -89,19 +89,22 @@ l_date_timezone(const l_date* d)
 L_EXTERN l_time l_system_time();
 L_EXTERN l_time l_mono_time();
 L_EXTERN l_date l_system_date();
-L_EXTERN l_date l_date_fromsecs(l_long utcsecs);
-L_EXTERN l_date l_date_fromtime(l_time utctime);
+L_EXTERN l_date l_date_from_secs(l_long utcsecs);
+L_EXTERN l_date l_date_from_time(l_time utctime);
+L_EXTERN l_medit l_utcsec_offset();
 
 /** file operations **/
 
 typedef struct {
-  void* ds;
+  void* impl;
 } l_dirstm;
 
-L_EXTERN int l_dirstm_opendir(l_dirstm* self, const void* name);
-L_EXTERN void l_dirstm_close(l_dirstm* self);
-L_EXTERN const l_byte* l_dirstm_read(l_dirstm* self);
-L_EXTERN const l_byte* l_dirstm_read2(l_dirstm* self, int* isdir);
+L_EXTERN l_dirstm l_dirstm_open(const void* name);
+L_EXTERN l_bool l_dirstm_is_empty(const l_dirstm* stm);
+L_EXTERN l_bool l_dirstm_nt_empty(const l_dirstm* stm);
+L_EXTERN void l_dirstm_close(l_dirstm* stm);
+L_EXTERN const l_byte* l_dirstm_read(l_dirstm* stm);
+L_EXTERN const l_byte* l_dirstm_read_x(l_dirstm* stm, int* isdir);
 
 typedef struct {
   l_long size;
@@ -113,15 +116,16 @@ typedef struct {
   l_byte islink;
 } l_fileattr;
 
-L_EXTERN int l_file_exist(const void* name);
-L_EXTERN int l_file_exist_in(l_filehdl* dir, const void* name);
-L_EXTERN int l_file_folder_exist(const void* foldername);
+L_EXTERN l_bool l_file_exist(const void* name);
+L_EXTERN l_bool l_file_exist_in(l_filehdl* dir, const void* name);
+L_EXTERN l_bool l_file_dir_exist(const void* dirname);
+L_EXTERN l_bool l_file_is_dir(const void* name);
 L_EXTERN l_ulong l_file_size(const void* name);
 L_EXTERN l_bool l_file_attr(l_fileattr* addr, const void* name);
-L_EXTERN int l_file_opendir(l_filehdl* self, const void* name);
-L_EXTERN void l_file_closefd(l_filehdl* self);
+L_EXTERN l_filehdl l_file_open_dir(const void* name);
+L_EXTERN void l_filehdl_close(l_filehdl* hdl);
 
-/** dynamic libarary loading **/
+/** dynamic library loading **/
 
 typedef struct {
   void* impl;
@@ -135,7 +139,7 @@ L_EXTERN l_dynhdl l_dynhdl_open_from(l_strn path, l_strn lib_name);
 L_EXTERN void* l_dynhdl_load(l_dynhdl* hdl, l_strn sym_name);
 L_EXTERN void l_dynhdl_close(l_dynhdl* hdl);
 
-/** concurrency and synchronization **/
+/** concurrency **/
 
 L_DEFINE_STRUCT_OF_SIZE(l_thrhdl, L_IMPL_THRHDL_TYPE_SIZE);
 L_DEFINE_STRUCT_OF_SIZE(l_thrkey, L_IMPL_THRKEY_TYPE_SIZE);
@@ -147,9 +151,9 @@ L_EXTERN l_thrhdl l_thrhdl_self();
 L_EXTERN int l_thrhdl_create(l_thrhdl* thrhdl, void* (*start)(void*), void* para);
 L_EXTERN int l_thrhdl_cancel(l_thrhdl* thrhdl);
 L_EXTERN int l_thrhdl_join(l_thrhdl* thrhdl);
-L_EXTERN void l_thrhdl_exit();
 L_EXTERN void l_thread_sleep_us(l_long us);
 L_EXTERN void l_thread_sleep_ms(l_long ms);
+L_EXTERN void l_thread_exit();
 
 L_EXTERN void l_thrkey_init(l_thrkey* self);
 L_EXTERN void l_thrkey_free(l_thrkey* self);
@@ -194,6 +198,8 @@ L_DEFINE_STRUCT_OF_SIZE(l_ioevmgr, L_IMPL_IOEVMGR_TYPE_SIZE);
 typedef l_filehdl l_socket;
 #define l_socket_is_empty l_filehdl_is_empty
 #define l_socket_nt_empty l_filehdl_nt_empty
+#define L_EMPTY_SOCKET L_EMPTY_HDL
+#define l_empty_socket l_empty_filehdl
 
 typedef struct {
   l_socket sock;
@@ -202,17 +208,19 @@ typedef struct {
 
 L_EXTERN l_bool l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port);
 L_EXTERN l_sockaddr l_sockaddr_local(l_socket* sock);
-L_EXTERN l_bool l_sockaddr_getip(l_sockaddr* self, void* out, l_int bfsz);
+L_EXTERN l_sbuf64 l_sockaddr_getip(l_sockaddr* self);
 L_EXTERN l_ushort l_sockaddr_port(l_sockaddr* self);
-L_EXTERN void l_socket_init();
-L_EXTERN void l_socket_close(l_socket* sock);
-L_EXTERN void l_socket_shutdown(l_socket* sock, l_byte r_w_a);
-L_EXTERN l_socket l_socket_tcp_listen(const l_sockaddr* addr, int backlog);
+L_EXTERN void l_socket_prepare();
 L_EXTERN void l_socket_accept(l_socket skt, void (*cb)(void*, l_socketconn*), void* ud);
+L_EXTERN l_socket l_socket_tcp_listen(const l_sockaddr* addr, int backlog);
 L_EXTERN l_socket l_socket_tcp_connect(const l_sockaddr* addr, l_bool* done);
 L_EXTERN l_bool l_socket_cmpl_connect(l_socket sock);
+L_EXTERN void l_socket_close(l_socket* sock);
+L_EXTERN void l_socket_shutdown(l_socket* sock, l_byte r_w_a);
 L_EXTERN l_int l_data_read(l_filehdl hdl, void* out, l_int size);
 L_EXTERN l_int l_data_write(l_filehdl hdl, const void* from, l_int size);
+
+/** io events **/
 
 L_EXTERN void l_ioevmgr_init(l_ioevmgr* mgr);
 L_EXTERN void l_ioevmgr_free(l_ioevmgr* mgr);
