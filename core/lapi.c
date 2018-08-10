@@ -150,6 +150,12 @@ ll_pop_beyond(lua_State* L, int pos)
   }
 }
 
+L_EXTERN void
+ll_push_value(lua_State* L, int value_at)
+{
+  lua_pushvalue(L, value_at);
+}
+
 L_EXTERN void /* [-1, +1, e] */
 ll_set_global(lua_State* L, const void* name, int stackindex)
 {

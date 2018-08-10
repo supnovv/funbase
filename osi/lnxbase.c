@@ -85,13 +85,13 @@ l_impl_get_time(clockid_t id)
   struct timespec spec = {0};
 
   if (clock_gettime(id, &spec) != 0) {
-    l_loge_2("clock_gettime %d %s", ld(id), lserror(errno));
+    l_loge_2(LNUL, "clock_gettime %d %s", ld(id), lserror(errno));
     return time;
   }
 
   time.sec = (l_long)spec.tv_sec;
   time.nsec = (l_umedit)spec.tv_nsec;
-  time.zone = 0;
+  time.zsec = 0;
 
   return time;
 }
@@ -170,7 +170,7 @@ l_date_from_secs(l_long utcsecs)
   }; */
 
   if (gmtime_r(&secs, &st) != &st) { /* gmtime_r needs _POSIX_C_SOURCE >= 1 */
-    l_loge_1("gmtime_r %s", lserror(errno));
+    l_loge_1(LNUL, "gmtime_r %s", lserror(errno));
     return date;
   }
 
@@ -200,12 +200,13 @@ l_date_from_secs(l_long utcsecs)
     effect at the time described.  The value is positive if
     daylight saving time is in effect, zero if it is not, and
     negative if the information is not available. */
-    l_logw_s("gmtime_r invalid tm_isdst");
+    l_logw_s(LNUL, "gmtime_r invalid tm_isdst");
   }
 
   return date;
 }
 
+#if 0
 static l_strn l_weekday_abbr[] = {
   L_STR("Sun"), L_STR("Mon"), L_STR("Tue"), L_STR("Wed"),
   L_STR("Thu"), L_STR("Fri"), L_STR("Sat"), L_STR("Sun")
@@ -215,6 +216,7 @@ static l_strn l_month_abbr[] = {
   L_STR("Nul"), L_STR("Jan"), L_STR("Feb"), L_STR("Mar"), L_STR("Apr"), L_STR("May"), L_STR("Jun"),
   L_STR("Jul"), L_STR("Aug"), L_STR("Sep"), L_STR("Oct"), L_STR("Nov"), L_STR("Dec")
 };
+#endif
 
 L_EXTERN l_medit
 l_utcsec_offset()
@@ -227,7 +229,7 @@ l_utcsec_offset()
   struct tm local;
 
   if (localtime_r(&t, &local) != &local) {
-    l_loge_1("localtime_r %s", lserror(errno));
+    l_loge_1(LNUL, "localtime_r %s", lserror(errno));
     return 0;
   }
 
@@ -238,7 +240,7 @@ l_utcsec_offset()
     effect at the time described.  The value is positive if
     daylight saving time is in effect, zero if it is not, and
     negative if the information is not available. */
-    l_logw_s("localtime_r invalid tm_isdst");
+    l_logw_s(LNUL, "localtime_r invalid tm_isdst");
   }
 
   /* long tm_gmtoff; // offset from UTC in seconds
@@ -253,18 +255,18 @@ l_utcsec_offset()
   struct tm local;
 
   if (localtime_r(&utcsecs, &local) != &local) {
-    l_loge_1("localtime_r %s", lserror(errno));
+    l_loge_1(LNUL, "localtime_r %s", lserror(errno));
     return 0;
   }
 
-  if (st.tm_isdst != 0) {
+  if (local.tm_isdst != 0) {
     /* daylight saving time is in effect. gmtime_r将时间转换成协调统一时间的分解
     结构，不会像localtime_r那样考虑本地时区和夏令时，该值应该在此处无效.
     A flag that indicates whether daylight saving time is in
     effect at the time described.  The value is positive if
     daylight saving time is in effect, zero if it is not, and
     negative if the information is not available. */
-    l_logw_s("localtime_r invalid tm_isdst");
+    l_logw_s(LNUL, "localtime_r invalid tm_isdst");
   }
 
   offset = (l_medit)(local.tm_hour * 3600 + local.tm_min * 60 + local.tm_sec);
@@ -2019,6 +2021,9 @@ l_socket_cmpl_connect(l_socket sock)
   connect() completed successfully (SO_ERROR is zero) or
   unsuccessfully (SO_ERROR is one of the usual error codes
   listed here, explaining the reason for the failure). **/
+
+  L_UNUSED(sock);
+  return false;
 }
 
 static l_int
@@ -2078,15 +2083,14 @@ l_impl_read(int fd, void* out, l_int size)
     }
 
     status = errno;
-    switch (status) {
-    case EINTR:
+
+    if (status == EAGAIN || status == EWOULDBLOCK) {
+      return -1; /* data is not available currently */
+    } else if (status == EINTR) {
       /* interrupted by a signal before read any bytes,
       try to read again. */
-      break; /* continue the for loop */
-    case EAGAIN:
-    case EWOULDBLOCK:
-      return -1; /* data is not available currently */
-    default:
+      continue; /* continue the for loop */
+    } else {
       l_loge_1(LNUL, "read %s", lserror(status));
       return -2; /* error occurred */
     }
@@ -2174,15 +2178,14 @@ l_impl_write(int fd, const void* data, l_int size)
     }
 
     status = errno;
-    switch (status) {
-    case EINTR:
+
+    if (status == EAGAIN || status == EWOULDBLOCK) {
+      return -1; /* cannot write currently */
+    } else if (status == EINTR) {
       /* interrupted by a signal before written any bytes,
       try to read again. */
-      break; /* continue the for loop */
-    case EAGAIN:
-    case EWOULDBLOCK:
-      return -1; /* cannot write currently */
-    default:
+      continue; /* continue the for loop */
+    } else {
       l_loge_1(LNUL, "write %s", lserror(status));
       return -2; /* error occurred */
     }
@@ -2249,7 +2252,7 @@ continue_to_write:
 
 #define l_filehdl_from(fd) (l_filehdl){fd}
 
-static l_filehdl
+static int
 l_eventfd_create()
 {
   /** eventfd - create a file descriptor for event notification **
@@ -2345,7 +2348,7 @@ l_eventfd_create()
   if (hdl == -1) {
     l_loge_1(LNUL, "eventfd %s", lserror(errno));
   }
-  return l_filehdl_from(hdl);
+  return hdl;
 }
 
 static void
@@ -2362,10 +2365,10 @@ l_eventfd_close(int* hdl)
 }
 
 static l_bool
-l_eventfd_write(l_filehdl* hdl)
+l_eventfd_write(int hdl)
 {
   l_ulong count = 1;
-  int n = l_impl_write(hdl->fd, &count, sizeof(l_ulong));
+  int n = l_impl_write(hdl, &count, sizeof(l_ulong));
   if (n == sizeof(l_ulong)) {
     return true;
   } else {
@@ -2375,74 +2378,16 @@ l_eventfd_write(l_filehdl* hdl)
 }
 
 static l_bool
-l_eventfd_read(l_filehdl* hdl)
+l_eventfd_read(int hdl)
 {
   l_ulong count = 0;
-  int n = l_impl_read(hdl->fd, &count, sizeof(l_ulong));
+  int n = l_impl_read(hdl, &count, sizeof(l_ulong));
   if (n == sizeof(l_ulong)) {
     return true;
   } else {
     l_loge_1(LNUL, "eventfd read fail %s", lserror(errno));
     return false;
   }
-}
-
-typedef struct {
-  l_filehdl ephl;
-  l_filehdl wake_hdl;
-  int wake_hdl_added;
-  int wake_count;
-  int nready;
-  l_mutex wklk;
-  struct epoll_event ready_arr[L_EPOLL_MAX_EVENTS+1];
-} l_epollmgr;
-
-L_EXTERN void
-l_ioevmgr_init(l_ioevmgr* thiz)
-{
-  l_epollmgr* mgr = (l_epollmgr*)thiz;
-  l_zero_n(mgr, sizeof(l_epollmgr));
-  l_mutex_init(&mgr->wklk);
-  mgr->ephl = l_epoll_create();
-  mgr->wake_hdl = l_eventfd_create();
-}
-
-L_EXTERN void
-l_ioevmgr_free(l_ioevmgr* thiz)
-{
-  l_epollmgr* mgr = (l_epollmgr*)thiz;
-  mgr->wake_hdl_added = false;
-  mgr->wake_count = 0;
-  mgr->nready = 0;
-  l_mutex_free(&mgr->wklk);
-  l_epoll_close(&mgr->ephl);
-  l_eventfd_close(&mgr->wake_hdl);
-}
-
-L_EXTERN l_bool
-l_ioevmgr_wakeup(l_ioevmgr* thiz)
-{
-  l_epollmgr* mgr = (l_impl_epollmgr*)thiz;
-  l_mutex* wklk = &mgr->wklk;
-
-  /* if we use a flag like "wait_is_called" to indicate master called epoll_wait() or not,
-  and then write eventfd to signal master wakeup only "wait_is_called" is true, then master
-  may not be triggered to wakeup. because if this kind of check is performed just before
-  master call epoll_wait(), wakeup is not signaled but master will enter into wait state
-  next. so dont use this trick. */
-
-  /* here is the another trick to count the wakeup times.
-  this function can be called from any thread, the counter
-  need to be protected by a lock.*/
-  l_mutex_lock(wklk);
-  if (mgr->wake_count) {
-    l_mutex_unlock(wklk);
-    return true; /* already signaled to wakeup */
-  }
-  mgr->wake_count = 1;
-  l_mutex_unlock(wklk);
-
-  return l_eventfd_write(&mgr->wake_hdl);
 }
 
 /** epoll - I/O event notification facility **
@@ -2534,8 +2479,8 @@ example, FreeBSD has kqueue, and Solaris has /dev/poll.
 The set of fds that is being monitored via an epoll fd can be viewed the entry for the
 epoll fd in the process's /proc/[pid]/fdinfo directory. */
 
-static l_filehdl
-l_epoll_create()
+static int
+l_impl_epoll_create()
 {
   /** epoll_create **
   #include <sys/epoll.h>
@@ -2573,25 +2518,25 @@ l_epoll_create()
   if (epfd == -1) {
     l_loge_1(LNUL, "epoll_create1 %s", lserror(errno));
   }
-  return l_filehdl_from(epfd);
+  return epfd;
 }
 
 static void
-l_epoll_close(l_filehdl* hdl)
+l_impl_epoll_close(int* hdl)
 {
-  if (hdl->fd != -1) {
-    if (close(hdl->fd) != 0) {
+  if (*hdl != -1) {
+    if (close(*hdl) != 0) {
       l_loge_1(LNUL, "close epoll %s", lserror(errno));
     }
-    hdl->fd = -1;
+    *hdl = -1;
   }
 }
 
 static l_bool
-l_epoll_ctl(l_filehdl* hdl, int op, int fd, struct epoll_event* ev)
+l_impl_epoll_ctl(int hdl, int op, int fd, struct epoll_event* ev)
 {
-  if (hdl->fd == -1 || fd == -1 || hdl->fd == fd) {
-    l_loge_s(LNUL, "l_epoll_ctl EINVAL");
+  if (hdl == -1 || fd == -1 || hdl == fd) {
+    l_loge_s(LNUL, "l_impl_epoll_ctl EINVAL");
   }
 
   /** epoll_event **
@@ -2631,37 +2576,37 @@ l_epoll_ctl(l_filehdl* hdl, int op, int fd, struct epoll_event* ev)
   EPERM - the target file fd does not support epoll. this can occur if fd
   refers to, for example, a regular file or a directory. */
 
-  return epoll_ctl(hdl->fd, op, fd, ev) == 0;
+  return epoll_ctl(hdl, op, fd, ev) == 0;
 }
 
 static l_bool
-l_epoll_add(l_filehdl* hdl, int fd, struct epoll_event* ev)
+l_impl_epoll_add(int hdl, int fd, struct epoll_event* ev)
 {
-  if (l_epoll_ctl(hdl, EPOLL_CTL_ADD, fd, ev)) {
+  if (l_impl_epoll_ctl(hdl, EPOLL_CTL_ADD, fd, ev)) {
     return true;
   } else {
-    if (errno == EEXIST && l_epoll_ctl(hdl, EPOLL_CTL_MOD, fd, ev)) {
+    if (errno == EEXIST && l_impl_epoll_ctl(hdl, EPOLL_CTL_MOD, fd, ev)) {
       return true;
     } else {
-      l_loge_1(LNUL, "l_epoll_add fail %s", lserror(errno));
+      l_loge_1(LNUL, "l_impl_epoll_add fail %s", lserror(errno));
       return false;
     }
   }
 }
 
 static l_bool
-l_epoll_mod(l_filehdl* hdl, int fd, struct epoll_event* ev)
+l_impl_epoll_mod(int hdl, int fd, struct epoll_event* ev)
 {
-  if (l_epoll_ctl(hdl, EPOLL_CTL_MOD, fd, ev)) {
+  if (l_impl_epoll_ctl(hdl, EPOLL_CTL_MOD, fd, ev)) {
     return true;
   } else {
-    l_loge_1(LNUL, "l_epoll_mod fail %s", lserror(errno));
+    l_loge_1(LNUL, "l_impl_epoll_mod fail %s", lserror(errno));
     return false;
   }
 }
 
 static l_bool
-l_epoll_del(l_filehdl* hdl, int fd)
+l_impl_epoll_del(int hdl, int fd)
 {
   /* In kernel versions before 2.6.9, the EPOLL_CTL_DEL
   operation required a non-null pointer in event, even
@@ -2671,16 +2616,16 @@ l_epoll_del(l_filehdl* hdl, int fd)
   2.6.9 should specify a non-null pointer in event. */
   struct epoll_event ev;
   l_zero_n(&ev, sizeof(struct epoll_event));
-  if (l_epoll_ctl(hdl, EPOLL_CTL_DEL, fd, &ev)) {
+  if (l_impl_epoll_ctl(hdl, EPOLL_CTL_DEL, fd, &ev)) {
     return true;
   } else {
-    l_loge_1(LNUL, "l_epoll_del fail %s", lserror(errno));
+    l_loge_1(LNUL, "l_impl_epoll_del fail %s", lserror(errno));
     return false;
   }
 }
 
 static void
-l_epollmgr_wait(l_epollmgr* mgr, int ms)
+l_impl_epollmgr_wait(l_impl_epollmgr* mgr, int ms)
 {
   /** epoll_wait **
   #include <sys/epoll.h>
@@ -2725,10 +2670,10 @@ l_epollmgr_wait(l_epollmgr* mgr, int ms)
   examination has wrong checksum and is discarded. There may be other circumstances in which
   a fd is spuriously reported as ready. Thus it may be safer to use O_NONBLOCK on sockets that
   should not block. */
-  int n = epoll_wait(mgr->ephl.fd, mgr->ready_arr, L_EPOLL_MAX_EVENTS, ms);
+  int n = epoll_wait(mgr->epfd, mgr->ready, L_MAX_IO_EVENTS, ms);
   if (n == -1) {
     if (errno == EINTR) { /* the call was interrupted by a signal handler */
-      l_epollmgr_wait(mgr, 0);
+      l_impl_epollmgr_wait(mgr, 0);
     } else {
       l_loge_1(LNUL, "epoll_wait %s", lserror(errno));
     }
@@ -2740,48 +2685,48 @@ l_epollmgr_wait(l_epollmgr* mgr, int ms)
 
 static uint32_t l_epoll_mask[] = {
   /* 0x00 */ 0,
-  /* 0x01 */ EPOLLIN,    /* L_EVENT_IO_READ */
-  /* 0x02 */ EPOLLOUT,   /* L_EVENT_IO_WRITE */
+  /* 0x01 */ EPOLLIN,    /* L_IO_EVENT_READ */
+  /* 0x02 */ EPOLLOUT,   /* L_IO_EVENT_WRITE */
   /* 0x03 */ 0,
-  /* 0x04 */ EPOLLPRI,   /* L_EVENT_IO_PRI */
+  /* 0x04 */ EPOLLPRI,   /* L_IO_EVENT_PRI */
   /* 0x05 */ 0,
   /* 0x06 */ 0,
   /* 0x07 */ 0,
-  /* 0x08 */ EPOLLRDHUP, /* L_EVENT_IO_RDH */
+  /* 0x08 */ EPOLLRDHUP, /* L_IO_EVENT_RDH */
   /* 0x09 */ 0
 };
 
 static l_ushort l_ioev_rd[] = {
-  0, L_EVENT_IO_READ
+  0, L_IO_EVENT_READ
 };
 
 static l_ushort l_ioev_wr[] = {
-  0, L_EVENT_IO_WRITE
+  0, L_IO_EVENT_WRITE
 };
 
 static l_ushort l_ioev_pri[] = {
-  0, L_EVENT_IO_PRI
+  0, L_IO_EVENT_PRI
 };
 
 static l_ushort l_ioev_rdh[] = {
-  0, L_EVENT_IO_RDH
+  0, L_IO_EVENT_RDH
 };
 
 static l_ushort l_ioev_hup[] = {
-  0, L_EVENT_IO_HUP
+  0, L_IO_EVENT_HUP
 };
 
 static l_ushort l_ioev_err[] = {
-  0, L_EVENT_IO_ERR
+  0, L_IO_EVENT_ERR
 };
 
 static uint32_t
-l_get_epoll_masks(l_umedit masks)
+l_gen_epoll_masks(l_umedit masks)
 {
-  return (l_epoll_mask[masks & L_EVENT_IO_READ] |
-          l_epoll_mask[masks & L_EVENT_IO_WRITE] |
-          l_epoll_mask[masks & L_EVENT_IO_PRI] |
-          l_epoll_mask[masks & L_EVENT_IO_RDH] |
+  return (l_epoll_mask[masks & L_IO_EVENT_READ] |
+          l_epoll_mask[masks & L_IO_EVENT_WRITE] |
+          l_epoll_mask[masks & L_IO_EVENT_PRI] |
+          l_epoll_mask[masks & L_IO_EVENT_RDH] |
           EPOLLHUP | EPOLLERR);
 }
 
@@ -2797,8 +2742,55 @@ l_get_ioev_masks(struct epoll_event* ev)
           l_ioev_err[(masks & EPOLLERR) != 0]);
 }
 
+L_EXTERN void
+l_ioevmgr_init(l_ioevmgr* self)
+{
+  l_impl_epollmgr* mgr = (l_impl_epollmgr*)self;
+  l_zero_n(mgr, sizeof(l_impl_epollmgr));
+  l_mutex_init((l_mutex*)&mgr->wake_lock);
+  mgr->epfd = l_impl_epoll_create();
+  mgr->wakefd = l_eventfd_create();
+}
+
+L_EXTERN void
+l_ioevmgr_free(l_ioevmgr* self)
+{
+  l_impl_epollmgr* mgr = (l_impl_epollmgr*)self;
+  mgr->wakefd_added = false;
+  mgr->wakeup_count = 0;
+  mgr->nready = 0;
+  l_mutex_free((l_mutex*)&mgr->wake_lock);
+  l_impl_epoll_close(&mgr->epfd);
+  l_eventfd_close(&mgr->wakefd);
+}
+
 L_EXTERN l_bool
-l_ioevmgr_add(l_ioevmgr* thiz, l_filehdl fd, l_ulong ud, l_ushort masks)
+l_ioevmgr_wakeup(l_ioevmgr* self)
+{
+  l_impl_epollmgr* mgr = (l_impl_epollmgr*)self;
+
+  /* if we use a flag like "wait_is_called" to indicate master called epoll_wait() or not,
+  and then write eventfd to signal master wakeup only "wait_is_called" is true, then master
+  may not be triggered to wakeup. because if this kind of check is performed just before
+  master call epoll_wait(), wakeup is not signaled but master will enter into wait state
+  next. so dont use this trick. */
+
+  /* here is the another trick to count the wakeup times.
+  this function can be called from any thread, the counter
+  need to be protected by a lock.*/
+  l_mutex_lock((l_mutex*)&mgr->wake_lock);
+  if (mgr->wakeup_count) {
+    l_mutex_unlock((l_mutex*)&mgr->wake_lock);
+    return true; /* already signaled to wakeup */
+  }
+  mgr->wakeup_count = 1;
+  l_mutex_unlock((l_mutex*)&mgr->wake_lock);
+
+  return l_eventfd_write(mgr->wakefd);
+}
+
+L_EXTERN l_bool
+l_ioevmgr_add(l_ioevmgr* self, l_filehdl hdl, l_ulong ud, l_ushort masks)
 {
   /** event masks **
   The bit masks can be composed using the following event types:
@@ -2862,34 +2854,34 @@ l_ioevmgr_add(l_ioevmgr* thiz, l_filehdl fd, l_ulong ud, l_ushort masks)
   to epoll_ctl that specifies EPOLLEXCLUSIVE and specifies the target
   fd as an epoll instance will likewise fail. The error in all of
   these cases is EINVAL. */
-  l_epollmgr* mgr = (l_epollmgr*)thiz;
+  l_impl_epollmgr* mgr = (l_impl_epollmgr*)self;
   struct epoll_event ev;
-  ev.events = l_get_epoll_masks(masks);
+  ev.events = l_gen_epoll_masks(masks);
   ev.data.u64 = ud;
-  return l_epoll_add(&mgr->ephl, fd, &ev);
+  return l_impl_epoll_add(mgr->epfd, hdl.fd, &ev);
 }
 
 L_EXTERN l_bool
-l_ioevmgr_mod(l_ioevmgr* thiz, l_filehdl fd, l_ulong ud, l_ushort masks)
+l_ioevmgr_mod(l_ioevmgr* self, l_filehdl hdl, l_ulong ud, l_ushort masks)
 {
-  l_epollmgr* mgr = (l_epollmgr*)thiz;
+  l_impl_epollmgr* mgr = (l_impl_epollmgr*)self;
   struct epoll_event ev;
-  ev.events = l_get_epoll_masks(masks);
+  ev.events = l_gen_epoll_masks(masks);
   ev.data.u64 = ud;
-  return l_epoll_mod(&mgr->ephl, fd.fd, &ev);
+  return l_impl_epoll_mod(mgr->epfd, hdl.fd, &ev);
 }
 
 L_EXTERN l_bool
-l_ioevmgr_del(l_ioevmgr* thiz, l_filehdl fd)
+l_ioevmgr_del(l_ioevmgr* self, l_filehdl hdl)
 {
-  l_epollmgr* mgr = (l_epollmgr*)thiz;
-  return l_epoll_del(&mgr->ephl, fd.fd);
+  l_impl_epollmgr* mgr = (l_impl_epollmgr*)self;
+  return l_impl_epoll_del(mgr->epfd, hdl.fd);
 }
 
 L_EXTERN int
-l_ioevmgr_timed_wait(l_ioevmgr* thiz, int ms, void (*cb)(l_ulong, l_ushort))
+l_ioevmgr_timed_wait(l_ioevmgr* self, int ms, void (*cb)(l_ulong, l_ushort))
 {
-  l_epollmgr* mgr = (l_impl_ioevmgr*)thiz;
+  l_impl_epollmgr* mgr = (l_impl_epollmgr*)self;
   struct epoll_event* pcur = 0;
   struct epoll_event* pend = 0;
 
@@ -2901,33 +2893,33 @@ l_ioevmgr_timed_wait(l_ioevmgr* thiz, int ms, void (*cb)(l_ulong, l_ushort))
     ms = 30 * 60 * 1000; /* 30min */
   }
 
-  if (!mgr->wake_hdl_added) {
+  if (!mgr->wakefd_added) {
     struct epoll_event e;
-    mgr->wake_hdl_added = true;
-    e.events = EPOLLERR | EPOOLIN;
-    e.data.u64 = mgr->wake_hdl.fd;
-    if (!l_epoll_add(&mgr->ephl, mgr->wake_hdl.fd, &e)) {
+    mgr->wakefd_added = true;
+    e.events = EPOLLERR | EPOLLIN;
+    e.data.u64 = mgr->wakefd;
+    if (!l_impl_epoll_add(mgr->epfd, mgr->wakefd, &e)) {
       l_loge_s(LNUL, "epoll_wait add wake fd fail");
     }
   }
 
-  l_epollmgr_wait(mgr, ms);
+  l_impl_epollmgr_wait(mgr, ms);
   if (mgr->nready <= 0) {
     return 0;
   }
 
-  pcur = mgr->ready_arr;
+  pcur = mgr->ready;
   pend = pcur + mgr->nready;
 
   for (; pcur < pend; ++pcur) {
-    /* l_assert(sizeof(l_filehdl) == 4) && svid high 32 bit cannot be 0 */
-    if (pcur->data.u64 == mgr->wake_hdl.fd) {
-      l_eventfd_read(&mgr->wake_hdl); /* return > 0 success, -1 block, -2 error */
-      l_mutex_lock(&mgr->wklk);
-      mgr->wake_count = 0;
-      l_mutex_unlock(&mgr->wklk);
+    /* l_assert(sizeof(l_filehdl) <= 4) && srvc_id high 32 bit cannot be 0 */
+    if (pcur->data.u64 == (l_ulong)mgr->wakefd) {
+      l_eventfd_read(mgr->wakefd); /* return > 0 success, -1 block, -2 error */
+      l_mutex_lock((l_mutex*)&mgr->wake_lock);
+      mgr->wakeup_count = 0;
+      l_mutex_unlock((l_mutex*)&mgr->wake_lock);
     } else {
-      cb(pcur->data.u64, l_impl_epoll_masks(pcur));
+      cb(pcur->data.u64, l_get_ioev_masks(pcur));
     }
   }
 
@@ -2935,13 +2927,13 @@ l_ioevmgr_timed_wait(l_ioevmgr* thiz, int ms, void (*cb)(l_ulong, l_ushort))
 }
 
 L_EXTERN int
-l_ioevmgr_wait(l_ioevmgr* thiz, void (*cb)(l_ulong, l_ushort))
+l_ioevmgr_wait(l_ioevmgr* self, void (*cb)(l_ulong, l_ushort))
 {
-  return l_ioevmgr_timed_wait(thiz, -1, cb);
+  return l_ioevmgr_timed_wait(self, -1, cb);
 }
 
 L_EXTERN int
-l_ioevmgr_try_wait(l_ioevmgr* thiz, void (*cb)(l_ulong, l_ushort))
+l_ioevmgr_try_wait(l_ioevmgr* self, void (*cb)(l_ulong, l_ushort))
 {
-  return l_ioevmgr_timed_wait(thiz, 0, cb);
+  return l_ioevmgr_timed_wait(self, 0, cb);
 }

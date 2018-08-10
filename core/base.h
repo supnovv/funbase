@@ -609,7 +609,7 @@ L_EXTERN l_bool l_strbuf_is_empty(l_strbuf* b);
 L_EXTERN l_bool l_strbuf_nt_empty(l_strbuf* b);
 L_EXTERN l_int l_strbuf_add_path(l_strbuf* b, l_strn path);
 L_EXTERN l_int l_strbuf_end_path(l_strbuf* b, l_strn fileanme);
-L_EXTERN l_int l_strbuf_end_path_x(l_strbuf* b, l_strn filename_part1, l_strn filename_part2);
+L_EXTERN l_int l_strbuf_end_path_x(l_strbuf* b, l_strn name_parta, l_strn name_partb);
 
 /** variable length string **/
 

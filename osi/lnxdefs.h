@@ -74,7 +74,7 @@ typedef struct {
   int wakefd_added;
   int wakeup_count;
   int nready;
-  pthread_mutex_t mutex; /* can use spin lock instead */
+  pthread_mutex_t wake_lock; /* can use spin lock instead */
   struct epoll_event ready[L_MAX_IO_EVENTS+1];
 } l_impl_epollmgr;
 

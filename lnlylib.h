@@ -5,8 +5,9 @@ extern "C" {
 #endif
 
 #include "core/base.h"
-#include "core/file.h"
-#include "core/string.h"
+#include "core/lapi.h"
+#include "core/beat.h"
+#include "osi/base.h"
 
 #ifdef __cplusplus
 }

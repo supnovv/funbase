@@ -48,9 +48,15 @@ LDSHARED = -Wl,-Bdynamic
 # # cd lua_folder
 # $ make linux && make install
 
+# It makes a difference where in the command you write the option -l;
+# the linker searches and processes libraries and object files in
+# the order they are specified. Thus, foo.o -lz bar.o searches
+# library z after file foo.o but before bar.o. If bar.o refers to
+# functions in z, those functions may not be loaded.
+
 LDFLAGS =
 LDPATH = -L./lib
-LDLIBS = -lm -ldl -lpthread -llua  # left library is more basic
+LDLIBS = -llua -lpthread -ldl -lm
 
 ifeq ($(PLAT), linux)
 SHARED = $(POSINDEPCODE) -shared -Wl,-E -ldl
@@ -66,7 +72,7 @@ CMPL_OPTIONS = $(CFLAGS) $(CWARNS) $(CINCPATH) $(CMACRO)
 CMPL = $(CC) -std=c89 $(CMPL_OPTIONS) -c -o$@
 CC99 = $(CC) -std=c99 $(CMPL_OPTIONS) -c -o$@
 
-LINK_OPTIONS = $(LDFLAGS) $(LDPATH) $(LDLIBS)
+LINK_OPTIONS = $(LDFLAGS) $(LDPATH)
 LINK = $(CC) -std=c89 $(LINK_OPTIONS) -o$@
 
 RM = rm -rf
@@ -96,12 +102,17 @@ OSIOBJS = $(OUTDIR)/osi/lnxbase$(OBJ)
 
 OSIINCS = $(COREINCS) \
           osi/base.h \
-          osi/lnxpref.h
+          osi/lnxdefs.h
+
+LNLYTEST = $(OUTDIR)/lnlytest$(EXE)
+TESTOBJS = $(OUTDIR)/lnlytest$(OBJ)
+TESTDEPS = core/test.c \
+           osi/lnxtest.c
 
 ifeq ($(PLAT), none)
 default: none
 else
-default: echo MAKEDIR $(AUTOCONF) LNLYLIB
+default: echo makeout $(AUTOCONF) $(LNLYTEST)
 endif
 
 none:
@@ -110,8 +121,14 @@ none:
 echo:
 	@echo "PLAT= $(PLAT)"
 
+makeout:
+	$(MKDIR) $(OUTDIR)/core
+	$(MKDIR) $(OUTDIR)/osi
+
 clean:
 	$(RM) $(OUTDIR) autoconf.h
+
+.PHONY: default none echo makeout clean
 
 $(OUTDIR)/%$(OBJ): %.c
 	@echo "$@ <- $? | $(CMPL)"
@@ -123,15 +140,12 @@ $(OUTDIR)/core/lapi$(OBJ): core/lapi.c  # use c99 to support 'long long'
 
 $(AUTOCONF): $(AUTOOBJS) $(AUTOINCS)
 	$(RM) autoconf.h
-	@echo "$@ <- $(AUTOOBJS) | $(LINK)"
-	@$(LINK) $(AUTOOBJS)
+	@echo "$@ <- $(AUTOOBJS) | $(LINK) $(LDLIBS)"
+	@$(LINK) $(AUTOOBJS) $(LDLIBS)
 	./$@
 
-MAKEDIR:
-	$(MKDIR) $(OUTDIR)/core
-	$(MKDIR) $(OUTDIR)/osi
-
-LNLYLIB: $(COREOBJS) $(COREINCS) $(OSIOBJS) $(OSIINCS)
-
-.PHONY: default none echo clean MAKEDIR LNLYLIB
+$(LNLYTEST): $(COREOBJS) $(COREINCS) $(OSIOBJS) $(OSIINCS) $(TESTOBJS) $(TESTDEPS)
+	@echo "$@ <- $(TESTOBJS) | $(LINK) $(LDLIBS)"
+	@$(LINK) $(TESTOBJS) $(OSIOBJS) $(COREOBJS) $(LDLIBS)
+	./$@
 

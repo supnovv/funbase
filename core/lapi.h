@@ -25,7 +25,7 @@ L_EXTERN void* ll_get_extra(lua_State* L);
 L_EXTERN void ll_pop_n(lua_State* L, int n);
 L_EXTERN void ll_pop_to(lua_State* L, int pos);
 L_EXTERN void ll_pop_beyond(lua_State* L, int pos);
-L_EXTERN void ll_push(lua_State* L, int value_at);
+L_EXTERN void ll_push_value(lua_State* L, int value_at);
 
 L_EXTERN void ll_set_global(lua_State* L, const void* name, int value_at);
 L_EXTERN void ll_set_field(lua_State* L, l_tableindex t, const void* field, int value_at);

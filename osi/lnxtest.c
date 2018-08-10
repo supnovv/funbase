@@ -1,4 +1,4 @@
 {
-  l_assert(sizeof(l_handle) <= 4);
+  l_assert(E, sizeof(l_filehdl) <= 4);
 }
 

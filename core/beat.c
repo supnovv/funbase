@@ -177,7 +177,7 @@ typedef struct l_service {
   l_squeue srvc_msgq;
   l_filehdl ioev_hdl;
   l_umedit srvc_flags;
-  l_ulong srvc_id; /* the highest bit is for remote service or not, high 32-bit is the index, low 32-bit is the seed num */
+  l_ulong srvc_id; /* the highest bit is for remote service or not, high 32-bit is the index (cannot be 0), low 32-bit is the seed num */
   l_corotable* coro_tabl; /* only created for lua service */
   l_service_callback* cb;
   void* ud;
@@ -340,7 +340,7 @@ l_config_load(l_config* conf)
   }
 
   ll_set_funcenv(L, func, env);
-  ll_push(L, func.index);
+  ll_push_value(L, func.index);
   ll_pcall_func(L, func, 0);
 
   conf->num_workers = ll_table_get_int(L, env, "workers");
@@ -2198,6 +2198,22 @@ l_copy_n(void* dest, const void* from, l_ulong size)
   }
 }
 
+L_EXTERN l_bool
+l_strn_equal(const l_strn* a, l_strn b)
+{
+  if (a->n != b.n) {
+    return false;
+  } else {
+    return strncmp((const char*)a->p, (const char*)b.p, b.n) == 0;
+  }
+}
+
+L_EXTERN l_bool
+l_strn_has(const l_strn* a, l_byte c)
+{
+  return memchr(a->p, c, a->n) != 0;
+}
+
 /** debug and logging **/
 
 static int l_global_loglevel = 3;
@@ -3115,6 +3131,18 @@ l_strbuf_strn(l_strbuf* b)
   return l_strn_l(b->s, b->n);
 }
 
+L_EXTERN l_bool
+l_strbuf_is_empty(l_strbuf* b)
+{
+  return b->s[0] == 0;
+}
+
+L_EXTERN l_bool
+l_strbuf_nt_empty(l_strbuf* b)
+{
+  return b->s[0] != 0;
+}
+
 L_EXTERN l_int
 l_strbuf_add_path(l_strbuf* b, l_strn path)
 {
@@ -3128,6 +3156,15 @@ l_strbuf_end_path(l_strbuf* b, l_strn filename)
 {
   L_UNUSED(b);
   L_UNUSED(filename);
+  return 0;
+}
+
+L_EXTERN l_int
+l_strbuf_end_path_x(l_strbuf* b, l_strn name_parta, l_strn name_partb)
+{
+  L_UNUSED(b);
+  L_UNUSED(name_parta);
+  L_UNUSED(name_partb);
   return 0;
 }
 
