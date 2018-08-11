@@ -2069,11 +2069,6 @@ l_impl_read(int fd, void* out, l_int size)
   ssize_t n = 0;
   int status = 0;
 
-  if (size < 0 || size > L_MAX_INT_IO) {
-    l_loge_s(LNUL, "read EINVAL");
-    return -2;
-  }
-
   for (; ;) {
     if ((n = read(fd, out, (size_t)size)) >= 0) {
       /* note that one case about read bytes n < count is:
@@ -2163,11 +2158,6 @@ l_impl_write(int fd, const void* data, l_int size)
   Other errors may occur, depending on the object connected to fd. */
   ssize_t n = 0;
   int status = 0;
-
-  if (size < 0 || size > L_MAX_INT_IO) {
-    l_loge_s(LNUL, "write EINVAL");
-    return -2;
-  }
 
   for (; ;) {
     if ((n = write(fd, data, (size_t)size)) >= 0) {

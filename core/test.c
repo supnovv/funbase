@@ -16,8 +16,10 @@
 }
 
 { /* string test */
+#if 0
   char* s = 0;
-  l_assert(E, strlen(s) == 0);
+  l_assert(E, strlen(s) == 0); /* cannot pass zero to strlen, there will be segmentation failure on linux */
+#endif
 }
 
 { /** very large memory space allocation **/

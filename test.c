@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 #include "lnlylib.h"
 
@@ -13,6 +14,7 @@ int start(lnlylib_env* E)
 
 int main(int argc, char** argv)
 {
+  l_set_log_level(5);
   return lnlylib_main(start, argc, argv);
 }
 

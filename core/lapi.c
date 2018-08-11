@@ -56,7 +56,7 @@ struct lnlylib_env;
 extern struct lnlylib_env* l_get_lnlylib_env();
 
 L_EXTERN lua_State*
-ll_new_state()
+l_new_state()
 {
   lua_State* L = 0;
   struct lnlylib_env* E = 0;
@@ -78,7 +78,7 @@ ll_new_state()
 }
 
 L_EXTERN void
-ll_close_state(lua_State* L)
+l_close_state(lua_State* L)
 {
   if (L) {
     lua_close(L);
@@ -86,7 +86,7 @@ ll_close_state(lua_State* L)
 }
 
 L_EXTERN lua_State*
-ll_new_coro(lua_State* L)
+l_new_coro(lua_State* L)
 {
   lua_State* co = 0;
   co = lua_newthread(L);
@@ -98,7 +98,7 @@ ll_new_coro(lua_State* L)
 }
 
 L_EXTERN void*
-ll_set_extra(lua_State* L, void* p)
+l_set_extra(lua_State* L, void* p)
 {
   /** void* lua_getextraspace(lua_State* L) **
   Returns a pointer to a raw memory area associated with the given Lua
@@ -115,14 +115,14 @@ ll_set_extra(lua_State* L, void* p)
 }
 
 L_EXTERN void*
-ll_get_extra(lua_State* L)
+l_get_extra(lua_State* L)
 {
   l_uint* extra = (l_uint*)lua_getextraspace(L);
   return (void*)*extra;
 }
 
 L_EXTERN void /* pos n emements */
-ll_pop_n(lua_State* L, int n)
+l_pop_n(lua_State* L, int n)
 {
   int total = lua_gettop(L);
   if (n < total) {
@@ -133,7 +133,7 @@ ll_pop_n(lua_State* L, int n)
 }
 
 L_EXTERN void /* pos is not popped */
-ll_pop_to(lua_State* L, int pos)
+l_pop_to(lua_State* L, int pos)
 {
   int n = lua_gettop(L) - pos;
   if (n > 0) {
@@ -142,7 +142,7 @@ ll_pop_to(lua_State* L, int pos)
 }
 
 L_EXTERN void /* pos is popped out */
-ll_pop_beyond(lua_State* L, int pos)
+l_pop_beyond(lua_State* L, int pos)
 {
   int n = lua_gettop(L) - pos + 1;
   if (n > 0) {
@@ -150,66 +150,73 @@ ll_pop_beyond(lua_State* L, int pos)
   }
 }
 
-L_EXTERN void
-ll_push_value(lua_State* L, int value_at)
+L_EXTERN int
+l_push_value(lua_State* L, int value_at)
 {
   lua_pushvalue(L, value_at);
+  return lua_gettop(L);
+}
+
+L_EXTERN int
+l_top_index(lua_State* L)
+{
+  return lua_gettop(L);
 }
 
 L_EXTERN void /* [-1, +1, e] */
-ll_set_global(lua_State* L, const void* name, int stackindex)
+l_set_global(lua_State* L, const void* name, int stackindex)
 {
   lua_pushvalue(L, stackindex);
   lua_setglobal(L, (const char*)name);
 }
 
 L_EXTERN void /* [-1, +1, e] */
-ll_set_field(lua_State* L, l_tableindex t, const void* field, int stackindex)
+l_set_field(lua_State* L, l_tableindex t, const void* field, int stackindex)
 {
   lua_pushvalue(L, stackindex);
   lua_setfield(L, t.index, (const char*)field);
 }
 
 L_EXTERN int /* [-0, +1, e] */
-ll_get_global(lua_State* L, const void* name)
+l_get_global(lua_State* L, const void* name)
 {
   lua_getglobal(L, (const char*)name); /* it returns value type */
   return lua_gettop(L);
 }
 
 L_EXTERN l_tableindex /* [-0, +1, e] */
-ll_get_table(lua_State* L, const void* name)
+l_get_table(lua_State* L, const void* name)
 {
   l_tableindex table;
-  table.index = ll_get_global(L, name);
+  table.index = l_get_global(L, name);
   return table;
 }
 
 L_EXTERN int /* [-0, +1, e] */
-ll_get_field(lua_State* L, l_tableindex t, const void* field)
+l_get_field(lua_State* L, l_tableindex t, const void* field)
 {
   lua_getfield(L, t.index, (const char*)field); /* it returns value type */
   return lua_gettop(L);
 }
 
 L_EXTERN l_tableindex /* [-0, +1, e] */
-ll_get_field_table(lua_State* L, l_tableindex t, const void* field)
+l_get_field_table(lua_State* L, l_tableindex t, const void* field)
 {
   l_tableindex table;
-  table.index = ll_get_field(L, t, field);
+  table.index = l_get_field(L, t, field);
   return table;
 }
 
 L_EXTERN l_funcindex /* [-0, +1, e] */
-ll_get_field_func(lua_State* L, l_tableindex t, const void* field)
+l_get_field_func(lua_State* L, l_tableindex t, const void* field)
 {
   l_funcindex func;
-  func.index = ll_get_field(L, t, field);
+  func.index = l_get_field(L, t, field);
   return func;
 }
 
 static l_bool
-ll_table_getn(lua_State* L, l_tableindex t, const void* name)
+l_table_getn(lua_State* L, l_tableindex t, const void* name)
 {
   l_sbuf1k name_buf;
   l_strbuf* key_names = 0;
@@ -250,13 +257,13 @@ ll_table_getn(lua_State* L, l_tableindex t, const void* name)
 
     if (key == key_end) {
       l_loge_s(LNUL, "empty key name string");
-      ll_pop_to(L, oldtop);
+      l_pop_to(L, oldtop);
       return false;
     }
 
-    if (!ll_is_table(L, tableindex)) {
+    if (!l_is_table(L, tableindex)) {
       l_loge_1(LNUL, "access %s of a not-a-table", ls(key));
-      ll_pop_to(L, oldtop);
+      l_pop_to(L, oldtop);
       return false;
     }
 
@@ -275,13 +282,13 @@ ll_table_getn(lua_State* L, l_tableindex t, const void* name)
     return true;
   } else {
     lua_copy(L, -1, oldtop + 1);
-    ll_pop_to(L, oldtop + 1);
+    l_pop_to(L, oldtop + 1);
     return true;
   }
 }
 
 static l_bool /* if return true, the value is on the top */
-ll_table_getv(lua_State* L, l_tableindex t, int n, va_list vl)
+l_table_getv(lua_State* L, l_tableindex t, int n, va_list vl)
 {
   const char* key = 0;
   int tableindex = t.index;
@@ -295,12 +302,12 @@ ll_table_getv(lua_State* L, l_tableindex t, int n, va_list vl)
     key = va_arg(vl, const char*);
     if (key == 0) {
       l_loge_s(LNUL, "empty key name string");
-      ll_pop_to(L, oldtop);
+      l_pop_to(L, oldtop);
       return false;
     }
-    if (!ll_is_table(L, tableindex)) {
+    if (!l_is_table(L, tableindex)) {
       l_loge_1(LNUL, "access %s of a not-a-table", ls(key));
-      ll_pop_to(L, oldtop);
+      l_pop_to(L, oldtop);
       return false;
     }
     lua_getfield(L, tableindex, (const char*)key);
@@ -311,82 +318,82 @@ ll_table_getv(lua_State* L, l_tableindex t, int n, va_list vl)
     return true;
   } else {
     lua_copy(L, -1, oldtop + 1);
-    ll_pop_to(L, oldtop + 1);
+    l_pop_to(L, oldtop + 1);
     return true;
   }
 }
 
 L_EXTERN l_int
-ll_table_get_int(lua_State* L, l_tableindex t, const void* namechain)
+l_table_get_int(lua_State* L, l_tableindex t, const void* namechain)
 {
-  if (ll_table_getn(L, t, namechain)) {
-    return ll_to_int(L, -1);
+  if (l_table_getn(L, t, namechain)) {
+    return l_to_int(L, -1);
   } else {
     return 0;
   }
 }
 
 L_EXTERN l_strn
-ll_table_get_str(lua_State* L, l_tableindex t, const void* namechain)
+l_table_get_str(lua_State* L, l_tableindex t, const void* namechain)
 {
-  if (ll_table_getn(L, t, namechain)) {
-    return ll_to_strn(L, -1);
+  if (l_table_getn(L, t, namechain)) {
+    return l_to_strn(L, -1);
   } else {
     return L_EMPTY_STR;
   }
 }
 
 L_EXTERN double
-ll_table_get_num(lua_State* L, l_tableindex t, const void* namechain)
+l_table_get_num(lua_State* L, l_tableindex t, const void* namechain)
 {
-  if (ll_table_getn(L, t, namechain)) {
-    return ll_to_num(L, -1);
+  if (l_table_getn(L, t, namechain)) {
+    return l_to_num(L, -1);
   } else {
     return 0;
   }
 }
 
 L_EXTERN l_int
-ll_table_get_intv(lua_State* L, l_tableindex t, int n, ...)
+l_table_get_intv(lua_State* L, l_tableindex t, int n, ...)
 {
   l_int a = 0;
   va_list vl;
   va_start(vl, n);
-  if (ll_table_getv(L, t, n, vl)) {
-    a = ll_to_int(L, -1);
+  if (l_table_getv(L, t, n, vl)) {
+    a = l_to_int(L, -1);
   }
   va_end(vl);
   return a;
 }
 
 L_EXTERN l_strn
-ll_table_get_strv(lua_State* L, l_tableindex t, int n, ...)
+l_table_get_strv(lua_State* L, l_tableindex t, int n, ...)
 {
   l_strn s = L_EMPTY_STR;
   va_list vl;
   va_start(vl, n);
-  if (ll_table_getv(L, t, n, vl)) {
-    s = ll_to_strn(L, -1);
+  if (l_table_getv(L, t, n, vl)) {
+    s = l_to_strn(L, -1);
   }
   va_end(vl);
   return s;
 }
 
 L_EXTERN double
-ll_table_get_numv(lua_State* L, l_tableindex t, int n, ...)
+l_table_get_numv(lua_State* L, l_tableindex t, int n, ...)
 {
   double f = 0;
   va_list vl;
   va_start(vl, n);
-  if (ll_table_getv(L, t, n, vl)) {
-    f = ll_to_num(L, -1);
+  if (l_table_getv(L, t, n, vl)) {
+    f = l_to_num(L, -1);
   }
   va_end(vl);
   return f;
 }
 
 L_EXTERN void
-ll_set_funcenv(lua_State* L, l_funcindex func, l_tableindex t)
+l_set_funcenv(lua_State* L, l_funcindex func, l_tableindex t)
 {
   /** const char* lua_setupvalue(lua_State* L, int funcindex, int n); [-(0|1), +0, -]
       const char* lua_getupvalue(lua_State* L, int funcindex, int n); [-0, +(0|1), -]
@@ -406,90 +413,90 @@ ll_set_funcenv(lua_State* L, l_funcindex func, l_tableindex t)
   lua_pushvalue(L, t.index);
   if (lua_setupvalue(L, func.index, 1) == 0) {
     l_loge_s(LNUL, "set func env failed");
-    ll_pop_n(L, 1);
+    l_pop_n(L, 1);
   }
 }
 
 L_EXTERN l_tableindex
-ll_new_table(lua_State* L)
+l_new_table(lua_State* L)
 {
   lua_newtable(L);
   return (l_tableindex){lua_gettop(L)};
 }
 
 L_EXTERN l_tableindex
-ll_new_table_with_size(lua_State* L, int nseq, int rest)
+l_new_table_with_size(lua_State* L, int nseq, int rest)
 {
   lua_createtable(L, nseq > 0 ? nseq : 0, rest > 0 ? rest : 0);
   return (l_tableindex){lua_gettop(L)};
 }
 
 L_EXTERN int
-ll_type(lua_State* L, int stackindex)
+l_type(lua_State* L, int stackindex)
 {
   return lua_type(L, stackindex);
 }
 
 L_EXTERN l_bool
-ll_is_str(lua_State* L, int stackindex)
+l_is_str(lua_State* L, int stackindex)
 {
-  return ll_type(L, stackindex) == LUA_TSTRING;
+  return l_type(L, stackindex) == LUA_TSTRING;
 }
 
 L_EXTERN l_bool
-ll_is_int(lua_State* L, int stackindex)
+l_is_int(lua_State* L, int stackindex)
 {
   return lua_isinteger(L, stackindex);
 }
 
 L_EXTERN l_bool
-ll_is_num(lua_State* L, int stackindex)
+l_is_num(lua_State* L, int stackindex)
 {
-  return ll_type(L, stackindex) == LUA_TNUMBER;
+  return l_type(L, stackindex) == LUA_TNUMBER;
 }
 
 L_EXTERN l_bool
-ll_is_table(lua_State* L, int value_at)
+l_is_table(lua_State* L, int value_at)
 {
-  return ll_type(L, value_at) == LUA_TTABLE;
+  return l_type(L, value_at) == LUA_TTABLE;
 }
 
 L_EXTERN l_bool
-ll_is_func(lua_State* L, int value_at)
+l_is_func(lua_State* L, int value_at)
 {
-  return ll_type(L, value_at) == LUA_TFUNCTION;
+  return l_type(L, value_at) == LUA_TFUNCTION;
 }
 
 L_EXTERN l_bool
-ll_is_udata(lua_State* L, int value_at)
+l_is_udata(lua_State* L, int value_at)
 {
-  return ll_type(L, value_at) == LUA_TUSERDATA;
+  return l_type(L, value_at) == LUA_TUSERDATA;
 }
 
 L_EXTERN l_bool
-ll_is_ldata(lua_State* L, int value_at)
+l_is_ldata(lua_State* L, int value_at)
 {
-  return ll_type(L, value_at) == LUA_TLIGHTUSERDATA;
+  return l_type(L, value_at) == LUA_TLIGHTUSERDATA;
 }
 
 L_EXTERN l_bool
-ll_is_valid(lua_State* L, int stackindex)
+l_is_valid(lua_State* L, int stackindex)
 {
-  int n = ll_type(L, stackindex);
+  int n = l_type(L, stackindex);
   return (n != LUA_TNIL && n != LUA_TNONE);
 }
 
 L_EXTERN l_bool
-ll_nt_valid(lua_State* L, int stackindex)
+l_nt_valid(lua_State* L, int stackindex)
 {
-  int n = ll_type(L, stackindex);
+  int n = l_type(L, stackindex);
   return (n == LUA_TNIL || n == LUA_TNONE);
 }
 
 L_EXTERN l_strn
-ll_to_strn(lua_State* L, int stackindex)
+l_to_strn(lua_State* L, int stackindex)
 {
-  if (ll_is_int(L, stackindex) || ll_is_str(L, stackindex)) {
+  if (l_is_int(L, stackindex) || l_is_str(L, stackindex)) {
     size_t len = 0;
     const char* s = 0;
     s = lua_tolstring(L, stackindex, &len);
@@ -505,21 +512,21 @@ ll_to_strn(lua_State* L, int stackindex)
 }
 
 L_EXTERN l_int
-ll_to_int(lua_State* L, int value_at)
+l_to_int(lua_State* L, int value_at)
 {
   return (l_int)lua_tointeger(L, value_at);
 }
 
 L_EXTERN double
-ll_to_num(lua_State* L, int value_at)
+l_to_num(lua_State* L, int value_at)
 {
   return (double)lua_tonumber(L, value_at);
 }
 
 L_EXTERN const l_byte*
-ll_to_cstr(lua_State* L, int stackindex)
+l_to_cstr(lua_State* L, int stackindex)
 {
-  return ll_to_strn(L, stackindex).p;
+  return l_to_strn(L, stackindex).p;
 }
 
 /** create string in lua **
@@ -556,7 +563,7 @@ luaL_pushresult push the result string to the top of the stack.
 **********************************************************************/
 
 static int
-ll_new_strv(lua_State* L, int n, ...)
+l_new_strv(lua_State* L, int n, ...)
 {
   va_list vl;
   l_strn s;
@@ -577,7 +584,7 @@ ll_new_strv(lua_State* L, int n, ...)
 }
 
 L_EXTERN int
-ll_new_str_n(lua_State* L, int n, l_strn* s)
+l_new_str_n(lua_State* L, int n, l_strn* s)
 {
   luaL_Buffer B;
   l_strn* pend = 0;
@@ -597,75 +604,75 @@ ll_new_str_n(lua_State* L, int n, l_strn* s)
 }
 
 L_EXTERN int
-ll_new_str_1(lua_State* L, l_strn s1)
+l_new_str_1(lua_State* L, l_strn s1)
 {
-  return ll_new_strv(L, 1, s1);
+  return l_new_strv(L, 1, s1);
 }
 
 L_EXTERN int
-ll_new_str_2(lua_State* L, l_strn s1, l_strn s2)
+l_new_str_2(lua_State* L, l_strn s1, l_strn s2)
 {
-  return ll_new_strv(L, 2, s1, s2);
+  return l_new_strv(L, 2, s1, s2);
 }
 
 L_EXTERN int
-ll_new_str_3(lua_State* L, l_strn s1, l_strn s2, l_strn s3)
+l_new_str_3(lua_State* L, l_strn s1, l_strn s2, l_strn s3)
 {
-  return ll_new_strv(L, 3, s1, s2, s3);
+  return l_new_strv(L, 3, s1, s2, s3);
 }
 
 L_EXTERN int
-ll_new_str_4(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4)
+l_new_str_4(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4)
 {
-  return ll_new_strv(L, 4, s1, s2, s3, s4);
+  return l_new_strv(L, 4, s1, s2, s3, s4);
 }
 
 L_EXTERN int
-ll_new_str_5(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5)
+l_new_str_5(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5)
 {
-  return ll_new_strv(L, 5, s1, s2, s3, s4, s5);
+  return l_new_strv(L, 5, s1, s2, s3, s4, s5);
 }
 
 L_EXTERN int
-ll_new_str_6(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6)
+l_new_str_6(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6)
 {
-  return ll_new_strv(L, 6, s1, s2, s3, s4, s5, s6);
+  return l_new_strv(L, 6, s1, s2, s3, s4, s5, s6);
 }
 
 L_EXTERN int
-ll_new_str_7(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6, l_strn s7)
+l_new_str_7(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6, l_strn s7)
 {
-  return ll_new_strv(L, 7, s1, s2, s3, s4, s5, s6, s7);
+  return l_new_strv(L, 7, s1, s2, s3, s4, s5, s6, s7);
 }
 
 L_EXTERN int
-ll_new_str_8(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6, l_strn s7, l_strn s8)
+l_new_str_8(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6, l_strn s7, l_strn s8)
 {
-  return ll_new_strv(L, 8, s1, s2, s3, s4, s5, s6, s7, s8);
+  return l_new_strv(L, 8, s1, s2, s3, s4, s5, s6, s7, s8);
 }
 
 L_EXTERN int
-ll_new_str_9(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6, l_strn s7, l_strn s8, l_strn s9)
+l_new_str_9(lua_State* L, l_strn s1, l_strn s2, l_strn s3, l_strn s4, l_strn s5, l_strn s6, l_strn s7, l_strn s8, l_strn s9)
 {
-  return ll_new_strv(L, 9, s1, s2, s3, s4, s5, s6, s7, s8, s9);
+  return l_new_strv(L, 9, s1, s2, s3, s4, s5, s6, s7, s8, s9);
 }
 
 L_EXTERN int /* [-0, +2, -] */
-ll_get_path(lua_State* L)
+l_get_path(lua_State* L)
 {
-  l_tableindex t = ll_get_table(L, "package");
-  return ll_get_field(L, t, "path");
+  l_tableindex t = l_get_table(L, "package");
+  return l_get_field(L, t, "path");
 }
 
 L_EXTERN int /* [-0, +2, -] */
-ll_get_cpath(lua_State* L)
+l_get_cpath(lua_State* L)
 {
-  l_tableindex t = ll_get_table(L, "package");
-  return ll_get_field(L, t, "cpath");
+  l_tableindex t = l_get_table(L, "package");
+  return l_get_field(L, t, "cpath");
 }
 
 L_EXTERN void
-ll_add_path(lua_State* L, l_strn path)
+l_add_path(lua_State* L, l_strn path)
 {
   l_tableindex package;
   int old_path;
@@ -675,17 +682,17 @@ ll_add_path(lua_State* L, l_strn path)
     return;
   }
 
-  package = ll_get_table(L, "package");
-  old_path = ll_get_field(L, package, "path");
+  package = l_get_table(L, "package");
+  old_path = l_get_field(L, package, "path");
 
-  new_path = ll_new_str_4(L, ll_to_strn(L, old_path), l_const_strn(";"), path, l_const_strn("?.lua"));
-  ll_set_field(L, package, "path", new_path);
+  new_path = l_new_str_4(L, l_to_strn(L, old_path), l_literal_strn(";"), path, l_literal_strn("?.lua"));
+  l_set_field(L, package, "path", new_path);
 
-  ll_pop_beyond(L, package.index);
+  l_pop_beyond(L, package.index);
 }
 
 L_EXTERN void
-ll_add_cpath(lua_State* L, l_strn path)
+l_add_cpath(lua_State* L, l_strn path)
 {
   l_tableindex package;
   int old_path;
@@ -695,13 +702,13 @@ ll_add_cpath(lua_State* L, l_strn path)
     return;
   }
 
-  package = ll_get_table(L, "package");
-  old_path = ll_get_field(L, package, "cpath");
+  package = l_get_table(L, "package");
+  old_path = l_get_field(L, package, "cpath");
 
-  new_path = ll_new_str_6(L, ll_to_strn(L, old_path), l_const_strn(";"), path, l_const_strn("?.so;"), path, l_const_strn("?.dll"));
-  ll_set_field(L, package, "cpath", new_path);
+  new_path = l_new_str_6(L, l_to_strn(L, old_path), l_literal_strn(";"), path, l_literal_strn("?.so;"), path, l_literal_strn("?.dll"));
+  l_set_field(L, package, "cpath", new_path);
 
-  ll_pop_beyond(L, package.index);
+  l_pop_beyond(L, package.index);
 }
 
 /** dump functions and values **
@@ -723,7 +730,7 @@ When loaded, those upvalues receive fresh instances containing nil.
 You can use the debug library to serialize and reload the upvalues of a function in a way adequate to your needs.
 **********************************************************************/
 static int
-ll_string_writer_for_compile(lua_State* L, const void* p, size_t sz, void* data)
+l_string_writer_for_compile(lua_State* L, const void* p, size_t sz, void* data)
 {
   luaL_Buffer* B = 0;
   L_UNUSED(L);
@@ -733,7 +740,7 @@ ll_string_writer_for_compile(lua_State* L, const void* p, size_t sz, void* data)
 }
 
 static int
-ll_file_writer_for_compile(lua_State* L, const void* p, size_t sz, void* data)
+l_file_writer_for_compile(lua_State* L, const void* p, size_t sz, void* data)
 {
   l_int n = 0;
   l_file* out = 0;
@@ -744,23 +751,23 @@ ll_file_writer_for_compile(lua_State* L, const void* p, size_t sz, void* data)
 }
 
 L_EXTERN const l_byte* /* return the stack index of the string of the compiled chunk */
-ll_compile_to_str(lua_State* L, l_funcindex func)
+l_compile_to_str(lua_State* L, l_funcindex func)
 {
   int n = 0;
   luaL_Buffer B;
   luaL_buffinit(L, &B);
   lua_pushvalue(L, func.index);
-  n = lua_dump(L, ll_string_writer_for_compile, &B, true);
+  n = lua_dump(L, l_string_writer_for_compile, &B, true);
   if (n == 0) {
     luaL_pushresult(&B);
-    return ll_to_cstr(L, -1);
+    return l_to_cstr(L, -1);
   } else {
     return 0;
   }
 }
 
 L_EXTERN l_bool
-ll_compile_to_file(lua_State* L, l_funcindex func, const void* file)
+l_compile_to_file(lua_State* L, l_funcindex func, const void* file)
 {
   int n = 0;
   l_file outfile;
@@ -771,7 +778,7 @@ ll_compile_to_file(lua_State* L, l_funcindex func, const void* file)
   }
 
   lua_pushvalue(L, func.index);
-  n = lua_dump(L, ll_file_writer_for_compile, &outfile, true);
+  n = lua_dump(L, l_file_writer_for_compile, &outfile, true);
   l_file_close(&outfile);
 
   return n == 0;
@@ -815,7 +822,7 @@ If you want to change the environment variable for the chunk, you can call lua_s
 **********************************************************************/
 
 L_EXTERN l_funcindex /* load lua code into a function */
-ll_load_code(lua_State* L, l_strn code)
+l_load_code(lua_State* L, l_strn code)
 {
   int n = 0;
   if (l_strn_is_empty(&code)) {
@@ -825,13 +832,13 @@ ll_load_code(lua_State* L, l_strn code)
   if (n == LUA_OK) {
     return (l_funcindex){lua_gettop(L)};
   } else {
-    ll_pop_error(L);
+    l_pop_error(L);
     return (l_funcindex){0};
   }
 }
 
 L_EXTERN l_funcindex
-ll_load_compiled_code(lua_State* L, l_strn code)
+l_load_compiled_code(lua_State* L, l_strn code)
 {
   int n = 0;
   if (l_strn_is_empty(&code)) {
@@ -841,13 +848,13 @@ ll_load_compiled_code(lua_State* L, l_strn code)
   if (n == LUA_OK) {
     return (l_funcindex){lua_gettop(L)};
   } else {
-    ll_pop_error(L);
+    l_pop_error(L);
     return (l_funcindex){0};
   }
 }
 
 L_EXTERN l_funcindex /* load lua code from the file into a function */
-ll_load_file(lua_State* L, const void* file)
+l_load_file(lua_State* L, const void* file)
 {
   int n = 0;
 
@@ -859,13 +866,13 @@ ll_load_file(lua_State* L, const void* file)
   if (n == LUA_OK) {
     return (l_funcindex){lua_gettop(L)};
   } else {
-    ll_pop_error(L);
+    l_pop_error(L);
     return (l_funcindex){0};
   }
 }
 
 L_EXTERN l_funcindex
-ll_load_compiled_file(lua_State* L, const void* file)
+l_load_compiled_file(lua_State* L, const void* file)
 {
   int n = 0;
 
@@ -877,7 +884,7 @@ ll_load_compiled_file(lua_State* L, const void* file)
   if (n == LUA_OK) {
     return (l_funcindex){lua_gettop(L)};
   } else {
-    ll_pop_error(L);
+    l_pop_error(L);
     return (l_funcindex){0};
   }
 }
@@ -930,48 +937,48 @@ lua_pcall calls the function in protected mode, i.e. if there is any error durin
 **********************************************************************/
 
 L_EXTERN void /* the func and the args are already pushed on the stack, after call results are on the stack or raise a error */
-ll_call_func(lua_State* L, l_funcindex func, int results)
+l_call_func(lua_State* L, l_funcindex func, int results)
 {
   int args = lua_gettop(L) - func.index;
   lua_call(L, args, results);
 }
 
 L_EXTERN l_bool /* the func and the args are already pushed on the stack, after call results or a error object on the stack */
-ll_pcall_func(lua_State* L, l_funcindex func, int results)
+l_pcall_func(lua_State* L, l_funcindex func, int results)
 {
   int args = lua_gettop(L) - func.index;
   int n = lua_pcall(L, args, results, 0); /* [-(nargs+1), +(nresults|1), -] */
   if (n == LUA_OK) {
     return true;
   } else {
-    ll_pop_error(L);
+    l_pop_error(L);
     return false;
   }
 }
 
 L_EXTERN l_bool
-ll_pcall_with_msgh(lua_State* L, l_funcindex func, int results, l_funcindex msgh)
+l_pcall_with_msgh(lua_State* L, l_funcindex func, int results, l_funcindex msgh)
 {
   int args = lua_gettop(L) - func.index;
   int n = lua_pcall(L, args, results, msgh.index);
   if (n == LUA_OK) {
     return true;
   } else {
-    ll_pop_error(L);
+    l_pop_error(L);
     return false;
   }
 }
 
 L_EXTERN int /* load the file and run it, no args passed, return all results or nil */
-ll_exec_file(lua_State* L, const void* file)
+l_exec_file(lua_State* L, const void* file)
 {
   l_funcindex func;
-  func = ll_load_file(L, file);
+  func = l_load_file(L, file);
   if (func.index <= 0) {
     lua_pushnil(L);
   } else {
     l_bool succ = false;
-    succ = ll_pcall_func(L, func, LUA_MULTRET);
+    succ = l_pcall_func(L, func, LUA_MULTRET);
     if (!succ) {
       lua_pushnil(L);
     }
@@ -1081,7 +1088,7 @@ plus other Unix systems that support the dlfcn standard).
 
 #if 0
 static l_funcindex
-ll_dynlib_load(lua_State* L, l_strn lib, l_strn symbol)
+l_dynlib_load(lua_State* L, l_strn lib, l_strn symbol)
 {
   /* can use package.loadlib */
   L_UNUSED(L);
@@ -1091,7 +1098,7 @@ ll_dynlib_load(lua_State* L, l_strn lib, l_strn symbol)
 }
 
 static int
-ll_search_and_load_func(lua_State* L)
+l_search_and_load_func(lua_State* L)
 {
   int name_lookup = 0;
   l_strn main_module;
@@ -1100,63 +1107,63 @@ ll_search_and_load_func(lua_State* L)
   l_funcindex search_func;
 
   name_lookup = lua_gettop(L);
-  package = ll_get_table(L, "package");
-  path = ll_get_field(L, package, "path");
-  search_func = ll_get_field_func(L, package, "searchpath");
+  package = l_get_table(L, "package");
+  path = l_get_field(L, package, "path");
+  search_func = l_get_field_func(L, package, "searchpath");
 
   lua_pushvalue(L, name_lookup);
   lua_pushvalue(L, path);
-  ll_call_func(L, search_func, 1); /* get 1 result: nil or the found file name */
+  l_call_func(L, search_func, 1); /* get 1 result: nil or the found file name */
 
   if (lua_isnil(L, -1)) {
     goto try_to_laod_from_c_library;
   } else {
-    ll_load_file(L, ll_to_cstr(L, -1)); /* load the lua find */
+    l_load_file(L, l_to_cstr(L, -1)); /* load the lua find */
     return 1; /* return loaded func on the top */
   }
 
 try_to_load_from_c_library:
 
-  ll_pop_to(L, search_func.index);
-  path = ll_get_field(L, package, "cpath");
+  l_pop_to(L, search_func.index);
+  path = l_get_field(L, package, "cpath");
 
   lua_pushvalue(L, name_lookup);
   lua_pushvalue(L, path);
-  ll_call_func(L, search_func, 1); /* get 1 result: nil or c library file name found */
+  l_call_func(L, search_func, 1); /* get 1 result: nil or c library file name found */
 
   if (lua_isnil(L, -1)) {
     goto try_all_modules_in_one_library_method;
   } else {
-    l_filename f = ll_gen_luaopen_func_name(ll_to_strn(L, name_lookup));
-    ll_dynlib_load(L, ll_to_strn(L, -1), l_filename_strn(&f));
+    l_filename f = l_gen_luaopen_func_name(l_to_strn(L, name_lookup));
+    l_dynlib_load(L, l_to_strn(L, -1), l_filename_strn(&f));
     return 1; /* return loaded func on the top */
   }
 
 try_all_module_in_one_library_method:
 
-  if (!ll_get_main_module(ll_to_strn(L, name_lookup), &main_module)) { /* name_lookup need has sub module names */
+  if (!l_get_main_module(l_to_strn(L, name_lookup), &main_module)) { /* name_lookup need has sub module names */
     return 1; /* return nil on the top */
   }
 
-  ll_pop_to(L, path);
+  l_pop_to(L, path);
 
-  ll_push_str(L, main_module);
+  l_push_str(L, main_module);
   lua_pushvalue(L, path);
-  ll_call_func(L, search_func, 1); /* get 1 result: nil or c library file name found */
+  l_call_func(L, search_func, 1); /* get 1 result: nil or c library file name found */
 
   if (lua_isnil(L, -1)) {
     return 1; /* return nil on the top */
   } else {
-    l_filename f = ll_gen_luaopen_func_name(ll_to_strn(L, name_lookup));
-    ll_dynlib_load(L, ll_to_strn(L, -1), l_filename_strn(&f));
+    l_filename f = l_gen_luaopen_func_name(l_to_strn(L, name_lookup));
+    l_dynlib_load(L, l_to_strn(L, -1), l_filename_strn(&f));
     return 1; /* return loaded func on the top */
   }
 }
 
 L_EXTERN int /* return the stack index of the value */
-ll_search_and_exec_file(lua_State* L, const void* file)
+l_search_and_exec_file(lua_State* L, const void* file)
 {
-  luaL_requiref(L, (const char*)file, ll_search_and_load_func, false);
+  luaL_requiref(L, (const char*)file, l_search_and_load_func, false);
   return lua_gettop(L);
 }
 #endif

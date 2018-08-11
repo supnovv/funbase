@@ -32,7 +32,7 @@
 PLAT = none
 PLATS = linux macosx
 
-CC = gcc
+CC = gcc -std=c99
 CFLAGS = -g -O2
 CWARNS = -Wall -Wextra -Werror -Wno-error=unused-function -Wno-unused-function
 CINCPATH = -I./
@@ -69,11 +69,10 @@ CMACRO += -DL_PLAT_MACOSX
 endif
 
 CMPL_OPTIONS = $(CFLAGS) $(CWARNS) $(CINCPATH) $(CMACRO)
-CMPL = $(CC) -std=c89 $(CMPL_OPTIONS) -c -o$@
-CC99 = $(CC) -std=c99 $(CMPL_OPTIONS) -c -o$@
+CMPL = $(CC) $(CMPL_OPTIONS) -c -o$@
 
 LINK_OPTIONS = $(LDFLAGS) $(LDPATH)
-LINK = $(CC) -std=c89 $(LINK_OPTIONS) -o$@
+LINK = $(CC) $(LINK_OPTIONS) -o$@
 
 RM = rm -rf
 MKDIR = mkdir -p
@@ -104,8 +103,8 @@ OSIINCS = $(COREINCS) \
           osi/base.h \
           osi/lnxdefs.h
 
-LNLYTEST = $(OUTDIR)/lnlytest$(EXE)
-TESTOBJS = $(OUTDIR)/lnlytest$(OBJ)
+LNLYTEST = $(OUTDIR)/test$(EXE)
+TESTOBJS = $(OUTDIR)/test$(OBJ)
 TESTDEPS = core/test.c \
            osi/lnxtest.c
 
@@ -134,9 +133,9 @@ $(OUTDIR)/%$(OBJ): %.c
 	@echo "$@ <- $? | $(CMPL)"
 	@$(CMPL) $<
 
-$(OUTDIR)/core/lapi$(OBJ): core/lapi.c  # use c99 to support 'long long'
-	@echo "$@ <- $? | $(CC99)"
-	@$(CC99) $<
+#$(OUTDIR)/core/lapi$(OBJ): core/lapi.c  # use c99 to support 'long long'
+#	@echo "$@ <- $? | $(CC99)"
+#	@$(CC99) $<
 
 $(AUTOCONF): $(AUTOOBJS) $(AUTOINCS)
 	$(RM) autoconf.h
@@ -147,5 +146,4 @@ $(AUTOCONF): $(AUTOOBJS) $(AUTOINCS)
 $(LNLYTEST): $(COREOBJS) $(COREINCS) $(OSIOBJS) $(OSIINCS) $(TESTOBJS) $(TESTDEPS)
 	@echo "$@ <- $(TESTOBJS) | $(LINK) $(LDLIBS)"
 	@$(LINK) $(TESTOBJS) $(OSIOBJS) $(COREOBJS) $(LDLIBS)
-	./$@
 

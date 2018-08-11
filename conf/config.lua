@@ -1,6 +1,6 @@
-workers = 1
+workers = 2
 services = 1024
-logfile = "lnlylib"
+logfile = "trace"
 script = ""
 
 http_default = {
