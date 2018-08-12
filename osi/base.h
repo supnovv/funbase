@@ -32,6 +32,12 @@ typedef struct {
   l_medit nsec; /* Nanoseconds that less than 1 sec */
 } l_date;
 
+L_INLINE l_medit
+l_date_msec(const l_date* d)
+{
+  return d->nsec / 1000000;
+}
+
 L_INLINE l_byte
 l_date_sec(const l_date* d)
 {
@@ -88,9 +94,13 @@ l_date_timezone(const l_date* d)
 
 L_EXTERN l_time l_system_time();
 L_EXTERN l_time l_mono_time();
+L_EXTERN l_long l_system_time_ms();
+L_EXTERN l_long l_mono_time_ms();
 L_EXTERN l_date l_system_date();
 L_EXTERN l_date l_date_from_secs(l_long utcsecs);
 L_EXTERN l_date l_date_from_time(l_time utctime);
+L_EXTERN l_date l_date_from_msec(l_long utcmsec);
+L_EXTERN l_bool l_timestamp_from_msec(l_long utcmsec, l_value* v);
 L_EXTERN l_medit l_utcsec_offset();
 
 /** file operations **/

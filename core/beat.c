@@ -106,6 +106,16 @@ typedef struct {
   l_mutex mast_rxlk;
 } l_worknode;
 
+typedef struct l_timestamp {
+  l_long base_syst_time;
+  l_long base_mono_time;
+  l_long mast_time_ms;
+  l_rwlock* tmlk;
+  l_long time_ms;
+  l_sbuf32 tmstr;
+  l_rwlock time_lock;
+} l_timestamp;
+
 typedef struct l_master {
   l_thread T;
   l_config* conf;
@@ -117,6 +127,7 @@ typedef struct l_master {
   l_squeue* mast_frsq;
   l_squeue* temp_svcq;
   lnlylib_env* E;
+  l_timestamp* stamp;
   l_srvctable* stbl;
   l_umedit srvc_seed;
   l_medit num_workers;
@@ -129,6 +140,7 @@ typedef struct l_master {
   l_cmdline cmdline;
   l_mutex globalq_lock;
   l_condv globalq_cndv;
+  l_timestamp timestamp;
   l_ioevmgr ioevent_mgr;
 } l_master;
 
@@ -143,7 +155,7 @@ typedef struct l_worker {
   l_squeue* mast_rxmq; /* msgs from worker to master */
   l_mutex* mast_rxlk;
   l_squeue msgq[4];
-  lnlylib_env env;
+  lnlylib_env work_env;
 } l_worker;
 
 typedef struct {
@@ -324,7 +336,7 @@ l_config_load(l_config* conf)
   conf->num_workers = 1;
   conf->init_stbl_size = L_MIN_SRVC_TABLE_SIZE;
   script_buf = l_sbuf1k_init(&conf->start_script);
-  logfile_buf = l_sbuf1k_init_from(&conf->logfilename, L_STR("stdout"));
+  logfile_buf = l_sbuf1k_init_from(&conf->logfilename, l_literal_strn("stdout"));
 
   func = l_load_file(L, LNLYLIB_HOME_DIR "/conf/config.lua");
   if (func.index <= 0) {
@@ -359,7 +371,7 @@ l_config_load(l_config* conf)
 
   logfile = l_table_get_str(L, env, "logfile");
   if (l_strbuf_reset(logfile_buf, logfile) == 0) {
-    l_strbuf_reset(logfile_buf, L_STR("stdout"));
+    l_strbuf_reset(logfile_buf, l_literal_strn("stdout"));
   }
 
   l_close_state(L);
@@ -372,9 +384,9 @@ l_config_logout(l_config* conf, l_umedit thridx)
   l_strn prefix;
   prefix = l_strbuf_strn(l_sbuf1k_p(&conf->logfilename));
 
-  if (l_strn_equal(&prefix, L_STR("stdout"))) {
+  if (l_strn_equal(&prefix, l_literal_strn("stdout"))) {
     logout = l_stdout_ostream();
-  } else if (l_strn_equal(&prefix, L_STR("stderr"))) {
+  } else if (l_strn_equal(&prefix, l_literal_strn("stderr"))) {
     logout = l_stderr_ostream();
   } else {
     l_sbuf2k name_buf;
@@ -630,6 +642,79 @@ l_parse_cmd_line(l_master* M, int argc, char** argv)
   L_UNUSED(argv);
 }
 
+static l_sbuf32
+l_timestamp_gen_str(l_long ms)
+{
+  l_sbuf32 str;
+  l_strbuf* p_str = 0;
+  l_ostream str_out;
+  l_value date[8] = {0};
+
+  p_str = l_sbuf32_init(&str);
+  str_out = l_strbuf_ostream(p_str);
+
+  l_timestamp_from_msec(ms, date);
+  l_ostream_format_n(&str_out, "%04d/%02d/%02d %02d:%02d:%02d.%03d", 7, date);
+
+  return str;
+}
+
+static void
+l_timestamp_init(l_timestamp* stamp)
+{
+  stamp->base_syst_time = l_system_time_ms();
+  stamp->base_mono_time = l_mono_time_ms();
+  stamp->mast_time_ms = stamp->base_syst_time;
+
+  stamp->tmlk = &stamp->time_lock;
+  l_rwlock_init(stamp->tmlk);
+
+  stamp->time_ms = stamp->base_syst_time;
+  stamp->tmstr = l_timestamp_gen_str(stamp->time_ms);
+}
+
+static void
+l_timestamp_update(lnlylib_env* E)
+{
+  l_long mono_time = l_mono_time_ms();
+  l_timestamp* tm = E->stamp;
+  l_long time_ms = 0;
+  l_sbuf32 tmstr;
+
+  if (mono_time > tm->base_mono_time) {
+    time_ms = tm->base_syst_time + mono_time - tm->base_mono_time;
+    tmstr = l_timestamp_gen_str(time_ms);
+
+    tm->mast_time_ms = time_ms;
+
+    l_rwlock_wrlock(tm->tmlk);
+    tm->time_ms = time_ms;
+    tm->tmstr = tmstr;
+    l_rwlock_unlock(tm->tmlk);
+  }
+}
+
+static l_long
+l_time_msec(lnlylib_env* E)
+{
+  l_long time_ms = 0;
+  l_timestamp* tm = E->stamp;
+  l_rwlock_rdlock(tm->tmlk);
+  time_ms = tm->time_ms;
+  l_rwlock_unlock(tm->tmlk);
+  return time_ms;
+}
+
+static const l_byte*
+l_time_cstr(lnlylib_env* E)
+{
+  l_timestamp* tm = E->stamp;
+  l_rwlock_rdlock(tm->tmlk);
+  E->tmstr = tm->tmstr;
+  l_rwlock_unlock(tm->tmlk);
+  return l_strbuf_cstr(l_sbuf32_p(&E->tmstr));
+}
+
 static lnlylib_env*
 l_master_init(int (*start)(lnlylib_env*), int argc, char** argv)
 {
@@ -648,6 +733,9 @@ l_master_init(int (*start)(lnlylib_env*), int argc, char** argv)
 
   M->conf = &M->config;
   M->cmds = &M->cmdline;
+
+  M->stamp = &M->timestamp;
+  l_timestamp_init(M->stamp);
 
   M->qlock = &M->globalq_lock;
   M->qcndv = &M->globalq_cndv;
@@ -673,8 +761,9 @@ l_master_init(int (*start)(lnlylib_env*), int argc, char** argv)
   main_env = M->E;
   main_env->M = M;
   main_env->T = &M->T;
-  main_env->ALLOC = M->T.thrd_alloc;
-  main_env->LOG = &M->T.logout;
+  main_env->alloc = M->T.thrd_alloc;
+  main_env->logout = &M->T.logout;
+  main_env->stamp = M->stamp;
 
   l_threadlocal_set(main_env);
 
@@ -682,8 +771,8 @@ l_master_init(int (*start)(lnlylib_env*), int argc, char** argv)
   l_config_load(conf);
   M->T.logout = l_config_logout(conf, L_MASTER_THRIDX);
   M->T.thrd_alloc = l_thrdalloc_create();
-  main_env->LOG = &M->T.logout;
-  main_env->ALLOC = M->T.thrd_alloc;
+  main_env->logout = &M->T.logout;
+  main_env->alloc = M->T.thrd_alloc;
 
   l_parse_cmd_line(M, argc, argv);
 
@@ -701,7 +790,7 @@ l_master_init(int (*start)(lnlylib_env*), int argc, char** argv)
   for (i = 0; i < M->num_workers; ++i) {
     work_node = M->node_arr + i;
     worker = L_MALLOC_TYPE(main_env, l_worker);
-    l_thread_init(&worker->T, L_WORKER_THRIDX + i, &worker->env, conf);
+    l_thread_init(&worker->T, L_WORKER_THRIDX + i, &worker->work_env, conf);
     worker->work_flags = 0;
     worker->weight = i / 4 - 1;
 
@@ -719,15 +808,16 @@ l_master_init(int (*start)(lnlylib_env*), int argc, char** argv)
     l_squeue_init(worker->mast_rxmq);
     l_mutex_init(worker->mast_rxlk);
 
-    worker->env.M = M;
-    worker->env.T = &worker->T;
-    worker->env.S = 0;
-    worker->env.MSG = 0;
-    worker->env.SVUD = 0;
-    worker->env.ALLOC = worker->T.thrd_alloc;
-    worker->env.CT = 0;
-    worker->env.CO = 0;
-    worker->env.LOG = &worker->T.logout;
+    worker->work_env.M = M;
+    worker->work_env.T = &worker->T;
+    worker->work_env.S = 0;
+    worker->work_env.MSG = 0;
+    worker->work_env.svud = 0;
+    worker->work_env.alloc = worker->T.thrd_alloc;
+    worker->work_env.ctbl = 0;
+    worker->work_env.coro = 0;
+    worker->work_env.logout = &worker->T.logout;
+    worker->work_env.stamp = M->stamp;
 
     work_node->worker = worker;
   }
@@ -931,9 +1021,9 @@ l_master_handle_messages(l_master* M, l_squeue* txms)
 static l_ulong
 l_current_coid(lnlylib_env* E)
 {
-  l_coroutine* co = E->CO;
-  if (E->CT && co) {
-    l_umedit id = co - E->CT->coro_arr;
+  l_coroutine* co = E->coro;
+  if (E->ctbl && co) {
+    l_umedit id = co - E->ctbl->coro_arr;
     return (((l_ulong)id) << 32) | co->seed_num;
   } else {
     return 0;
@@ -964,7 +1054,7 @@ l_booter_on_create(lnlylib_env* E)
 static void
 l_booter_on_destroy(lnlylib_env* E)
 {
-  l_logm_1(E, "booter on destroy (ud %p)", lp(E->SVUD));
+  l_logm_1(E, "booter on destroy (ud %p)", lp(E->svud));
   l_program_exit(E);
 }
 
@@ -1021,7 +1111,6 @@ l_master_loop(lnlylib_env* main_env)
   l_socket_prepare();
 
   for (; ;) {
-
     if (l_squeue_nt_empty(&srvc_need_hdl)) {
       l_mutex_lock(QLOCK);
       global_q_is_empty = l_squeue_is_empty(Q);
@@ -1032,8 +1121,10 @@ l_master_loop(lnlylib_env* main_env)
         l_condv_broadcast(QCNDV);
       }
     } else {
-      l_thread_sleep_ms(30);
+      l_thread_sleep_ms(1);
     }
+
+    l_timestamp_update(main_env);
 
     if (master_exit) {
       break;
@@ -1139,6 +1230,15 @@ l_master_loop(lnlylib_env* main_env)
 }
 
 static void
+l_worker_to_master_message(l_worker* W, l_message* msg)
+{
+  /* deliver worker msg to master */
+  l_mutex_lock(W->mast_rxlk);
+  l_squeue_push(W->mast_rxmq, &msg->node);
+  l_mutex_unlock(W->mast_rxlk);
+}
+
+static void
 l_worker_send_feedback(lnlylib_env* E)
 {
   l_worker* W = (l_worker*)E->T;
@@ -1154,11 +1254,8 @@ l_worker_send_feedback(lnlylib_env* E)
   l_squeue_move_init(&feedback.srvc_to_mast, W->srvc_to_mast);
 
   msg = l_create_message(E, 0, L_MSG_WORKER_FEEDBACK, 0, &feedback, sizeof(l_worker_feedback));
+  l_worker_to_master_message(W, msg);
 
-  /* deliver worker msg to master */
-  l_mutex_lock(W->mast_rxlk);
-  l_squeue_push(W->mast_rxmq, &msg->node);
-  l_mutex_unlock(W->mast_rxlk);
 }
 
 static void
@@ -1166,13 +1263,8 @@ l_worker_send_exit_req(lnlylib_env* E)
 {
   l_worker* W = (l_worker*)E->T;
   l_message* msg = 0;
-
   msg = l_create_message(E, 0, L_MSG_PROGRAM_EXIT_REQ, 0, 0, 0);
-
-  /* deliver worker msg to master */
-  l_mutex_lock(W->mast_rxlk);
-  l_squeue_push(W->mast_rxmq, &msg->node);
-  l_mutex_unlock(W->mast_rxlk);
+  l_worker_to_master_message(W, msg);
 }
 
 static void
@@ -1186,25 +1278,21 @@ l_worker_send_exit_rsp(lnlylib_env* E)
   rsp.killer = S;
   rsp.thridx = W->T.thridx;
   msg = l_create_message(E, 0, L_MSG_PROGRAM_EXIT_RSP, 0, &rsp, sizeof(l_worker_exit_rsp));
-
-  /* deliver worker msg to master */
-  l_mutex_lock(W->mast_rxlk);
-  l_squeue_push(W->mast_rxmq, &msg->node);
-  l_mutex_unlock(W->mast_rxlk);
+  l_worker_to_master_message(W, msg);
 }
 
 static int
-l_worker_loop(lnlylib_env* ENV)
+l_worker_loop(lnlylib_env* E)
 {
-  l_worker* W = (l_worker*)ENV->T;
-  l_squeue* Q = ENV->M->globalq;
-  l_mutex* QLOCK = ENV->M->qlock;
-  l_condv* QCNDV = ENV->M->qcndv;
+  l_worker* W = (l_worker*)E->T;
+  l_squeue* Q = E->M->globalq;
+  l_mutex* QLOCK = E->M->qlock;
+  l_condv* QCNDV = E->M->qcndv;
   l_service* S = 0;
   l_message* MSG = 0;
   int i = 0, n = 0;
 
-  l_logm_1(ENV, "worker %d started", ld(W->T.thridx));
+  l_logm_1(E, "worker %d started", ld(W->T.thridx));
 
   for (; ;) {
     l_mutex_lock(QLOCK);
@@ -1214,14 +1302,14 @@ l_worker_loop(lnlylib_env* ENV)
     S = (l_service*)l_squeue_pop(Q);
     l_mutex_unlock(QLOCK);
 
-    l_logv_s(ENV, "worker heart beating ...");
+    l_logv_s(E, "worker heart beating ...");
 
-    ENV->S = S;
-    ENV->SVUD = S->ud;
+    E->S = S;
+    E->svud = S->ud;
     W->work_flags = 0;
 
     if ((S->srvc_id >> 32) == L_SERVICE_KILLER) {
-      l_worker_send_exit_rsp(ENV);
+      l_worker_send_exit_rsp(E);
       break;
     }
 
@@ -1230,48 +1318,48 @@ l_worker_loop(lnlylib_env* ENV)
     for (i = 0; i < n; ++i) {
       MSG = (l_message*)l_squeue_pop(&S->srvc_msgq);
       if (MSG == 0) { break; }
-      ENV->MSG = MSG;
+      E->MSG = MSG;
       switch (MSG->mssg_id) {
       case L_MSG_SERVICE_ON_CREATE:
         if (S->cb->service_on_create) {
           void* svud = 0;
-          svud = S->cb->service_on_create(ENV);
+          svud = S->cb->service_on_create(E);
           if (S->ud == 0) {
-            ENV->SVUD = S->ud = svud;
+            E->svud = S->ud = svud;
           } else if (svud != 0) {
-            l_loge_1(ENV, "the service %.16x user data already exist", lx(S->srvc_id));
+            l_loge_1(E, "the service %.16x user data already exist", lx(S->srvc_id));
           }
         }
         break;
       case L_MSG_SERVICE_ON_DESTROY:
         if (S->cb->service_on_destroy) {
-          S->cb->service_on_destroy(ENV);
+          S->cb->service_on_destroy(E);
         }
         S->srvc_flags |= L_SRVC_FLAG_DESTROY_SERVICE;
         break;
       default:
         if (S->cb->service_proc) {
-          S->cb->service_proc(ENV);
+          S->cb->service_proc(E);
         }
         break;
       }
       if (MSG->mssg_flags & L_MSSG_FLAG_DONT_FREE_MSSG) {
         MSG->mssg_flags &= (~L_MSSG_FLAG_DONT_FREE_MSSG);
       } else {
-        l_message_free_data(ENV, MSG);
+        l_message_free_data(E, MSG);
         l_squeue_push(W->work_frmq, &MSG->node);
       }
     }
 
-    l_worker_send_feedback(ENV);
+    l_worker_send_feedback(E);
 
     if (W->work_flags & L_WORK_FLAG_PROGRAM_EXIT) {
-      l_worker_send_exit_req(ENV);
+      l_worker_send_exit_req(E);
       W->work_flags &= (~L_WORK_FLAG_PROGRAM_EXIT);
     }
   }
 
-  l_logm_1(ENV, "worker %d exited", ld(W->T.thridx));
+  l_logm_1(E, "worker %d exited", ld(W->T.thridx));
   return 0;
 }
 
@@ -1765,24 +1853,24 @@ l_master_load_service_module(const void* module)
   l_service_callback* cb = 0;
   l_dynhdl hdl = l_empty_dynlib();
 
-  hdl = l_dynhdl_open2(L_STR(LNLYLIB_CLIB_DIR), module_name); /* TODO: 1. do module cache? 2. multiple service can exist in one module */
+  hdl = l_dynhdl_open2(l_literal_strn(LNLYLIB_CLIB_DIR), module_name); /* TODO: 1. do module cache? 2. multiple service can exist in one module */
   if (l_dynhdl_is_empty(&hdl)) {
     l_loge_1(LNUL, "open library %strn failed", lstrn(&module_name));
     return 0;
   }
 
 /*
-  cb.service_proc = (void (*)(lnlylib_env*))l_dynhdl_sym2(&hdl, module_name, L_STR("service_proc"));
+  cb.service_proc = (void (*)(lnlylib_env*))l_dynhdl_sym2(&hdl, module_name, l_literal_strn("service_proc"));
   if (cb.service_proc == 0) {
     l_loge_1("load %strn_service_proc failed", l_strn(&module_name));
     return 0;
   }
 
-  cb.service_on_create = (void* (*)(lnlylib_env*))l_dynhdl_sym2(&hdl, module_name, L_STR("service_on_create"));
-  cb.service_on_destroy = (void (*)(lnlylib_env*))l_dynhdl_sym2(&hdl, module_name, L_STR("service_on_destroy"));
+  cb.service_on_create = (void* (*)(lnlylib_env*))l_dynhdl_sym2(&hdl, module_name, l_literal_strn("service_on_create"));
+  cb.service_on_destroy = (void (*)(lnlylib_env*))l_dynhdl_sym2(&hdl, module_name, l_literal_strn("service_on_destroy"));
 */
 
-  cb = (l_service_callback*)l_dynhdl_sym2(&hdl, module_name, L_STR("callback"));
+  cb = (l_service_callback*)l_dynhdl_sym2(&hdl, module_name, l_literal_strn("callback"));
   return cb;
 #endif
 }
@@ -2027,12 +2115,12 @@ l_socket_listen_service_on_destroy(lnlylib_env* E)
 {
   l_socket_listen_svud* data = 0;
 
-  data = (l_socket_listen_svud*)E->SVUD;
+  data = (l_socket_listen_svud*)E->svud;
   if (data) {
     L_MFREE(E, data);
   }
 
-  E->SVUD = 0;
+  E->svud = 0;
 }
 
 static void
@@ -2043,7 +2131,7 @@ l_socket_listen_service_accept_conn(void* ud, l_socketconn* conn)
   l_socket_inconn_svud* inconn_svud = 0;
   l_sockaddr* remote = 0;
 
-  data = (l_socket_listen_svud*)E->SVUD;
+  data = (l_socket_listen_svud*)E->svud;
   inconn_svud = (l_socket_inconn_svud*)l_dqueue_pop(&data->freeq);
   if (inconn_svud == 0) {
     inconn_svud = L_MALLOC_TYPE(E, l_socket_inconn_svud);
@@ -2067,7 +2155,7 @@ l_socket_listen_service_proc(lnlylib_env* E)
   l_socket_listen_svud* srvc = 0;
 
   mgid = E->MSG->mssg_id;
-  srvc = (l_socket_listen_svud*)E->SVUD;
+  srvc = (l_socket_listen_svud*)E->svud;
 
   switch (mgid) {
   case L_MSG_SERVICE_EXIT_REQ:
@@ -2106,7 +2194,7 @@ static void*
 l_socket_inconn_service_on_create(lnlylib_env* E)
 {
   l_socket_inconn_svud* svud = 0;
-  svud = (l_socket_inconn_svud*)E->SVUD;
+  svud = (l_socket_inconn_svud*)E->svud;
   l_create_service(E, L_SERVICE(svud->listen_svud->inconn_cb), 0);
   return 0;
 }
@@ -2144,7 +2232,7 @@ l_socket_inconn_service_proc(lnlylib_env* E)
   l_umedit size = 0;
   l_umedit done = 0;
 
-  svud = (l_socket_inconn_svud*)E->SVUD;
+  svud = (l_socket_inconn_svud*)E->svud;
 
   switch (MSG->mssg_id) {
   case L_MSG_SUBSRVC_CREATE_RSP: {
@@ -2229,7 +2317,7 @@ l_socket_outconn_service_proc(lnlylib_env* E)
   l_service* S = E->S;
   l_socket_outconn_svud* outconn = 0;
 
-  outconn = (l_socket_outconn_svud*)E->SVUD;
+  outconn = (l_socket_outconn_svud*)E->svud;
   L_UNUSED(outconn);
 
   switch (mgid) {
@@ -2358,7 +2446,7 @@ l_finish_logging(lnlylib_env* E)
   }
 
   if (E) {
-    l_ostream_flush(E->LOG);
+    l_ostream_flush(E->logout);
   }
 }
 
@@ -2368,6 +2456,7 @@ l_start_logging(lnlylib_env* E, const l_byte* tag, l_ostream* temp_out)
   l_ostream* out = 0;
   l_umedit thridx = 9999;
   l_umedit svid = 0;
+  const l_byte* tmstr = 0;
 
   if (E == 0) {
     E = l_get_lnlylib_env();
@@ -2376,15 +2465,15 @@ l_start_logging(lnlylib_env* E, const l_byte* tag, l_ostream* temp_out)
   if (E == 0) {
     *temp_out = l_stdout_ostream();
     out = temp_out;
+    tmstr = l_cstr("0000/00/00 00:00:00.000");
   } else {
-    out = E->LOG;
+    out = E->logout;
     thridx = E->T->thridx;
     svid = E->S ? (l_umedit)(E->S->srvc_id >> 32) : 0;
+    tmstr = l_time_cstr(E);
   }
 
-  /* TODO: add timestamp */
-
-  l_ostream_format_3(out, "%s\t%d:%.8zx ", ls(tag), ld(thridx), ld(svid));
+  l_ostream_format_4(out, "%s\t%s %4d:%.8zx ", ls(tag), ls(tmstr), ld(thridx), ld(svid));
   return out;
 }
 
@@ -2452,8 +2541,8 @@ static const l_byte l_char_table[] = {
 };
 
 static const l_strn l_hex_digit[] = {
-  L_STR("0123456789abcdef"),
-  L_STR("0123456789ABCDEF")
+  l_literal_strn("0123456789abcdef"),
+  l_literal_strn("0123456789ABCDEF")
 };
 
 L_EXTERN int
@@ -2922,15 +3011,15 @@ l_ostream_format_bool(l_ostream* os, int n, l_umedit flags)
 {
   if (n) {
     if (flags & L_UPPER) {
-      return l_ostream_format_strn(os, L_STR("TRUE"), flags);
+      return l_ostream_format_strn(os, l_literal_strn("TRUE"), flags);
     } else {
-      return l_ostream_format_strn(os, L_STR("true"), flags);
+      return l_ostream_format_strn(os, l_literal_strn("true"), flags);
     }
   } else {
     if (flags & L_UPPER) {
-      return l_ostream_format_strn(os, L_STR("FALSE"), flags);
+      return l_ostream_format_strn(os, l_literal_strn("FALSE"), flags);
     } else {
-      return l_ostream_format_strn(os, L_STR("false"), flags);
+      return l_ostream_format_strn(os, l_literal_strn("false"), flags);
     }
   }
 }

@@ -16,7 +16,6 @@ LNLYLIB_API_IMPL - shall be defined in lib src file
 LNLYLIB_HOME_DIR - the lnlylib root folder when make
 LNLYLIB_CLIB_DIR - c libraries folder
 LNLYLIB_LUALIB_DIR - lua libraries folder
-LNLYLIB_API_IMPL
 L_MACH_32_BIT or L_MACH_64_BIT
 L_LIT_ENDIAN or L_BIG_ENDIAN
 l_bool false true - boolean
@@ -38,7 +37,6 @@ l_int l_uint - pointer-size integer **/
 #undef L_MAX_INT_UL
 #undef L_MAX_INT_SL
 #undef L_MIN_INT_SL
-#undef L_MAX_INT_IO
 
 #define L_MAX_INT_UB ((l_byte)0xff) /* 255 */
 #define L_MAX_INT_SB ((l_sbyte)0x7f) /* 127 */
@@ -52,9 +50,6 @@ l_int l_uint - pointer-size integer **/
 #define L_MAX_INT_UL ((l_ulong)0xffffffffffffffff) /* 18446744073709551615 */
 #define L_MAX_INT_SL ((l_long)0x7fffffffffffffff) /* 9223372036854775807 */
 #define L_MIN_INT_SL ((l_long)-9223372036854775807-1) /* 9223372036854775808 0x8000000000000000 */
-#define L_MAX_INT_IO (0x7fff0000) /* 2147418112 */
-/* on linux, write() and similar system calls will transfer at most 0x7ffff000 (2,147,479,522) bytes,
-returning the number of bytes actually transferred. this is true on both 32-bit and 64-bit systems. */
 
 #undef LNUL
 #define LNUL (0)
@@ -76,11 +71,6 @@ typedef struct {
 #define l_strn_c(s) ((l_strn){l_cstr(s), (s) ? strlen((char*)(s)) : 0})
 #define l_empty_strn() l_literal_strn("")
 #define l_literal_strn(s) ((l_strn){l_cstr("" s), sizeof(s) - 1})
-
-#undef L_STR
-#undef L_EMPTY_STR
-#define L_STR(s) l_literal_strn(s)
-#define L_EMPTY_STR l_empty_strn()
 
 L_EXTERN l_bool l_strn_equal(const l_strn* a, l_strn b);
 L_EXTERN l_bool l_strn_has(const l_strn* a, l_byte c);

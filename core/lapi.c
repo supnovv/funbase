@@ -339,7 +339,7 @@ l_table_get_str(lua_State* L, l_tableindex t, const void* namechain)
   if (l_table_getn(L, t, namechain)) {
     return l_to_strn(L, -1);
   } else {
-    return L_EMPTY_STR;
+    return l_empty_strn();
   }
 }
 
@@ -369,7 +369,7 @@ l_table_get_intv(lua_State* L, l_tableindex t, int n, ...)
 L_EXTERN l_strn
 l_table_get_strv(lua_State* L, l_tableindex t, int n, ...)
 {
-  l_strn s = L_EMPTY_STR;
+  l_strn s = l_empty_strn();
   va_list vl;
   va_start(vl, n);
   if (l_table_getv(L, t, n, vl)) {

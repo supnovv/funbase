@@ -76,7 +76,12 @@ clock_serv_t cclock;
 mach_timespec_t mts;
 host_get_clock_service(mach_host_self(), SYSTEM_CLOCK, &cclock);
 clock_get_time(cclock, &mts);
-mach_port_deallocate(mach_task_self(), cclock); **/
+mach_port_deallocate(mach_task_self(), cclock);
+---
+struct timespec {
+  time_t tv_sec;  // seconds
+  long tv_nsec; // nanoseconds
+}; **/
 
 static l_time
 l_impl_get_time(clockid_t id)
@@ -96,10 +101,27 @@ l_impl_get_time(clockid_t id)
   return time;
 }
 
+static l_long
+l_impl_get_time_ms(clockid_t id)
+{
+  struct timespec spec;
+  if (clock_gettime(id, &spec) != 0) {
+    return 0;
+  } else {
+    return (l_long)(spec.tv_sec * 1000 + spec.tv_nsec / 1000000);
+  }
+}
+
 L_EXTERN l_time
 l_system_time()
 {
   return l_impl_get_time(CLOCK_REALTIME);
+}
+
+L_EXTERN l_long
+l_system_time_ms()
+{
+  return l_impl_get_time_ms(CLOCK_REALTIME);
 }
 
 L_EXTERN l_time
@@ -128,21 +150,36 @@ l_mono_time()
   if the time is changed using settimeofday or similar.
   @@OSX doesn't support this function */
 
-  clockid_t id;
-
 #if defined(CLOCK_BOOTTIME)
-  id = CLOCK_BOOTTIME;
+  return l_impl_get_time(CLOCK_BOOTTIME);
 #else
-  id = CLOCK_MONOTONIC;
+  return l_impl_get_time(CLOCK_MONOTONIC);
 #endif
+}
 
-  return l_impl_get_time(id);
+L_EXTERN l_long
+l_mono_time_ms()
+{
+#if defined(CLOCK_BOOTTIME)
+  return l_impl_get_time_ms(CLOCK_BOOTTIME);
+#else
+  return l_impl_get_time_ms(CLOCK_MONOTONIC);
+#endif
 }
 
 L_EXTERN l_date
 l_system_date()
 {
   return l_date_from_time(l_system_time());
+}
+
+L_EXTERN l_date
+l_date_from_msec(l_long utcmsec)
+{
+  l_long secs = utcmsec / 1000;
+  l_date date = l_date_from_secs(secs);
+  date.nsec = (utcmsec - secs * 1000) * 1000000;
+  return date;
 }
 
 L_EXTERN l_date
@@ -206,15 +243,36 @@ l_date_from_secs(l_long utcsecs)
   return date;
 }
 
+L_EXTERN l_bool
+l_timestamp_from_msec(l_long utcmsec, l_value* v)
+{
+  struct tm st;
+  time_t secs = utcmsec / 1000;
+
+  if (gmtime_r(&secs, &st) != &st) {
+    return false;
+  }
+
+  v[0].d = st.tm_year + 1900;
+  v[1].d = st.tm_mon + 1;
+  v[2].d = st.tm_mday;
+  v[3].d = st.tm_hour;
+  v[4].d = st.tm_min;
+  v[5].d = st.tm_sec;
+  v[6].d = utcmsec - secs * 1000;
+  return true;
+}
+
 #if 0
 static l_strn l_weekday_abbr[] = {
-  L_STR("Sun"), L_STR("Mon"), L_STR("Tue"), L_STR("Wed"),
-  L_STR("Thu"), L_STR("Fri"), L_STR("Sat"), L_STR("Sun")
+  l_literal_strn("Sun"), l_literal_strn("Mon"), l_literal_strn("Tue"), l_literal_strn("Wed"),
+  l_literal_strn("Thu"), l_literal_strn("Fri"), l_literal_strn("Sat"), l_literal_strn("Sun")
 };
 
 static l_strn l_month_abbr[] = {
-  L_STR("Nul"), L_STR("Jan"), L_STR("Feb"), L_STR("Mar"), L_STR("Apr"), L_STR("May"), L_STR("Jun"),
-  L_STR("Jul"), L_STR("Aug"), L_STR("Sep"), L_STR("Oct"), L_STR("Nov"), L_STR("Dec")
+  l_literal_strn("Nul"), l_literal_strn("Jan"), l_literal_strn("Feb"), l_literal_strn("Mar"),
+  l_literal_strn("Apr"), l_literal_strn("May"), l_literal_strn("Jun"), l_literal_strn("Jul"),
+  l_literal_strn("Aug"), l_literal_strn("Sep"), l_literal_strn("Oct"), l_literal_strn("Nov"), l_literal_strn("Dec")
 };
 #endif
 
@@ -651,7 +709,7 @@ l_dynhdl_open(l_strn name)
 
   name_str = l_sbuf4k_init_from(&name_buf, name);
 
-  if (l_strbuf_write(name_str, L_STR(".so")) > 0) {
+  if (l_strbuf_write(name_str, l_literal_strn(".so")) > 0) {
     return l_impl_dynhdl_open(l_strbuf_strn(name_str));
   } else {
     return l_empty_dynhdl();
@@ -674,7 +732,7 @@ l_dynhdl_open_from(l_strn path, l_strn lib_name)
 
   name = l_sbuf4k_init(&buffer);
 
-  if (l_strbuf_add_path(name, path) > 0 && l_strbuf_end_path_x(name, lib_name, L_STR(".so")) > 0) {
+  if (l_strbuf_add_path(name, path) > 0 && l_strbuf_end_path_x(name, lib_name, l_literal_strn(".so")) > 0) {
     return l_impl_dynhdl_open(l_strbuf_strn(name));
   } else {
     return l_empty_dynhdl();
@@ -2108,7 +2166,7 @@ l_impl_write(int fd, const void* data, l_int size)
   POSIX conforming.
   According to POSIX.1, if count is greater than SSIZE_MAX, the result is
   implementation-defined; on linux, write() and similar system calls will
-  transfer at most 0x7ffff000 (2,147,479,522) bytes, returning the number of
+  transfer at most ***0x7ffff000 (2,147,479,522)*** bytes, returning the number of
   bytes actually transferred. (this is true on both 32-bit and 64-bit systems).
   A successful return from write() does not make any guarantee that data has
   been committed to disk. In fact, on some buggy implementations, it does not

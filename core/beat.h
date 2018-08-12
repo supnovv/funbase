@@ -4,9 +4,9 @@
 
 struct l_master;
 struct l_thread;
-struct l_worker;
 struct l_service;
 struct l_message;
+struct l_timestamp;
 struct l_corotable;
 struct l_coroutine;
 
@@ -15,11 +15,13 @@ typedef struct lnlylib_env {
   struct l_thread* T;
   struct l_service* S;
   struct l_message* MSG;
-  void* SVUD;
-  void* ALLOC;
-  l_ostream* LOG;
-  struct l_corotable* CT;
-  struct l_coroutine* CO;
+  void* svud;
+  void* alloc;
+  l_ostream* logout;
+  struct l_timestamp* stamp;
+  struct l_corotable* ctbl;
+  struct l_coroutine* coro;
+  l_sbuf32 tmstr;
 } lnlylib_env;
 
 typedef struct {
