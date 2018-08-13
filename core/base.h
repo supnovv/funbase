@@ -824,6 +824,15 @@ l_squeue_move_init(l_squeue* self, l_squeue* q)
   l_squeue_push_queue(self, q);
 }
 
+L_INLINE l_squeue
+l_squeue_move(l_squeue* q)
+{
+  l_squeue out;
+  l_squeue_init(&out);
+  l_squeue_push_queue(&out, q);
+  return out;
+}
+
 L_INLINE l_smplnode*
 l_squeue_top(l_squeue* sq)
 {
