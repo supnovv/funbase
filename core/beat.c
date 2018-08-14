@@ -12,8 +12,8 @@
 
 #define L_THREAD_MASTER 1000
 #define L_THREAD_WORKER 1001
-#define L_MAX_NUM_WKERS 8000
 #define L_THREAD_OTHERS 9001
+#define L_MAX_NUM_WORKERS 8000
 
 #define L_SERVICE_ALIVE 0x01
 #define L_DOCKED_SERVICE_IN_TEMPQ 0x02
@@ -475,8 +475,8 @@ l_config_load(l_config* conf)
   conf->num_workers = l_table_get_int(L, env, "workers");
   if (conf->num_workers < 1) {
     conf->num_workers = 1;
-  } else if (conf->num_workers > L_MAX_NUM_WKERS) {
-    conf->num_workers = L_MAX_NUM_WKERS;
+  } else if (conf->num_workers > L_MAX_NUM_WORKERS) {
+    conf->num_workers = L_MAX_NUM_WORKERS;
   }
 
   conf->init_stbl_size = l_table_get_int(L, env, "services");
