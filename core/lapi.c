@@ -524,7 +524,7 @@ l_to_num(lua_State* L, int value_at)
 }
 
 L_EXTERN const l_byte*
-l_to_cstr(lua_State* L, int stackindex)
+l_to_strc(lua_State* L, int stackindex)
 {
   return l_to_strn(L, stackindex).p;
 }
@@ -760,7 +760,7 @@ l_compile_to_str(lua_State* L, l_funcindex func)
   n = lua_dump(L, l_string_writer_for_compile, &B, true);
   if (n == 0) {
     luaL_pushresult(&B);
-    return l_to_cstr(L, -1);
+    return l_to_strc(L, -1);
   } else {
     return 0;
   }
@@ -1118,7 +1118,7 @@ l_search_and_load_func(lua_State* L)
   if (lua_isnil(L, -1)) {
     goto try_to_laod_from_c_library;
   } else {
-    l_load_file(L, l_to_cstr(L, -1)); /* load the lua find */
+    l_load_file(L, l_to_strc(L, -1)); /* load the lua find */
     return 1; /* return loaded func on the top */
   }
 

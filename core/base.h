@@ -62,15 +62,15 @@ typedef struct {
   l_int n;
 } l_strn;
 
-#undef l_cstr
+#undef l_strc
 #undef l_strn_c
 #undef l_empty_strn
 #undef l_literal_strn
 
-#define l_cstr(s) ((l_byte*)(s)) /* zero terminated c string */
-#define l_strn_c(s) ((l_strn){l_cstr(s), (s) ? strlen((char*)(s)) : 0})
+#define l_strc(s) ((l_byte*)(s)) /* zero terminated c string */
+#define l_strn_c(s) ((l_strn){l_strc(s), (s) ? strlen((char*)(s)) : 0})
 #define l_empty_strn() l_literal_strn("")
-#define l_literal_strn(s) ((l_strn){l_cstr("" s), sizeof(s) - 1})
+#define l_literal_strn(s) ((l_strn){l_strc("" s), sizeof(s) - 1})
 
 L_EXTERN l_bool l_strn_equal(const l_strn* a, l_strn b);
 L_EXTERN l_bool l_strn_has(const l_strn* a, l_byte c);
@@ -90,19 +90,19 @@ l_strn_is_empty(const l_strn* s)
 L_INLINE l_strn
 l_strn_l(const void* s, l_int len)
 {
-  return (l_strn){l_cstr(s), len > 0 ? len : 0};
+  return (l_strn){l_strc(s), len > 0 ? len : 0};
 }
 
 L_INLINE l_strn
 l_strn_p(const void* s, const void* e)
 {
-  return l_strn_l(s, l_cstr(e) - l_cstr(s));
+  return l_strn_l(s, l_strc(e) - l_strc(s));
 }
 
 L_INLINE l_strn
 l_strn_s(const void* s, l_int m, l_int n)
 {
-  return l_strn_l(l_cstr(s) + m, n - m);
+  return l_strn_l(l_strc(s) + m, n - m);
 }
 
 /** memory operation **/
@@ -439,6 +439,12 @@ L_EXTERN l_int l_ostream_format_bool(l_ostream* os, int n, l_umedit flags);
 L_EXTERN int l_ostream_format_n(l_ostream* os, const void* fmt, l_int n, const l_value* a);
 L_EXTERN int l_impl_ostream_format(l_ostream* os, const void* fmt, l_int n, ...);
 
+L_INLINE l_int
+l_ostream_format_0(l_ostream* os, const void* s)
+{
+  return l_ostream_write_strn(os, l_strn_c(s));
+}
+
 L_INLINE int
 l_ostream_format_1(l_ostream* os, const void* fmt, l_value a)
 {
@@ -602,7 +608,7 @@ L_EXTERN l_ostream l_strbuf_ostream(l_strbuf* b);
 L_EXTERN l_int l_strbuf_write(l_strbuf* b, l_strn s);
 L_EXTERN l_int l_strbuf_reset(l_strbuf* b, l_strn s);
 L_EXTERN void l_strbuf_clear(l_strbuf* b);
-L_EXTERN const l_byte* l_strbuf_cstr(l_strbuf* b);
+L_EXTERN const l_byte* l_strbuf_strc(l_strbuf* b);
 L_EXTERN l_int l_strbuf_size(l_strbuf* b);
 L_EXTERN l_int l_strbuf_capacity(l_strbuf* b);
 L_EXTERN l_byte* l_strbuf_getp(l_strbuf* b);
@@ -633,7 +639,7 @@ L_EXTERN l_int l_string_reset(l_string* s, l_strn from);
 L_EXTERN void l_string_clear(l_string* s);
 
 L_INLINE l_byte*
-l_string_cstr(l_string* s)
+l_string_strc(l_string* s)
 {
   if (s->implsz <= 0) {
     return (l_byte*)&s->impltt;
@@ -655,7 +661,7 @@ l_string_size(l_string* s)
 L_INLINE l_strn
 l_string_strn(l_string* s)
 {
-  return l_strn_l(l_string_cstr(s), l_string_size(s));
+  return l_strn_l(l_string_strc(s), l_string_size(s));
 }
 
 L_INLINE l_bool
@@ -702,7 +708,7 @@ L_EXTERN void l_file_redirect_stderr(const void* name);
 L_EXTERN void l_file_redirect_stdin(const void* name);
 L_EXTERN l_ostream l_file_ostream(l_file* s);
 
-/** linked node **/
+/** single linked list and queue **/
 
 typedef struct l_smplnode {
   struct l_smplnode* next;
@@ -712,12 +718,6 @@ L_INLINE void
 l_smplnode_init(l_smplnode* node)
 {
   node->next = 0;
-}
-
-L_INLINE int
-l_smplnode_is_empty(l_smplnode* node)
-{
-  return node->next == 0;
 }
 
 L_INLINE void
@@ -736,42 +736,6 @@ l_smplnode_remove_next(l_smplnode* node)
   }
   return p;
 }
-
-typedef struct l_linknode {
-  struct l_linknode* next;
-  struct l_linknode* prev;
-} l_linknode;
-
-L_INLINE void
-l_linknode_init(l_linknode* node)
-{
-  node->next = node->prev = node; /* TODO: init to 0 */
-}
-
-L_INLINE int
-l_linknode_is_empty(l_linknode* node)
-{
-  return node->next == node;
-}
-
-L_INLINE void
-l_linknode_insert_after(l_linknode* node, l_linknode* newnode)
-{
-  newnode->next = node->next;
-  node->next = newnode;
-  newnode->prev = node;
-  newnode->next->prev = newnode;
-}
-
-L_INLINE l_linknode*
-l_linknode_remove(l_linknode* node)
-{
-  node->prev->next = node->next;
-  node->next->prev = node->prev;
-  return node;
-}
-
-/** linked queue **/
 
 typedef struct l_squeue {
   l_smplnode head;
@@ -828,8 +792,7 @@ L_INLINE l_squeue
 l_squeue_move(l_squeue* q)
 {
   l_squeue out;
-  l_squeue_init(&out);
-  l_squeue_push_queue(&out, q);
+  l_squeue_move_init(&out, q);
   return out;
 }
 
@@ -850,6 +813,40 @@ l_squeue_pop(l_squeue* sq)
   return node;
 }
 
+/** double linked list and queue **/
+
+typedef struct l_linknode {
+  struct l_linknode* next;
+  struct l_linknode* prev;
+} l_linknode;
+
+L_INLINE void
+l_linknode_init(l_linknode* node)
+{
+  node->next = node->prev = 0; /* init to 0 let the queue become copiable */
+}
+
+L_INLINE void
+l_linknode_insert_after(l_linknode* node, l_linknode* newnode)
+{
+  newnode->next = node->next;
+  node->next = newnode;
+  newnode->prev = node;
+  if (newnode->next) {
+    newnode->next->prev = newnode;
+  }
+}
+
+L_INLINE l_linknode*
+l_linknode_remove(l_linknode* node)
+{
+  l_linknode* next = node->next;
+  l_linknode* prev = node->prev;
+  if (next) next->prev = prev;
+  if (prev) prev->next = next;
+  return node;
+}
+
 typedef struct l_dqueue {
   l_linknode head;
 } l_dqueue;
@@ -863,19 +860,23 @@ l_dqueue_init(l_dqueue* dq)
 L_INLINE l_bool
 l_dqueue_is_empty(l_dqueue* dq)
 {
-  return dq->head.next == &dq->head;
+  return dq->head.next == 0;
 }
 
 L_INLINE l_bool
 l_dqueue_nt_empty(l_dqueue* dq)
 {
-  return dq->head.next != &dq->head;
+  return dq->head.next != 0;
 }
 
 L_INLINE void
 l_dqueue_push(l_dqueue* dq, l_linknode* newnode)
 {
-  l_linknode_insert_after(&dq->head, newnode);
+  l_linknode* node = dq->head.prev ? dq->head.prev : &dq->head;
+  node->next = newnode;
+  newnode->next = 0;
+  newnode->prev = node;
+  dq->head.prev = newnode;
 }
 
 L_INLINE void
@@ -884,13 +885,11 @@ l_dqueue_push_queue(l_dqueue* self, l_dqueue* q)
   l_linknode* tail = 0;
   if (l_dqueue_is_empty(q)) return;
   /* chain self's tail with q's first element */
-  tail = self->head.prev;
+  tail = self->head.prev ? self->head.prev : &self->head;
   tail->next = q->head.next;
   q->head.next->prev = tail;
-  /* chain q's tail with self's head */
-  tail = q->head.prev;
-  tail->next = &self->head;
-  self->head.prev = tail;
+  /* set tail to new tail of q */
+  self->head.prev = q->head.prev;
   /* init q to empty */
   l_dqueue_init(q);
 }
@@ -902,11 +901,35 @@ l_dqueue_move_init(l_dqueue* self, l_dqueue* q)
   l_dqueue_push_queue(self, q);
 }
 
+L_INLINE l_dqueue
+l_dqueue_move(l_dqueue* q)
+{
+  l_dqueue dq;
+  l_dqueue_move_init(&dq, q);
+  return dq;
+}
+
+L_INLINE l_linknode*
+l_dqueue_top(l_dqueue* dq)
+{
+  return dq->head.next;
+}
+
 L_INLINE l_linknode*
 l_dqueue_pop(l_dqueue* dq)
 {
-  if (l_dqueue_is_empty(dq)) return 0;
-  return l_linknode_remove(dq->head.prev);
+  l_linknode* node = dq->head.next;
+  if (node) {
+    l_linknode* prev = &dq->head;
+    l_linknode* next = node->next;
+    prev->next = next;
+    if (next) {
+      next->prev = prev;
+    } else {
+      dq->head.prev = 0;
+    }
+  }
+  return node;
 }
 
 #endif /* LNLYLIB_CORE_BASE_H */

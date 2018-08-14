@@ -530,7 +530,7 @@ l_dirstm_read(l_dirstm* stm)
     if (errno != 0) l_loge_1(LNUL, "readdir %s", lserror(errno));
     return 0;
   }
-  return l_cstr(entry->d_name);
+  return l_strc(entry->d_name);
 }
 
 L_EXTERN const l_byte*
@@ -555,7 +555,7 @@ l_dirstm_read_x(l_dirstm* stm, int* isdir)
     *isdir = l_file_is_dir(entry->d_name);
 #endif
   }
-  return l_cstr(entry->d_name);
+  return l_strc(entry->d_name);
 }
 
 /** dynamic library loading **
@@ -2250,7 +2250,7 @@ l_data_read(l_filehdl hdl, void* out, l_int size)
 
 continue_to_read:
 
-  buff = l_cstr(out) + done;
+  buff = l_strc(out) + done;
   left = size - done;
 
   if (left <= 0) {
@@ -2278,7 +2278,7 @@ l_data_write(l_filehdl hdl, const void* from, l_int size)
 
 continue_to_write:
 
-  data = l_cstr(from) + done;
+  data = l_strc(from) + done;
   left = size - done;
 
   if (left <= 0) {

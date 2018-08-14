@@ -5,7 +5,7 @@
 typedef struct lua_State lua_State;
 
 #define l_pop_error(L) {\
-  l_loge_1(LNUL, "lua error %s", ls(l_to_cstr((L), -1))); \
+  l_loge_1(LNUL, "lua error %s", ls(l_to_strc((L), -1))); \
   l_pop_n((L), 1); }
 
 typedef struct {
@@ -62,7 +62,7 @@ L_EXTERN l_int l_to_int(lua_State* L, int value_at); /* if cannot convert to int
 
 L_EXTERN double l_to_num(lua_State* L, int value_at); /* if cannot convert to num, reutrn 0 */
 L_EXTERN l_strn l_to_strn(lua_State* L, int value_at); /* convert the lua value to strn */
-L_EXTERN const l_byte* l_to_cstr(lua_State* L, int value_at); /* convert the lua value to cstr */
+L_EXTERN const l_byte* l_to_strc(lua_State* L, int value_at); /* convert the lua value to strc */
 
 L_EXTERN int l_new_str_n(lua_State* L, int n, l_strn* s); /* return the string value stack index */
 L_EXTERN int l_new_str_1(lua_State* L, l_strn s1);
