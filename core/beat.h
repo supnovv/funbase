@@ -2,6 +2,8 @@
 #define LNLYLIB_CORE_BEAT_H
 #include "core/base.h"
 
+#define L_MSG_MIN_USER_MSG_ID 0x0100
+
 struct l_master;
 struct l_thread;
 struct l_service;
@@ -70,6 +72,34 @@ L_EXTERN l_ulong l_service_id(struct l_service* S);
 L_EXTERN void* l_service_data(struct l_service* S);
 L_EXTERN l_ulong l_get_svid(lnlylib_env* E);
 L_EXTERN void* l_get_svud(lnlylib_env* E);
+
+
+#define L_MSG_TIMER_CREATE_RSP (L_MSG_MIN_USER_MSG_ID + 0x30)
+#define L_MSG_TIMER_NOTIFY_IND (L_MSG_MIN_USER_MSG_ID + 0x31)
+
+#define L_TIMER_MAX_INVALID_ID 0x0e
+#define L_TIMER_IMMED_FIRED_ID 0x0f
+
+typedef struct {
+  l_ulong uniid; /* 0x00 ~ 0x0e indicate created fail */
+} l_timer;
+
+typedef struct {
+  l_uint tmud; /* pointer size timer udata */
+  l_timer timer; /* new created timer */
+} l_timer_create_rsp;
+
+typedef struct {
+  l_long stamp;
+  l_ulong count;
+  l_uint tmud;
+  l_timer timer;
+} l_timer_notify_ind;
+
+L_EXTERN void l_create_timer(lnlylib_env* E, l_uint tmud, l_long ms, void* (*func)(void*), void* ud);
+L_EXTERN void l_create_repeated_timer(lnlylib_env* E, l_uint tmud, l_long ms, void* (*func)(void*), void* ud, l_long times);
+L_EXTERN void l_create_notify_timer(lnlylib_env* E, l_uint tmud, l_long ms, l_long times);
+L_EXTERN void l_cancel_timer(lnlylib_env* E, l_timer* timer);
 
 L_EXTERN int lnlylib_main(int (*start)(lnlylib_env*), int argc, char** argv);
 
