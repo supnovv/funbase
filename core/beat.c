@@ -184,8 +184,8 @@ typedef struct l_timer_create_req {
   l_uint tmud;
   l_long times;
   l_ulong count;
-  void* (*func)(void* ud);
-  void* ud;
+  void* (*func)(lnlylib_env*, void*);
+  void* parm;
 } l_timer_create_req;
 
 typedef struct {
@@ -193,10 +193,15 @@ typedef struct {
 } l_timer_cancel_req;
 
 typedef struct {
+  void* (*func)(lnlylib_env*, void*);
+  void* parm;
+} l_timer_func_call;
+
+typedef struct {
   l_smplnode node;
   l_timer timer;
   l_long fire_ms;
-  l_timer_create_req parm;
+  l_timer_create_req data;
 } l_timer_node;
 
 typedef struct {
@@ -1364,6 +1369,12 @@ l_worker_loop(lnlylib_env* E)
         }
         S->srvc_flags |= L_SRVC_FLAG_DESTROY_SERVICE;
         break;
+      case L_MSG_TIMER_FUNC_CALL: {
+        l_timer_func_call* call = 0;
+        call = (l_timer_func_call*)MSG->mssg_data;
+        call->func(E, call->parm);
+        }
+        break;
       default:
         if (S->cb->service_proc) {
           S->cb->service_proc(E);
@@ -2230,11 +2241,6 @@ l_master_destroy_service(l_master* M, l_ulong srvc_id)
 
 /** time and timer handling **/
 
-typedef struct {
-  void* (*func)(void*);
-  void* ud;
-} l_timer_func_call;
-
 L_EXTERN l_long
 l_time_msec(lnlylib_env* E)
 {
@@ -2314,7 +2320,7 @@ l_timertable_free_node(l_timertable* ttbl, l_timer_node* node)
 }
 
 L_EXTERN void
-l_create_repeated_timer(lnlylib_env* E, l_uint tmud, l_long ms, void* (*func)(void*), void* ud, l_long times)
+l_create_repeated_timer(lnlylib_env* E, l_uint tmud, l_long ms, void* (*func)(lnlylib_env*, void*), void* parm, l_long times)
 {
   if (func == 0) {
     l_loge_s(E, "timer func is empty");
@@ -2326,15 +2332,15 @@ l_create_repeated_timer(lnlylib_env* E, l_uint tmud, l_long ms, void* (*func)(vo
     req.times = times;
     req.count = 0;
     req.func = func;
-    req.ud = ud;
+    req.parm = parm;
     l_send_message_to_master(E, L_MSG_TIMER_CREATE_REQ, &req, sizeof(l_timer_create_req));
   }
 }
 
 L_EXTERN void
-l_create_timer(lnlylib_env* E, l_uint tmud, l_long ms, void* (*func)(void*), void* ud)
+l_create_timer(lnlylib_env* E, l_uint tmud, l_long ms, void* (*func)(lnlylib_env*, void*), void* parm)
 {
-  l_create_repeated_timer(E, tmud, ms, func, ud, 1);
+  l_create_repeated_timer(E, tmud, ms, func, parm, 1);
 }
 
 L_EXTERN void
@@ -2347,7 +2353,7 @@ l_create_notify_timer(lnlylib_env* E, l_uint tmud, l_long ms, l_long times)
   req.times = times;
   req.count = 0;
   req.func = 0;
-  req.ud = 0;
+  req.parm = 0;
   l_send_message_to_master(E, L_MSG_TIMER_CREATE_REQ, &req, sizeof(l_timer_create_req));
 }
 
@@ -2359,24 +2365,24 @@ l_cancel_timer(lnlylib_env* E, l_timer* timer)
 }
 
 static l_bool
-l_master_fire_timer_immediately(l_master* M, l_timer_create_req* parm, l_ulong timer_uniid)
+l_master_fire_timer_immediately(l_master* M, l_timer_create_req* req, l_ulong timer_uniid)
 {
   if (timer_uniid & L_TIMER_CANCELED_FLAG) {
     return false;
   }
 
-  if (parm->func) {
+  if (req->func) {
     l_timer_func_call msg;
-    msg.func = parm->func;
-    msg.ud = parm->ud;
-    l_master_send_message_to_service(M, parm->svid, L_MSG_TIMER_FUNC_CALL, &msg, sizeof(l_timer_func_call));
+    msg.func = req->func;
+    msg.parm = req->parm;
+    l_master_send_message_to_service(M, req->svid, L_MSG_TIMER_FUNC_CALL, &msg, sizeof(l_timer_func_call));
   } else {
     l_timer_notify_ind ind;
     ind.stamp = M->stamp->mast_time_ms;
-    ind.count = ++parm->count;
-    ind.tmud = parm->tmud;
+    ind.count = ++req->count;
+    ind.tmud = req->tmud;
     ind.timer.uniid = timer_uniid;
-    l_master_send_message_to_service(M, parm->svid, L_MSG_TIMER_NOTIFY_IND, &ind, sizeof(l_timer_notify_ind));
+    l_master_send_message_to_service(M, req->svid, L_MSG_TIMER_NOTIFY_IND, &ind, sizeof(l_timer_notify_ind));
   }
 
   return true;
@@ -2456,14 +2462,14 @@ l_master_start_timer(l_master* M, l_timer_node* timer, l_bool first_creation)
   if (first_creation) {
     if (succ) {
       l_timer_create_rsp rsp;
-      rsp.tmud = timer->parm.tmud;
+      rsp.tmud = timer->data.tmud;
       rsp.timer = timer->timer;
-      l_master_send_message_to_service(M, timer->parm.svid, L_MSG_TIMER_CREATE_RSP, &rsp, sizeof(l_timer_create_rsp));
+      l_master_send_message_to_service(M, timer->data.svid, L_MSG_TIMER_CREATE_RSP, &rsp, sizeof(l_timer_create_rsp));
     } else {
       l_timer_create_rsp rsp;
-      rsp.tmud = timer->parm.tmud;
+      rsp.tmud = timer->data.tmud;
       rsp.timer.uniid = L_TIMER_ADD_FAILED_ID;
-      l_master_send_message_to_service(M, timer->parm.svid, L_MSG_TIMER_CREATE_RSP, &rsp, sizeof(l_timer_create_rsp));
+      l_master_send_message_to_service(M, timer->data.svid, L_MSG_TIMER_CREATE_RSP, &rsp, sizeof(l_timer_create_rsp));
     }
   }
 }
@@ -2471,7 +2477,7 @@ l_master_start_timer(l_master* M, l_timer_node* timer, l_bool first_creation)
 static void
 l_master_repeat_timer(l_master* M, l_timer_node* timer)
 {
-  timer->fire_ms += timer->parm.diff_ms;
+  timer->fire_ms += timer->data.diff_ms;
   l_master_start_timer(M, timer, false);
 }
 
@@ -2488,7 +2494,7 @@ l_master_create_timer(l_master* M, l_timer_create_req* req)
     l_timer_node* node = 0;
     node = l_timertable_alloc_node(M->ttbl);
     node->fire_ms = M->stamp->mast_time_ms + req->diff_ms;
-    node->parm = *req;
+    node->data = *req;
     l_master_start_timer(M, node, true);
   }
 }
@@ -2496,14 +2502,14 @@ l_master_create_timer(l_master* M, l_timer_create_req* req)
 static void
 l_master_fire_timer(l_master* M, l_timer_node* timer)
 {
-  l_timer_create_req* parm = &timer->parm;
-  if (l_master_fire_timer_immediately(M, parm, timer->timer.uniid)) {
-    if (parm->times < 0) { /* repeat forever until cancel */
+  l_timer_create_req* req = &timer->data;
+  if (l_master_fire_timer_immediately(M, req, timer->timer.uniid)) {
+    if (req->times < 0) { /* repeat forever until cancel */
       l_master_repeat_timer(M, timer);
-    } else if (parm->times <= 1) { /* no need to repeat */
+    } else if (req->times <= 1) { /* no need to repeat */
       l_timertable_free_node(M->ttbl, timer);
     } else {
-      parm->times -= 1;
+      req->times -= 1;
       l_master_repeat_timer(M, timer);
     }
   } else {

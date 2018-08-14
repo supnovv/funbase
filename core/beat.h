@@ -96,8 +96,8 @@ typedef struct {
   l_timer timer;
 } l_timer_notify_ind;
 
-L_EXTERN void l_create_timer(lnlylib_env* E, l_uint tmud, l_long ms, void* (*func)(void*), void* ud);
-L_EXTERN void l_create_repeated_timer(lnlylib_env* E, l_uint tmud, l_long ms, void* (*func)(void*), void* ud, l_long times);
+L_EXTERN void l_create_timer(lnlylib_env* E, l_uint tmud, l_long ms, void* (*func)(lnlylib_env*, void*), void* parm);
+L_EXTERN void l_create_repeated_timer(lnlylib_env* E, l_uint tmud, l_long ms, void* (*func)(lnlylib_env*, void*), void* parm, l_long times);
 L_EXTERN void l_create_notify_timer(lnlylib_env* E, l_uint tmud, l_long ms, l_long times);
 L_EXTERN void l_cancel_timer(lnlylib_env* E, l_timer* timer);
 
