@@ -1116,7 +1116,7 @@ l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port)
 }
 
 L_EXTERN l_sockaddr
-l_sockaddr_local(l_socket* sock)
+l_sockaddr_local(l_socket sock)
 {
   /** getsockname **
   #include <sys/socket.h>
@@ -1130,7 +1130,7 @@ l_sockaddr_local(l_socket* sock)
   l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)&sockaddr;
   socklen_t provided_len = sizeof(struct sockaddr_in6);
   sa->len = provided_len;
-  if (getsockname(sock->fd, &(sa->addr.sa), &(sa->len)) != 0) {
+  if (getsockname(sock.fd, &(sa->addr.sa), &(sa->len)) != 0) {
     l_loge_1(LNUL, "getsockname %s", lserror(errno));
     sa->len = 0;
     sa->addr.sa.sa_family = 0;
