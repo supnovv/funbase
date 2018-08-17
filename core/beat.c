@@ -130,67 +130,23 @@ typedef struct l_timestamp {
   l_rwlock time_lock;
 } l_timestamp;
 
-typedef struct l_time_level {
-  struct l_time_level* next;
-  l_squeue* cur;
-  l_squeue* mid;
-  l_int to_unit;
-  l_squeue timeq[1];
-} l_time_level;
-
-typedef struct {
-  l_time_level* next;
-  l_squeue* cur_ms;
-  l_squeue* mid_ms;
-  l_int to_msec;
-  l_squeue msecq[1000*2];
-} l_time_one_sec;
-
-typedef struct {
-  l_time_level* next;
-  l_squeue* cur_sec;
-  l_squeue* mid_sec;
-  l_int to_sec;
-  l_squeue secq[60*2];
-} l_time_one_min;
-
-typedef struct {
-  l_time_level* next;
-  l_squeue* cur_min;
-  l_squeue* mid_min;
-  l_int to_min;
-  l_squeue minq[60*2];
-} l_time_one_hour;
-
-typedef struct {
-  l_time_level* next;
-  l_squeue* cur_hour;
-  l_squeue* mid_hour;
-  l_int to_hour;
-  l_squeue hourq[24*2];
-} l_time_one_day;
-
-typedef struct {
-  l_time_level* next;
-  l_squeue* cur_day;
-  l_squeue* mid_day;
-  l_int to_day;
-  l_squeue dayq[356*2];
-} l_time_one_year;
-
 typedef struct {
   l_long base_ms;
-  l_time_one_sec* sec;
-  l_time_one_min* min;
-  l_time_one_hour* hour;
-  l_time_one_day* day;
-  l_time_one_year* year;
-  l_time_one_sec s;
-  l_time_one_min m;
-  l_time_one_hour h;
-  l_time_one_day d;
-  l_time_one_year y;
-} l_time_chain;
+  l_squeue* cur_msec;
+  l_squeue msecq[3000]; /* max 3s */
+} l_timer_msec_level;
+
+typedef struct {
+  l_long base_hms;
+  l_squeue* cur_hms;
+  l_squeue hmsq[3000]; /* max 300s or 5min */
+} l_timer_hms_level;
+
+typedef struct {
+  l_long base_sec;
+  l_squeue* cur_sec;
+  l_squeue secq[3600]; /* max 1-hour */
+} l_timer_sec_level;
 
 typedef struct l_timer_create_req {
   l_long diff_ms;
@@ -214,7 +170,8 @@ typedef struct {
 typedef struct {
   l_smplnode node;
   l_timer timer;
-  l_long fire_ms;
+  l_long left_msecs;
+  l_long expire_time;
   l_timer_create_req data;
 } l_timer_node;
 
@@ -224,7 +181,12 @@ typedef struct {
   l_umedit timer_seed;
   l_squeue free_timers;
   l_timer_node* timer_arr;
-  l_time_chain time_chain;
+  l_timer_msec_level* msec_level;
+  l_timer_hms_level* hms_level;
+  l_timer_sec_level* sec_level;
+  l_timer_msec_level msec_level_timers;
+  l_timer_hms_level hms_level_timers;
+  l_timer_sec_level sec_level_timers;
 } l_timertable;
 
 typedef struct {
@@ -674,54 +636,19 @@ l_timestamp_init(l_timestamp* stamp)
 }
 
 static void
-l_time_chain_init(l_time_chain* tchn, l_long cur_ms)
-{
-  l_zero_n(tchn, sizeof(l_time_chain));
-
-  tchn->base_ms = cur_ms;
-  tchn->sec = &tchn->s;
-  tchn->min = &tchn->m;
-  tchn->hour = &tchn->h;
-  tchn->day = &tchn->d;
-  tchn->year = &tchn->y;
-
-  tchn->sec->next = (l_time_level*)tchn->min;
-  tchn->sec->cur_ms = tchn->sec->msecq;
-  tchn->sec->mid_ms = tchn->sec->msecq + 1000;
-  tchn->sec->to_msec = 1;
-
-  tchn->min->next = (l_time_level*)tchn->hour;
-  tchn->min->cur_sec = tchn->min->secq;
-  tchn->min->mid_sec = tchn->min->secq + 60;
-  tchn->min->to_sec = 1000;
-
-  tchn->hour->next = (l_time_level*)tchn->day;
-  tchn->hour->cur_min = tchn->hour->minq;
-  tchn->hour->mid_min = tchn->hour->minq + 60;
-  tchn->hour->to_min = 1000 * 60;
-
-  tchn->day->next = (l_time_level*)tchn->year;
-  tchn->day->cur_hour = tchn->day->hourq;
-  tchn->day->mid_hour = tchn->day->hourq + 24;
-  tchn->day->to_hour = 1000 * 60 * 60;
-
-  tchn->year->next = 0;
-  tchn->year->cur_day = tchn->year->dayq;
-  tchn->year->mid_day = tchn->year->dayq + 356;
-  tchn->year->to_day = 1000 * 60 * 60 * 24;
-}
-
-static void
 l_timertable_init(l_master* M, l_timertable* ttbl, l_medit n)
 {
   l_medit i = 0;
   l_timer_node* node = 0;
+  l_long base_ms = 0;
+
+  l_zero_n(ttbl, sizeof(l_timertable));
 
   if (n < L_TIMER_MIN_TABLE_SIZE) {
     n = L_TIMER_MIN_TABLE_SIZE;
   }
 
-  ttbl->capacity = 32;
+  ttbl->capacity = n;
   ttbl->num_timers = 0;
   ttbl->timer_seed = 0;
   l_squeue_init(&ttbl->free_timers);
@@ -732,7 +659,19 @@ l_timertable_init(l_master* M, l_timertable* ttbl, l_medit n)
     l_squeue_push(&ttbl->free_timers, &node->node);
   }
 
-  l_time_chain_init(&ttbl->time_chain, M->stamp->mast_time_ms);
+  base_ms = M->stamp->mast_time_ms;
+
+  ttbl->msec_level = &ttbl->msec_level_timers;
+  ttbl->msec_level->base_ms = base_ms;
+  ttbl->msec_level->cur_msec = ttbl->msec_level->msecq;
+
+  ttbl->hms_level = &ttbl->hms_level_timers;
+  ttbl->hms_level->base_hms = base_ms / 100;
+  ttbl->hms_level->cur_hms = ttbl->hms_level->hmsq;
+
+  ttbl->sec_level = &ttbl->sec_level_timers;
+  ttbl->sec_level->base_sec = base_ms / 1000;
+  ttbl->sec_level->cur_sec = ttbl->sec_level->secq;
 }
 
 static void
@@ -2314,6 +2253,7 @@ l_timertable_alloc_node(l_timertable* ttbl)
   node = (l_timer_node*)l_squeue_pop(&ttbl->free_timers);
   if (node != 0) {
     node->timer.uniid = (((l_ulong)(node - ttbl->timer_arr)) << 32) | l_gen_timer_seed(ttbl);
+    node->left_msecs = 0;
     ttbl->num_timers += 1;
     return node;
   }
@@ -2375,13 +2315,9 @@ l_cancel_timer(lnlylib_env* E, l_timer* timer)
   l_send_message_to_master(E, L_MSG_TIMER_CANCEL_REQ, &req, sizeof(l_timer_cancel_req));
 }
 
-static l_bool
+static void
 l_master_fire_timer_immediately(l_master* M, l_timer_create_req* req, l_ulong timer_uniid)
 {
-  if (timer_uniid & L_TIMER_CANCELED_FLAG) {
-    return false;
-  }
-
   if (req->func) {
     l_timer_func_call msg;
     msg.func = req->func;
@@ -2395,8 +2331,6 @@ l_master_fire_timer_immediately(l_master* M, l_timer_create_req* req, l_ulong ti
     ind.timer.uniid = timer_uniid;
     l_master_send_message_to_service(M, req->svid, L_MSG_TIMER_NOTIFY_IND, &ind, sizeof(l_timer_notify_ind));
   }
-
-  return true;
 }
 
 static l_medit
@@ -2423,72 +2357,75 @@ l_master_cancel_timer(l_master* M, l_timer timer)
 static l_bool
 l_master_add_timer(l_master* M, l_timer_node* timer)
 {
-  l_time_chain* tchn = &M->ttbl->time_chain;
-  l_long diff = timer->fire_ms - M->stamp->mast_time_ms;
+  l_timertable* ttbl = M->ttbl;
+  l_long diff = timer->expire_time - M->stamp->mast_time_ms;
+  l_squeue* tmrq = 0;
+  l_long index = 0;
 
-  if (diff <= 1000) { /* diff are msecs */
+  if (diff <= 3000) { /* <= 3000ms or 3s */
     if (diff < 1) diff = 1;
-    l_squeue_push(tchn->sec->cur_ms + diff - 1, &timer->node);
+    tmrq = ttbl->msec_level->msecq;
+    index = (diff - 1 + (ttbl->msec_level->cur_msec - tmrq)) % 3000;
+    l_squeue_push(tmrq + index, &timer->node);
     return true;
   }
 
-  diff = diff / 1000; /* diff are secs now */
-  if (diff <= 60) {
-    l_squeue_push(tchn->min->cur_sec + diff - 1, &timer->node);
+  diff /= 100; /* now diff's unit is 100ms */
+  if (diff <= 3000) { /* <= 300s or 5min */
+    tmrq = ttbl->hms_level->hmsq;
+    index = (diff - 1 + (ttbl->hms_level->cur_hms - tmrq)) % 3000;
+    l_squeue_push(tmrq + index, &timer->node);
     return true;
   }
 
-  diff = diff / 60; /* diff are mins now */
-  if (diff <= 60) {
-    l_squeue_push(tchn->hour->cur_min + diff - 1, &timer->node);
+  diff /= 10; /* now diff is secs */
+  if (diff <= 3600) { /* <= 1-hour */
+    tmrq = ttbl->sec_level->secq;
+    index = (diff - 1 + (ttbl->sec_level->cur_sec - tmrq)) % 3600;
+    l_squeue_push(tmrq + index, &timer->node);
     return true;
   }
 
-  diff = diff / 60; /* diff are hours now */
-  if (diff <= 24) {
-    l_squeue_push(tchn->day->cur_hour + diff - 1, &timer->node);
-    return true;
-  }
+  l_timertable_free_node(M->ttbl, timer);
 
-  diff = diff / 24; /* diff are days now */
-  if (diff <= 356) {
-    l_squeue_push(tchn->year->cur_day + diff - 1, &timer->node);
-    return true;
-  }
-
-  l_loge_1(M->E, "timer fire time (%d days) too long", ld(diff));
+  l_loge_1(M->E, "timer expire time too long (> %d-hour)", ld(diff/3600));
   return false;
 }
 
 static void
 l_master_start_timer(l_master* M, l_timer_node* timer, l_bool first_creation)
 {
-
   l_bool succ = false;
+  l_long cur_ms = M->stamp->mast_time_ms;
+  l_long time_diff = timer->expire_time - cur_ms;
 
-  if (!(succ = l_master_add_timer(M, timer))) {
-    l_timertable_free_node(M->ttbl, timer);
+  if (time_diff > 3600 * 1000) { /* > 1-hour */
+    timer->expire_time = cur_ms + 3600 * 1000;
+    timer->left_msecs = time_diff - 3600 * 1000;
   }
 
-  if (first_creation) {
-    if (succ) {
-      l_timer_create_rsp rsp;
-      rsp.tmud = timer->data.tmud;
-      rsp.timer = timer->timer;
-      l_master_send_message_to_service(M, timer->data.svid, L_MSG_TIMER_CREATE_RSP, &rsp, sizeof(l_timer_create_rsp));
-    } else {
-      l_timer_create_rsp rsp;
-      rsp.tmud = timer->data.tmud;
-      rsp.timer.uniid = L_TIMER_ADD_FAILED_ID;
-      l_master_send_message_to_service(M, timer->data.svid, L_MSG_TIMER_CREATE_RSP, &rsp, sizeof(l_timer_create_rsp));
-    }
+  succ = l_master_add_timer(M, timer);
+  if (!first_creation) {
+    return;
+  }
+
+  if (succ) {
+    l_timer_create_rsp rsp;
+    rsp.tmud = timer->data.tmud;
+    rsp.timer = timer->timer;
+    l_master_send_message_to_service(M, timer->data.svid, L_MSG_TIMER_CREATE_RSP, &rsp, sizeof(l_timer_create_rsp));
+  } else {
+    l_timer_create_rsp rsp;
+    rsp.tmud = timer->data.tmud;
+    rsp.timer.uniid = L_TIMER_ADD_FAILED_ID;
+    l_master_send_message_to_service(M, timer->data.svid, L_MSG_TIMER_CREATE_RSP, &rsp, sizeof(l_timer_create_rsp));
   }
 }
 
 static void
 l_master_repeat_timer(l_master* M, l_timer_node* timer)
 {
-  timer->fire_ms += timer->data.diff_ms;
+  timer->expire_time += timer->data.diff_ms;
   l_master_start_timer(M, timer, false);
 }
 
@@ -2504,7 +2441,7 @@ l_master_create_timer(l_master* M, l_timer_create_req* req)
   } else {
     l_timer_node* node = 0;
     node = l_timertable_alloc_node(M->ttbl);
-    node->fire_ms = M->stamp->mast_time_ms + req->diff_ms;
+    node->expire_time = M->stamp->mast_time_ms + req->diff_ms;
     node->data = *req;
     l_master_start_timer(M, node, true);
   }
@@ -2513,8 +2450,22 @@ l_master_create_timer(l_master* M, l_timer_create_req* req)
 static void
 l_master_fire_timer(l_master* M, l_timer_node* timer)
 {
-  l_timer_create_req* req = &timer->data;
-  if (l_master_fire_timer_immediately(M, req, timer->timer.uniid)) {
+  if (timer->timer.uniid & L_TIMER_CANCELED_FLAG) {
+    l_timertable_free_node(M->ttbl, timer);
+    return;
+  }
+
+  if (timer->left_msecs > 3600 * 1000) { /* > 1-hour */
+    timer->expire_time += 3600 * 1000;
+    timer->left_msecs -= 3600 * 1000;
+    l_master_add_timer(M, timer);
+  } else if (timer->left_msecs > 0) { /* left time less than 1-hour */
+    timer->expire_time += timer->left_msecs;
+    timer->left_msecs = 0;
+    l_master_add_timer(M, timer);
+  } else { /* no time left, fire timer */
+    l_timer_create_req* req = &timer->data;
+    l_master_fire_timer_immediately(M, req, timer->timer.uniid);
     if (req->times < 0) { /* repeat forever until cancel */
       l_master_repeat_timer(M, timer);
     } else if (req->times <= 1) { /* no need to repeat */
@@ -2523,226 +2474,120 @@ l_master_fire_timer(l_master* M, l_timer_node* timer)
       req->times -= 1;
       l_master_repeat_timer(M, timer);
     }
-  } else {
-    l_timertable_free_node(M->ttbl, timer);
   }
 }
 
-static l_int
-l_master_move_timers_up(l_master* M, l_time_level* cur_level, l_squeue timers)
+static l_squeue*
+l_check_current_timer_queues(l_squeue* start, l_int qcnt, l_squeue* cur, l_int expired_cnt, l_squeue* fired_q)
 {
-  l_time_chain* tchn = &M->ttbl->time_chain;
-  l_int qcnt = cur_level->mid - cur_level->timeq;
-  l_timer_node* timer = 0;
-  l_long diff_time = 0;
-  l_int move_back_count = 0;
-
-  while ((timer = (l_timer_node*)l_squeue_pop(&timers))) {
-    diff_time = (timer->fire_ms - tchn->base_ms) / cur_level->to_unit;
-    if (diff_time <= 1) diff_time = 1;
-    if (diff_time <= qcnt) {
-      l_squeue_push(cur_level->cur + diff_time - 1, &timer->node);
-    } else {
-      move_back_count += 1;
-      l_squeue_push(cur_level->next->cur, &timer->node);
+  l_int cur_pos = cur - start;
+  l_int expired_pos = (expired_cnt + cur_pos) % qcnt;
+  if (expired_pos > cur_pos) {
+    l_squeue* qend = start + expired_pos;
+    for (; cur < qend; ++cur) {
+      l_squeue_push_queue(fired_q, cur);
+    }
+  } else {
+    l_squeue* qend = start + qcnt;
+    for (; cur < qend; ++cur) {
+      l_squeue_push_queue(fired_q, cur);
+    }
+    cur = start;
+    qend = start + expired_pos;
+    for (; cur < qend; ++cur) {
+      l_squeue_push_queue(fired_q, cur);
     }
   }
+  return start + expired_pos;
+}
 
-  return move_back_count;
+static l_squeue*
+l_expire_all_current_queues(l_squeue* start, l_int qcnt, l_squeue* fired_q)
+{
+  l_squeue* cur = start;
+  l_squeue* qend = start + qcnt;
+  for (; cur < qend; ++cur) {
+    l_squeue_push_queue(fired_q, cur);
+  }
+  return start;
+}
+
+static void
+l_check_msec_level_timers(l_timer_msec_level* msec_level, l_long cur_ms, l_squeue* fired_q)
+{
+  l_long diff_ms = cur_ms - msec_level->base_ms;
+
+  if (diff_ms <= 0) {
+    return;
+  }
+
+  msec_level->base_ms = cur_ms;
+
+  if (diff_ms <= 3000) {
+    msec_level->cur_msec = l_check_current_timer_queues(msec_level->msecq, 3000, msec_level->cur_msec, diff_ms, fired_q);
+  } else { /* all timers in msec level are expired */
+    msec_level->cur_msec = l_expire_all_current_queues(msec_level->msecq, 3000, fired_q);
+  }
+}
+
+static void
+l_check_hms_level_timers(l_timer_hms_level* hms_level, l_long cur_ms, l_squeue* fired_q)
+{
+  l_long diff_hms = (cur_ms / 100) - hms_level->base_hms;
+
+  if (diff_hms <= 0) {
+    return;
+  }
+
+  hms_level->base_hms = cur_ms / 100;
+
+  if (diff_hms <= 3000) {
+    hms_level->cur_hms = l_check_current_timer_queues(hms_level->hmsq, 3000, hms_level->cur_hms, diff_hms, fired_q);
+  } else { /* all timers in hms level are expired */
+    hms_level->cur_hms = l_expire_all_current_queues(hms_level->hmsq, 3000, fired_q);
+  }
+}
+
+static void
+l_check_sec_level_timers(l_timer_sec_level* sec_level, l_long cur_ms, l_squeue* fired_q)
+{
+  l_long diff_sec = (cur_ms / 1000) - sec_level->base_sec;
+
+  if (diff_sec <= 0) {
+    return;
+  }
+
+  sec_level->base_sec = cur_ms / 1000;
+
+  if (diff_sec <= 3600) {
+    sec_level->cur_sec = l_check_current_timer_queues(sec_level->secq, 3600, sec_level->cur_sec, diff_sec, fired_q);
+  } else {
+    sec_level->cur_sec = l_expire_all_current_queues(sec_level->secq, 3600, fired_q);
+    l_loge_1(LNUL, "there is long time didn't check timers (> %d-hour)", ld(diff_sec/3600));
+  }
 }
 
 static void
 l_master_check_timers(l_master* M)
 {
-  /** Timer Scheduling Example **
-
-  pre-assumptions
-  - the time begins at 0-msec
-  - 1st level timer resolution is 1-msec
-  - 2nd level timer resolution is 4-msec, so the 1st level only has 4*2 slots
-  - tm1(T=1ms), tm3(T=3ms), tm4(T=4ms), tm5(T=5ms) are inserted at time 0-msec
-
-  1. initial
-  base_ms 0-msec
-  [1st level] array idx -   0     1     2     3  |  4     5     6     7     8
-  fire time from 0-msec   [1ms] [2ms] [3ms] [4ms]|[5ms] [6ms] [7ms] [8ms]
-         current timers   [tm1] [   ] [tm3] [tm4]|[   ] [   ] [   ] [   ]
-                      cur_1 ^                    |
-  ---
-                          [2nd level] array idx -            0                       1                      2
-                          fire time from 0-msec   [         4ms         ] [         8ms         ]
-                                 current timers   [         tm5         ] [                     ]
-                                              cur_2 ^
-
-  2. after 2ms (tm1 is fired, update base time to current time)
-  base_ms 2-msec
-  [1st level] array idx -   0     1     2     3  |  4     5     6     7     8
-  fire time from 0-msec   [1ms] [2ms] [3ms] [4ms]|[5ms] [6ms] [7ms] [8ms]
-         current timers   [   ] [   ] [tm3] [tm4]|[   ] [   ] [   ] [   ]
-                                 cur_1 ^         |
-  ---
-                          [2nd level] array idx -            0                       1                      2
-                          fire time from 0-msec   [         4ms         ] [         8ms         ]
-                                 current timers   [         tm5         ] [                     ]
-                                              cur_2 ^
-
-  3. add timer tm6(T=4ms), tm7(T=5ms)
-  ---
-  tm6 : current time + T - base time = T = 4 <= 4, insert into level 1
-  tm7 : current time + T - base time = T = 5 > 4, insert into level 2
-  ---
-  base_ms 2-msec
-  [1st level] array idx -   0     1     2     3  |  4     5     6     7     8
-  fire time from 0-msec   [1ms] [2ms] [3ms] [4ms]|[5ms] [6ms] [7ms] [8ms]
-         current timers   [   ] [   ] [tm3] [tm4]|[   ] [tm6] [   ] [   ]
-                                 cur_1 ^         |
-  ---
-                          [2nd level] array idx -            0                       1                      2
-                          fire time from 0-msec   [         4ms         ] [         8ms         ]
-                                 current timers   [      tm5, tm7       ] [                     ]
-                                              cur_2 ^
-
-  4. 3ms later (tm3, tm4, tm5 should be fired)
-  base_ms 2-msec
-  [1st level] array idx -   0     1     2     3  |  4     5     6     7     8
-  fire time from 0-msec   [1ms] [2ms] [3ms] [4ms]|[5ms] [6ms] [7ms] [8ms]
-         current timers   [   ] [   ] [tm3] [tm4]|[   ] [tm6] [   ] [   ]
-                                 cur_1 ^          |  fire ^
-  ---
-                          [2nd level] array idx -            0                       1                      2
-                          fire time from 0-msec   [       5ms-8ms       ] [       9ms-16ms      ]
-                                 current timers   [      tm5, tm7       ] [                     ]
-                                              cur_2 ^
-  ---
-  a. fire tm3 and tm4 are easy, because they are just before fire position, how to fire tm5 ?
-  b. current difference is the fire position crossed the middle line, fire time now is overlapped with the 1st slot in level 2
-  c. we should re-insert all timers in the level 2 first slot, below is the state after re-insert
-  ---
-  base_ms 2-msec
-  [1st level] array idx -   0     1     2     3  |  4     5     6     7     8
-  fire time from 0-msec   [1ms] [2ms] [3ms] [4ms]|[5ms] [6ms] [7ms] [8ms]
-         current timers   [   ] [   ] [tm3] [tm4]|[tm5] [tm6] [   ] [   ]
-                                 cur_1 ^          |  fire ^
-  ---
-                          [2nd level] array idx -            0                       1                      2
-                          fire time from 0-msec   [       5ms-8ms       ] [       9ms-16ms      ]
-                                 current timers   [         tm7         ] [                     ]
-                                              cur_2 ^
-  ---
-  d. now fire tm3, tm4, and tm5, and update base time to current
-  ---
-  base_ms 5-msec
-  [1st level] array idx -   0     1     2     3  |  4     5     6     7     8
-  fire time from 0-msec   [1ms] [2ms] [3ms] [4ms]|[5ms] [6ms] [7ms] [8ms]
-         current timers   [   ] [   ] [   ] [   ]|[   ] [tm6] [   ] [   ]
-                                                 | cur_1 ^
-  ---
-                          [2nd level] array idx -            0                       1                      2
-                          fire time from 0-msec   [       5ms-8ms       ] [       9ms-16ms      ]
-                                 current timers   [         tm7         ] [                     ]
-                                              cur_2 ^
-  ---
-  e. but there are less than 4-slot after cur_1, we shall ajust cur_1 back to the slot before middle line
-  f. even more, current time is passed more than 4ms (level 2 resolution), we should also move cur_2 one step forward, just like level 1 did
-  g. and the timers left in the original cur_2 position should all re-insert
-  ---
-  base_ms 5-msec
-  [1st level] array idx -   0     1     2     3  |  4     5     6     7     8
-  fire time from 0-msec   [1ms] [2ms] [3ms] [4ms]|[5ms] [6ms] [7ms] [8ms]
-         current timers   [   ] [tm6] [tm7] [   ]|[   ] [   ] [   ] [   ]
-                            cur_1 ^              |
-  ---
-                          [2nd level] array idx -            0                       1                      2
-                          fire time from 0-msec   [       5ms-8ms       ] [       9ms-16ms      ]
-                                 current timers   [                     ] [                     ]
-                                                                      cur_2 ^
-  ---
-  h. what if after move cur_2, it also crossed its middle line ?
-  i. we should also move cur_2 back to the slot before middle line, and should re-insert cur_3 and move cur_3 one step forward **/
-
-  l_time_chain* tchn = &M->ttbl->time_chain;
-  l_long current_time = M->stamp->mast_time_ms;
-  l_long time_lapse = current_time - tchn->base_ms;
+  l_timertable* ttbl = M->ttbl;
+  l_long current_ms = M->stamp->mast_time_ms;
   l_timer_node* timer = 0;
-  l_time_level* cur_level = (l_time_level*)tchn->sec;
-  l_time_level* next_level = 0;
-  l_squeue* fired = 0;
-  l_squeue* temp = 0;
   l_squeue fired_q;
-  l_int qcnt = 0;
+
+  if (current_ms <= ttbl->msec_level->base_ms) {
+    return;
+  }
 
   l_squeue_init(&fired_q);
 
-  if (time_lapse <= 0) {
-    return;
+  l_check_msec_level_timers(ttbl->msec_level, current_ms, &fired_q);
+  l_check_hms_level_timers(ttbl->hms_level, current_ms, &fired_q);
+  l_check_sec_level_timers(ttbl->sec_level, current_ms, &fired_q);
+
+  while ((timer = (l_timer_node*)l_squeue_pop(&fired_q))) {
+    l_master_fire_timer(M, timer);
   }
-
-continue_next_level:
-
-  if (cur_level == 0) {
-    l_loge_s(M->E, "this timer check is too long after previous");
-    return;
-  }
-
-  qcnt = cur_level->mid - cur_level->timeq;
-  next_level = cur_level->next;
-
-  if (time_lapse < qcnt) {
-    fired = cur_level->cur + time_lapse;
-
-    if (fired >= cur_level->mid && next_level) {
-      l_master_move_timers_up(M, cur_level, l_squeue_move(next_level->cur));
-    }
-
-    for (temp = cur_level->cur; temp < fired; temp += 1) {
-      l_squeue_push_queue(&fired_q, temp);
-    }
-
-    tchn->base_ms = current_time;
-
-    if (fired >= cur_level->mid) {
-      l_copy_n(cur_level->timeq, cur_level->mid, sizeof(l_squeue) * qcnt);
-      l_zero_n(cur_level->mid, sizeof(l_squeue) * qcnt);
-      cur_level->cur = cur_level->timeq + (fired - cur_level->mid);
-
-      while (next_level) {
-        next_level->cur += 1;
-        l_master_move_timers_up(M, cur_level, l_squeue_move(next_level->cur - 1));
-
-        if (next_level->cur >= next_level->mid) {
-          qcnt = next_level->mid - next_level->timeq;
-          l_copy_n(next_level->timeq, next_level->mid, sizeof(l_squeue) * qcnt);
-          l_zero_n(next_level->mid, sizeof(l_squeue) * qcnt);
-          next_level->cur = next_level->timeq;
-
-          cur_level = next_level;
-          next_level = cur_level->next;
-        }
-      }
-    } else {
-      cur_level->cur = fired;
-    }
-
-    while ((timer = (l_timer_node*)l_squeue_pop(&fired_q))) {
-      l_master_fire_timer(M, timer);
-    }
-
-    return;
-  }
-
-  /* all cur_level timers are fired */
-
-  l_assert(M->E, cur_level->cur < cur_level->mid);
-
-  for (temp = cur_level->cur; temp < cur_level->cur + qcnt; temp += 1) {
-    l_squeue_push_queue(&fired_q, temp);
-  }
-
-  cur_level->cur = cur_level->timeq + time_lapse % qcnt;
-  time_lapse /= qcnt;
-
-  cur_level = next_level;
-  goto continue_next_level;
 }
 
 /** memory opeartion - <stdlib.h> <string.h> **
