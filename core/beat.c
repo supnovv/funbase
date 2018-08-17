@@ -52,19 +52,19 @@
 #define L_TIMER_IMMED_FIRED_ID 0x0f
 #define L_TIMER_MIN_VALID_TMID 0x0f
 
-#define L_MSG_TIMER_CREATE_REQ 0x20
-#define L_MSG_TIMER_CANCEL_REQ 0x21
-#define L_MSG_TIMER_FUNC_CALL  0x22
-#define L_MSG_TIMER_CREATE_RSP (L_MSG_MIN_USER_MSG_ID - 0x11)
-#define L_MSG_TIMER_NOTIFY_IND (L_MSG_MIN_USER_MSG_ID - 0x12)
+#define L_MSG_TIMER_CREATE_REQ 0x10
+#define L_MSG_TIMER_CANCEL_REQ 0x11
+#define L_MSG_TIMER_FUNC_CALL  0x12
+#define L_MSG_TIMER_CREATE_RSP (L_MSG_MIN_USER_MSG_ID - 0x11) /* 0xef */
+#define L_MSG_TIMER_NOTIFY_IND (L_MSG_MIN_USER_MSG_ID - 0x12) /* 0xee */
 
-#define L_MSG_SOCK_ACCEPT_IND  0x30
-#define L_MSG_SOCK_CONN_NTF    0x31
-#define L_MSG_SOCK_CONN_RSP    0x32
-#define L_MSG_SOCK_READY_TX    0x33
-#define L_MSG_SOCK_READY_RX    0x34
-#define L_MSG_SOCK_DISC_NTF    0x35
-#define L_MSG_SOCK_ERROR_NTF   0x36
+/* master -> socket service */
+#define L_MSG_SOCK_ACCEPT_IND 0x20
+#define L_MSG_SOCK_CONN_RSP   0x21
+#define L_MSG_SOCK_READY_TX   0x22
+#define L_MSG_SOCK_READY_RX   0x23
+#define L_MSG_SOCK_DISC_NTF   0x24
+#define L_MSG_SOCK_ERROR_NTF  0x25
 
 struct l_master;
 struct l_thread;

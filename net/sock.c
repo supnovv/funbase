@@ -1,12 +1,24 @@
 #define LNLYLIB_API_IMPL
 #include "net/sock.h"
 
-#if 0
-l_socket_read(l_ulong sock_srvc)
-l_socket_write(l_ulong sock_srvc)
-l_socket_recover(l_ulong sock_srvc)
-l_socket_shutdown(l_ulong sock_srvc)
-#endif
+/* master -> socket service */
+#define L_MSG_SOCK_ACCEPT_IND 0x20
+#define L_MSG_SOCK_CONN_RSP   0x21
+#define L_MSG_SOCK_READY_TX   0x22
+#define L_MSG_SOCK_READY_RX   0x23
+#define L_MSG_SOCK_DISC_NTF   0x24
+#define L_MSG_SOCK_ERROR_NTF  0x25
+
+/* listen service <-> socket service */
+#define L_MSG_SOCK_CONN_NTF 0x2a
+#define L_MSG_SOCK_DISC_CMD 0x2b
+#define L_MSG_STOP_SKLS_CMD 0x2c /* stop socket listen server */
+
+/* user service -> socket service */
+#define L_MSG_SOCK_DATA_TX_REQ 0x30
+#define L_MSG_SOCK_DATA_RX_REQ 0x31
+#define L_MSG_SOCK_RECOVER_REQ 0x32
+#define L_MSG_SOCK_CLOSE_CMD   0x33
 
 typedef struct {
   l_service_callback* inconn_cb;
@@ -171,7 +183,7 @@ l_socket_listen_service_proc(lnlylib_env* E)
   case L_MSG_SUBSRVC_CREATE_RSP: {
     l_subsrvc_create_rsp* rsp = 0;
     l_socket_data_svud* data_svud = 0;
-    rsp = (l_subsrvc_create_rsp*)l_message_mgdt(MSG).p;
+    rsp = (l_subsrvc_create_rsp*)l_message_mgdt(MSG);
     data_svud = (l_socket_data_svud*)rsp->svud;
     if (rsp->svid) {
       listen->conns += 1;
@@ -187,7 +199,7 @@ l_socket_listen_service_proc(lnlylib_env* E)
     break;
   case L_MSG_SOCK_DISC_CMD: { /* from socket data service */
     l_socket_data_svud* data_svud = 0;
-    data_svud = ((l_sock_disc_cmd*)l_message_mgdt(MSG).p)->data_svud;
+    data_svud = ((l_sock_disc_cmd*)l_message_mgdt(MSG))->data_svud;
     l_socket_data_svud_free(data_svud);
     listen->conns -= 1;
     l_dqueue_remove(&listen->connq, &data_svud->node);
@@ -235,11 +247,11 @@ l_socket_inconn_service_proc(lnlylib_env* E)
        L_MSG_SOCK_DATA_TX_RSP
        L_MSG_SOCK_ERROR_NTF
        L_MSG_SOCK_RECOVER_RSP
-  [TX] L_MSG_SOCK_DATA_RX_REQ     <- l_socket_read(sock_srvc)
-       L_MSG_SOCK_DATA_TX_REQ     <- l_socket_write(sock_svrc)
-       L_MSG_SOCK_RECOVER_REQ     <- l_socket_recover(sock_srvc)
-       L_MSG_SOCK_CLOSE_CMD       <- l_socket_close(sock_srvc)
-       L_MSG_SOCK_STOP_SERVER_CMD <- l_stop_listen_server(E)
+  [TX] L_MSG_SOCK_DATA_RX_REQ     <- l_socket_service_read(sock_srvc)
+       L_MSG_SOCK_DATA_TX_REQ     <- l_socket_service_write(sock_svrc)
+       L_MSG_SOCK_RECOVER_REQ     <- l_socket_service_recover(sock_srvc)
+       L_MSG_SOCK_CLOSE_CMD       <- l_socket_service_close(sock_srvc)
+       L_MSG_STOP_SKLS_CMD        <- l_stop_listen_server(E)
   (2) socket data txrx service
   [RX] L_MSG_SOCK_CONN_NTF (from listen server after incoming connection accepted)
        L_MSG_SOCK_CONN_RSP (from master after initiated connection established)
@@ -251,9 +263,9 @@ l_socket_inconn_service_proc(lnlylib_env* E)
        L_MSG_SOCK_DATA_RX_REQ
        L_MSG_SOCK_RECOVER_REQ
        L_MSG_SOCK_CLOSE_CMD
-       L_MSG_SOCK_STOP_SERVER_CMD
+       L_MSG_STOP_SKLS_CMD
   [TX] L_MSG_SOCK_DISC_CMD (these are sent to listen server)
-       L_MSG_SOCK_STOP_SERVER_CMD
+       L_MSG_STOP_SKLS_CMD
        L_MSG_SOCK_READY_NTF (these are sent to user service)
        L_MSG_SOCK_ERROR_NTF
        L_MSG_SOCK_DATA_TX_RSP
@@ -293,7 +305,7 @@ l_socket_inconn_service_proc(lnlylib_env* E)
     break;
   case L_MSG_SUBSRVC_CREATE_RSP: {
     l_subsrvc_create_rsp* rsp = 0;
-    rsp = (l_subsrvc_create_rsp*)l_message_mgdt(MSG).p;
+    rsp = (l_subsrvc_create_rsp*)l_message_mgdt(MSG);
     if (rsp->svid) {
       l_sock_ready_ntf ntf;
       svud->user_svid = rsp->svid;
