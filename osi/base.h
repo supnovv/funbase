@@ -216,9 +216,13 @@ typedef struct {
   l_sockaddr remote;
 } l_socketconn;
 
+typedef struct {
+  l_byte ip[64];
+} l_ipstr;
+
 L_EXTERN l_bool l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port);
 L_EXTERN l_sockaddr l_sockaddr_local(l_socket sock);
-L_EXTERN l_sbuf64 l_sockaddr_getip(l_sockaddr* self);
+L_EXTERN l_ipstr l_sockaddr_getip(l_sockaddr* self);
 L_EXTERN l_ushort l_sockaddr_port(l_sockaddr* self);
 L_EXTERN void l_socket_prepare();
 L_EXTERN void l_socket_accept(l_socket skt, void (*cb)(void*, l_socketconn*), void* ud);

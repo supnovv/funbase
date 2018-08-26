@@ -110,17 +110,17 @@ l_strn_s(const void* s, l_int m, l_int n)
 typedef void* (*l_allocfunc)(void* ud, void* p, l_ulong oldsz, l_ulong newsz);
 L_EXTERN l_allocfunc l_alloc_func; /* note the allocated memory is not initialized */
 
-#undef L_MALLOC
+#undef l_malloc
+#undef l_ralloc
+#undef l_mfree
 #undef L_MALLOC_TYPE
 #undef L_MALLOC_TYPE_N
-#undef L_RALLOC
-#undef L_MFREE
 
-#define L_MALLOC(E, size) l_alloc_func((E), 0, 0, (size))
-#define L_MALLOC_TYPE(E, type) (type*)L_MALLOC((E), sizeof(type))
-#define L_MALLOC_TYPE_N(E, type, n) (type*)L_MALLOC((E), sizeof(type) * (n))
-#define L_RALLOC(E, p, newsz) l_alloc_func((E), (p), 0, (newsz))
-#define L_MFREE(E, p) l_alloc_func((E), (p), 0, 0)
+#define l_malloc(E, size) l_alloc_func((E), 0, 0, (size))
+#define l_ralloc(E, p, newsz) l_alloc_func((E), (p), 0, (newsz))
+#define l_mfree(E, p) l_alloc_func((E), (p), 0, 0)
+#define L_MALLOC_TYPE(E, type) (type*)l_malloc((E), sizeof(type))
+#define L_MALLOC_TYPE_N(E, type, n) (type*)l_malloc((E), sizeof(type) * (n))
 
 L_EXTERN l_bool l_zero_n(void* p, l_ulong size);
 L_EXTERN l_ulong l_copy_n(void* dest, const void* from, l_ulong size);
@@ -137,6 +137,7 @@ L_EXTERN l_ulong l_copy_n(void* dest, const void* from, l_ulong size);
 
 #undef l_impl_assert_pass
 #undef l_impl_assert_fail
+#undef l_assert_s
 #undef l_assert
 #undef l_loge_s
 #undef l_loge_n
@@ -185,8 +186,10 @@ L_EXTERN l_ulong l_copy_n(void* dest, const void* from, l_ulong size);
 
 #define l_impl_assert_pass(E,expr) l_impl_logger_func(E, "51[V] " L_FILE_LINE, "assert pass: %s", ls(expr))
 #define l_impl_assert_fail(E,expr) l_impl_logger_func(E, "01[F] " L_FILE_LINE, "assert fail: %s", ls(expr))
+#define l_impl_assert_s_fail(E,expr,s) l_impl_logger_func(E, "02[F] " L_FILE_LINE, "assert fail - %s: %s", ls(s), ls(expr))
 
-#define l_assert(E,e) ((e) ? l_impl_assert_pass(E, #e) : l_impl_assert_fail(E, #e)) /* 0:assert or fatal */
+#define l_assert_s(E,e,s) ((e) ? l_impl_assert_pass(E, #e) : l_impl_assert_s_fail(E, #e, (s))) /* 0: assert or fatal */
+#define l_assert(E,e) ((e) ? l_impl_assert_pass(E, #e) : l_impl_assert_fail(E, #e))
 #define l_loge_s(E,s)                   l_impl_logger_s(E, "10[E] " L_FILE_LINE, (s)) /* 1:error */
 #define l_loge_1(E,fmt,a)               l_impl_logger_1(E, "11[E] " L_FILE_LINE, (fmt), a)
 #define l_loge_n(E,fmt,n,a)             l_impl_logger_n(E, "1n[E] " L_FILE_LINE, (fmt), n,a)
@@ -294,6 +297,12 @@ L_INLINE l_value
 lstrn(const l_strn* s)
 {
   return lp(s);
+}
+
+L_INLINE l_value
+lsvid(l_ulong svid)
+{
+  return lx(svid);
 }
 
 struct lnlylib_env;

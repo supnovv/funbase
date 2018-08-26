@@ -1157,7 +1157,7 @@ l_sockaddr_family(l_sockaddr* self)
   return sa->addr.sa.sa_family;
 }
 
-L_EXTERN l_sbuf64
+L_EXTERN l_ipstr
 l_sockaddr_getip(l_sockaddr* self)
 {
   /** inet_ntop - convert ipv4 and ipv6 addresses from binary to text form **
@@ -1178,25 +1178,19 @@ l_sockaddr_getip(l_sockaddr* self)
   there was an error, with errno set to indicate the error. */
 
   l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)self;
-  l_sbuf64 buffer;
-  l_strbuf* ipstr = 0;
-  l_byte* out = 0;
+  l_ipstr buffer;
+  l_byte* out = buffer.ip;
 
-  ipstr = l_sbuf64_init(&buffer);
-  out = l_strbuf_getp(ipstr);
-
-  l_assert(LNUL, l_strbuf_capacity(ipstr) >= INET6_ADDRSTRLEN);
+  l_assert(LNUL, 64 >= INET6_ADDRSTRLEN);
 
   if (sa->addr.sa.sa_family == AF_INET) {
       if (inet_ntop(AF_INET, &(sa->addr.sa4.sin_addr), (char*)out, INET_ADDRSTRLEN) != 0) {
-        l_strbuf_adjust_len(ipstr);
         return buffer;
       } else {
         l_loge_1(LNUL, "inet_ntop 4 %s", lserror(errno));
       }
   } else if (sa->addr.sa.sa_family == AF_INET6) {
       if (inet_ntop(AF_INET6, &(sa->addr.sa6.sin6_addr), (char*)out, INET6_ADDRSTRLEN) != 0) {
-        l_strbuf_adjust_len(ipstr);
         return buffer;
       } else {
         l_loge_1(LNUL, "inet_ntop 6 %s", lserror(errno));

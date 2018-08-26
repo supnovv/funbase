@@ -8,17 +8,25 @@ typedef struct l_message l_message;
 
 L_EXTERN int lnlylib_main(int (*start)(lnlylib_env*), int argc, char** argv);
 
+typedef struct l_service_access_point {
+  l_smplnode node;
+  l_ulong remote_svid;
+  void (*access_proc)(lnlylib_env*);
+  struct l_service_access_point* remote_apid;
+} l_service_access_point;
+
 /* message */
 
 #define L_CORE_MSG_GR (0x00 << 8)
-#define L_SOCK_MSG_GR (0x01 << 8)
+#define L_HTTP_MSG_GR (0x01 << 8)
 
 #define L_MOVE_DATA_AUTO_FREE 0x80000000 /* the message data is moved and auto freed */
 #define L_MOVE_DATA_DONT_FREE 0x40000000 /* the message data is moved but it is not freed */
 
-L_EXTERN void l_send_message(lnlylib_env* E, l_ulong dest_svid, l_umedit mgid, void* data, l_umedit size);
-L_EXTERN void l_send_session_message(lnlylib_env* E, l_ulong dest_svid, l_umedit session, l_umedit mgid, void* data, l_umedit size);
-L_EXTERN void l_send_message_response(lnlylib_env* E, l_umedit mgid, void* data, l_umedit size);
+L_EXTERN void l_send_response(lnlylib_env* E, l_umedit mgid, void* data, l_umedit size);
+L_EXTERN void l_send_response_for(lnlylib_env* E, l_message* msg, l_umedit mgid, void* data, l_umedit size);
+L_EXTERN void l_send_message(lnlylib_env* E, l_service_access_point* sap, l_umedit session, l_umedit mgid, void* data, l_umedit size);
+L_EXTERN void l_send_message_to(lnlylib_env* E, l_ulong dest_svid, l_umedit session, l_umedit mgid, void* data, l_umedit size);
 
 L_EXTERN l_message* l_current_message(lnlylib_env* E);
 L_EXTERN l_umedit l_current_mgid(lnlylib_env* E);
@@ -40,7 +48,6 @@ L_EXTERN l_ulong l_mgfr(l_message* msg);
 #define L_MSG_SERVICE_RESTART_REQ (L_CORE_MSG_GR + 0x0C)
 
 typedef struct {
-  const char* service_name;
   void* (*service_on_create)(lnlylib_env*); /* create svud if needed, do other service creation related things */
   void (*service_on_destroy)(lnlylib_env*); /* release svud and do other service destroy related things */
   void (*service_proc)(lnlylib_env*); /* service main logic */
@@ -56,12 +63,13 @@ typedef struct {
   l_ushort port;
   l_filehdl hdl;
   const void* ip;
+  void* svud;
 } l_service_create_para;
 
 typedef struct {
-  l_ulong svid; /* non-zero svid indicates successful creation */
-  void* svud;
-  const char* name;
+  l_ulong svid; /* sub service id, non-zero svid indicates success */
+  void* svud; /* sub service's user data */
+  l_service_access_point* sap; /* established ap to accessing this sub service */
 } l_subsrvc_create_rsp;
 
 L_EXTERN void* l_empty_on_create(lnlylib_env* E);
@@ -78,7 +86,9 @@ L_EXTERN l_service_create_para L_SERVICE(l_service_callback* cb);
 L_EXTERN l_service_create_para L_MODULE(const void* module);
 
 L_EXTERN void l_create_service(lnlylib_env* E, l_service_create_para para, void* svud);
-L_EXTERN void l_create_service_ext(lnlylib_env* E, l_service_create_para para, void* svud, l_service_callback* super_cb);
+L_EXTERN void l_create_service_ext(lnlylib_env* E, l_service_create_para para, l_service_access_point* sap, void (*access_proc)(lnlylib_env*));
+L_EXTERN void l_create_access_point(lnlylib_env* E, l_service_access_point* sap, l_ulong remote_svid, void (*access_proc)(lnlylib_env*));
+L_EXTERN void l_delete_access_point(lnlylib_env* E, l_service_access_point* sap);
 L_EXTERN void l_stop_service(lnlylib_env* E);
 L_EXTERN void l_stop_dest_service(lnlylib_env* E, l_ulong svid);
 
@@ -87,16 +97,12 @@ L_EXTERN void* l_current_svud(lnlylib_env* E);
 L_EXTERN l_ulong l_current_svid(lnlylib_env* E);
 L_EXTERN l_filehdl l_current_evhd(lnlylib_env* E);
 L_EXTERN l_ulong l_current_svfr(lnlylib_env* E);
-L_EXTERN l_service_callback* l_current_svcb(lnlylib_env* E);
 L_EXTERN void l_set_current_svud(lnlylib_env* E, void* svud);
 
-L_EXTERN const char* l_svnm(l_service* S);
 L_EXTERN void* l_svud(l_service* S);
 L_EXTERN l_ulong l_svid(l_service* S);
 L_EXTERN l_filehdl l_evhd(l_service* S);
 L_EXTERN l_ulong l_svfr(l_service* S);
-L_EXTERN l_service_callback* l_svcb(l_service* S);
-L_EXTERN void l_set_svud(l_service* S, void* svud);
 
 /* time and timer */
 
@@ -138,11 +144,11 @@ L_EXTERN void l_socket_service_recover(lnlylib_env* E, l_ulong sock_srvc);
 L_EXTERN void l_socket_service_close(lnlylib_env* E, l_ulong sock_srvc);
 L_EXTERN void l_stop_listen_server(lnlylib_env* E);
 
-#define L_MSG_SOCK_READY_NTF   (L_SOCK_MSG_GR + 0x01) /* socket service -> user service */
-#define L_MSG_SOCK_DATA_RX_RSP (L_SOCK_MSG_GR + 0x02)
-#define L_MSG_SOCK_DATA_TX_RSP (L_SOCK_MSG_GR + 0x03)
-#define L_MSG_SOCK_NTRDY_NTF   (L_SOCK_MSG_GR + 0x04)
-#define L_MSG_SOCK_RECOVER_RSP (L_SOCK_MSG_GR + 0x05)
+#define L_MSG_SOCK_READY_NTF     (L_CORE_MSG_GR + 0x2A) /* socket service -> user service */
+#define L_MSG_SOCK_READ_RSP      (L_CORE_MSG_GR + 0x2B)
+#define L_MSG_SOCK_WRITE_RSP     (L_CORE_MSG_GR + 0x2C)
+#define L_MSG_SOCK_BAD_STATE_NTF (L_CORE_MSG_GR + 0x2D)
+#define L_MSG_SOCK_RECOVER_RSP   (L_CORE_MSG_GR + 0x2E)
 
 #endif /* LNLYLIB_CORE_BEAT_H */
 
