@@ -63,30 +63,24 @@ typedef struct {
   l_ushort port;
   l_filehdl hdl;
   const void* ip;
-  void* svud;
 } l_service_create_para;
 
 typedef struct {
   l_ulong svid; /* sub service id, non-zero svid indicates success */
   void* svud; /* sub service's user data */
-  l_service_access_point* sap; /* established ap to accessing this sub service */
+  void* ctx; /* unique data user passed in to identify this creation */
 } l_subsrvc_create_rsp;
 
 L_EXTERN void* l_empty_on_create(lnlylib_env* E);
 L_EXTERN void l_empty_on_destroy(lnlylib_env* E);
 L_EXTERN void l_empty_service_proc(lnlylib_env* E);
 
-L_EXTERN l_service_create_para L_LISTEN_SERVICE(const void* ip, l_ushort port, l_service_callback* cb);
-L_EXTERN l_service_create_para L_LISTEN_MODULE(const void* ip, l_ushort port, const void* module);
-L_EXTERN l_service_create_para L_CONNECT_SERVICE(const void* ip, l_ushort port, l_service_callback* cb);
-L_EXTERN l_service_create_para L_CONNECT_MODULE(const void* ip, l_ushort port, const void* module);
 L_EXTERN l_service_create_para L_USEHDL_SERVICE(l_filehdl hdl, l_service_callback* cb);
 L_EXTERN l_service_create_para L_USEHDL_MODULE(l_filehdl hdl, const void* module);
 L_EXTERN l_service_create_para L_SERVICE(l_service_callback* cb);
 L_EXTERN l_service_create_para L_MODULE(const void* module);
 
-L_EXTERN void l_create_service(lnlylib_env* E, l_service_create_para para, void* svud);
-L_EXTERN void l_create_service_ext(lnlylib_env* E, l_service_create_para para, l_service_access_point* sap, void (*access_proc)(lnlylib_env*));
+L_EXTERN void l_create_service(lnlylib_env* E, l_service_create_para para, void* svud, void* ctx);
 L_EXTERN void l_create_access_point(lnlylib_env* E, l_service_access_point* sap, l_ulong remote_svid, void (*access_proc)(lnlylib_env*));
 L_EXTERN void l_delete_access_point(lnlylib_env* E, l_service_access_point* sap);
 L_EXTERN void l_stop_service(lnlylib_env* E);

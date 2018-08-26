@@ -300,15 +300,17 @@ typedef struct l_service {
   l_umedit srvc_flags;
   l_ulong from_id; /* who created this service */
   l_ulong srvc_id; /* the highest bit is for remote service or not, high 32-bit is the index (cannot be 0), low 32-bit is the seed num */
-  l_corotable* coro_tabl; /* only created for lua service */
+  l_corotable* coro_tbl; /* only created for lua service */
+  struct l_svaptable* svap_tbl;
   l_service_callback* srvc_cb;
   void* srvc_ud;
-  struct l_svaptable* svap_tbl;
+  void* p_extra;
 } l_service;
 
 typedef struct {
   l_service_create_para para;
-  l_service_access_point* sap;
+  void* svud;
+  void* ctx;
 } l_service_create_req;
 
 typedef struct {
@@ -583,9 +585,11 @@ l_service_init(l_service* S, l_medit svid, l_umedit seed)
   S->srvc_flags = 0;
   S->from_id = 0;
   S->srvc_id = (((l_ulong)svid) << 32) | seed;
-  S->coro_tabl = 0;
+  S->coro_tbl = 0;
+  S->svap_tbl = 0;
   S->srvc_cb = 0;
   S->srvc_ud = 0;
+  S->p_extra = 0;
 }
 
 static void
@@ -994,20 +998,22 @@ l_master_handle_messages(l_master* M, l_squeue* txms)
       if (S) {
         /* the 1st message for the new service */
         S->from_id = msg->from_svid;
+        S->srvc_ud = req->svud;
+        S->p_extra = req->ctx;
         on_create = l_master_create_message(M, S->srvc_id, L_MSG_SERVICE_ON_CREATE, 0, 0);
         l_master_insert_message(M, on_create);
 
         /* report service created success */
         rsp.svid = S->srvc_id;
         rsp.svud = S->srvc_ud;
-        rsp.sap = req->sap ? req->sap : 0;
+        rsp.ctx = req->ctx;
         rsp_msg = l_master_create_message(M, msg->from_svid, L_MSG_SUBSRVC_CREATE_RSP, &rsp, sizeof(l_subsrvc_create_rsp));
         l_master_insert_message(M, rsp_msg);
       } else {
         /* report service created failed */
         rsp.svid = 0;
-        rsp.svud = req->para.svud;
-        rsp.sap = req->sap ? req->sap : 0;
+        rsp.svud = req->svud;
+        rsp.ctx = req->ctx;
         rsp_msg = l_master_create_message(M, msg->from_svid, L_MSG_SUBSRVC_CREATE_RSP, &rsp, sizeof(l_subsrvc_create_rsp));
         l_master_insert_message(M, rsp_msg);
       }}
@@ -1368,15 +1374,6 @@ l_worker_loop(lnlylib_env* E)
         call = (l_timer_func_call*)MSG->mssg_data;
         call->func(E, call->parm);
         }
-        break;
-      case L_MSG_SUBSRVC_CREATE_RSP: {
-        l_subsrvc_create_rsp* rsp = 0;
-        rsp = (l_subsrvc_create_rsp*)MSG->mssg_data;
-        if (rsp->sap) {
-          rsp->sap->remote_svid = rsp->svid;
-          l_service_add_access_point(E, S, rsp->sap);
-        }}
-        S->srvc_cb->service_proc(E);
         break;
       default:
         if (S->svap_tbl == 0) {
@@ -2117,6 +2114,7 @@ l_service_find_access_point(lnlylib_env* E, l_service* S, l_ulong remote_svid)
   return 0;
 }
 
+#if 0 /* no need increace complexity of service creation */
 L_EXTERN void
 l_create_service_ext(lnlylib_env* E, l_service_create_para para, l_service_access_point* sap, void (*access_proc)(lnlylib_env*))
 {
@@ -2130,6 +2128,7 @@ l_create_service_ext(lnlylib_env* E, l_service_create_para para, l_service_acces
     l_send_message_to_master(E, L_MSG_SERVICE_CREATE_REQ, &req, sizeof(l_service_create_req));
   }
 }
+#endif
 
 L_EXTERN void
 l_create_access_point(lnlylib_env* E, l_service_access_point* sap, l_ulong dest_svid, void (*access_proc)(lnlylib_env*))
@@ -2189,7 +2188,6 @@ L_LISTEN_SERVICE(const void* ip, l_ushort port, l_service_callback* cb)
   para.hdl = L_EMPTY_HDL;
   para.ip = ip;
   para.port = port;
-  para.svud = 0;
   return para;
 }
 
@@ -2204,7 +2202,6 @@ L_LISTEN_MODULE(const void* ip, l_ushort port, const void* module)
   para.hdl = L_EMPTY_HDL;
   para.ip = ip;
   para.port = port;
-  para.svud = 0;
   return para;
 }
 
@@ -2219,7 +2216,6 @@ L_CONNECT_SERVICE(const void* ip, l_ushort port, l_service_callback* cb)
   para.hdl = L_EMPTY_HDL;
   para.ip = ip;
   para.port = port;
-  para.svud = 0;
   return para;
 }
 
@@ -2234,7 +2230,6 @@ L_CONNECT_MODULE(const void* ip, l_ushort port, const void* module)
   para.hdl = L_EMPTY_HDL;
   para.ip = ip;
   para.port = port;
-  para.svud = 0;
   return para;
 }
 
@@ -2249,7 +2244,6 @@ L_USEHDL_SERVICE(l_filehdl hdl, l_service_callback* cb)
   para.hdl = hdl;
   para.ip = 0;
   para.port = 0;
-  para.svud = 0;
   return para;
 }
 
@@ -2264,7 +2258,6 @@ L_USERHDL_MODULE(l_filehdl hdl, const void* module)
   para.hdl = hdl;
   para.ip = 0;
   para.port = 0;
-  para.svud = 0;
   return para;
 }
 
@@ -2279,7 +2272,6 @@ L_SERVICE(l_service_callback* cb)
   para.hdl = L_EMPTY_HDL;
   para.ip = 0;
   para.port = 0;
-  para.svud = 0;
   return para;
 }
 
@@ -2294,7 +2286,6 @@ L_MODULE(const void* module)
   para.hdl = L_EMPTY_HDL;
   para.ip = 0;
   para.port = 0;
-  para.svud = 0;
   return para;
 }
 
@@ -2525,7 +2516,7 @@ l_master_create_service(l_master* M, l_medit svid, l_service_create_para para)
 
   S = slot->service;
   S->srvc_cb = cb;
-  S->srvc_ud = para.svud;
+  S->srvc_ud = 0;
   S->ioev_hdl = ioev_hdl;
 
   slot->flags |= L_SERVICE_ALIVE | flags;
@@ -2544,10 +2535,9 @@ l_master_create_service(l_master* M, l_medit svid, l_service_create_para para)
 }
 
 L_EXTERN void
-l_create_service(lnlylib_env* E, l_service_create_para para, void* svud)
+l_create_service(lnlylib_env* E, l_service_create_para para, void* svud, void* ctx)
 {
-  l_service_create_req req = {para, 0};
-  req.para.svud = svud;
+  l_service_create_req req = {para, svud, ctx};
   l_send_message_to_master(E, L_MSG_SERVICE_CREATE_REQ, &req, sizeof(l_service_create_req));
 }
 
@@ -3031,6 +3021,7 @@ l_master_check_timers(l_master* M)
 
 typedef struct {
   l_service_callback* inconn_cb;
+  void* inconn_ctx;
   l_dqueue connq;
   l_dqueue freeq;
   l_umedit conns;
@@ -3049,12 +3040,10 @@ l_socket_listen_service = {
   l_socket_listen_service_proc
 };
 
-L_EXTERN l_service_create_para
-l_listen_service_para(const void* local_ip, l_ushort local_port, l_service_callback* conn_cb)
+L_EXTERN void
+l_create_listen_service(lnlylib_env* E, const void* local_ip, l_ushort local_port, l_service_callback* conn_cb, void* ctx)
 {
-  l_service_create_para para = L_LISTEN_SERVICE(local_ip, local_port, &l_socket_listen_service);
-  para.svud = conn_cb;
-  return para;
+  l_create_service(E, L_LISTEN_SERVICE(local_ip, local_port, &l_socket_listen_service), conn_cb, ctx);
 }
 
 L_EXTERN void
@@ -3080,12 +3069,12 @@ typedef struct {
 
 typedef struct {
   l_linknode node;
+  l_socket_listen_svud* listen;
   l_squeue wrmq;
   l_squeue rdmq;
   l_bool outconn;
   l_ulong user_svid;
   l_socket_info_data info;
-  l_service_callback* inconn_cb;
   l_ipstr rmt_ip;
 } l_socket_data_svud;
 
@@ -3115,12 +3104,16 @@ l_socket_data_service = {
 static void*
 l_socket_listen_service_on_create(lnlylib_env* E)
 {
+  l_service* S = E->S;
   l_socket_listen_svud* listen = 0;
   l_sockaddr local;
 
   listen = L_MALLOC_TYPE(E, l_socket_listen_svud);
 
   listen->inconn_cb = (l_service_callback*)l_current_svud(E);
+  listen->inconn_ctx = S->p_extra;
+  S->p_extra = 0;
+
   listen->conns = 0;
   l_dqueue_init(&listen->connq);
   l_dqueue_init(&listen->freeq);
@@ -3168,14 +3161,14 @@ l_socket_listen_service_accept_conn(void* ud, l_socketconn* conn)
 
     l_zero_n(data_svud, sizeof(l_socket_data_svud));
 
-    data_svud->inconn_cb = listen->inconn_cb;
+    data_svud->listen = listen;
     data_svud->info.local_port = listen->local_port;
     data_svud->info.local_ip = &listen->local_ip;
     data_svud->info.remote_port = rmt_port;
     data_svud->info.remote_ip = &data_svud->rmt_ip;
     data_svud->rmt_ip = rmt_ip;
 
-    l_create_service(E, L_USEHDL_SERVICE(conn->sock, &l_socket_data_service), data_svud);
+    l_create_service(E, L_USEHDL_SERVICE(conn->sock, &l_socket_data_service), data_svud, 0);
   }
 }
 
@@ -3185,6 +3178,7 @@ typedef struct {
 
 typedef struct {
   l_ulong sock_srvc;
+  l_socket_info_data* sock_info;
 } l_sock_ready_ntf;
 
 static void
@@ -3318,7 +3312,7 @@ l_socket_data_service_proc(lnlylib_env* E)
   case L_MSG_SOCK_CONN_NTF: { /* from listen service, a incoming connection established */
     l_socket_data_svud* svud = 0;
     svud = (l_socket_data_svud*)l_current_svud(E);
-    l_create_service(E, L_SERVICE(svud->inconn_cb), &svud->info);
+    l_create_service(E, L_SERVICE(svud->listen->inconn_cb), 0, 0);
     }
     break;
   case L_MSG_SUBSRVC_CREATE_RSP: {
@@ -3326,8 +3320,16 @@ l_socket_data_service_proc(lnlylib_env* E)
     rsp = (l_subsrvc_create_rsp*)l_mgdt(MSG);
     if (rsp->svid) {
       l_sock_ready_ntf ntf;
+      l_subsrvc_create_rsp new_rsp;
+
+      new_rsp.svid = S->srvc_id;
+      new_rsp.svud = svud->listen->inconn_cb;
+      new_rsp.ctx = svud->listen->inconn_ctx;
+      l_send_message_to(E, svud->user_svid, 0, L_MSG_SUBSRVC_CREATE_RSP, &new_rsp, sizeof(l_subsrvc_create_rsp));
+
       svud->user_svid = rsp->svid;
       ntf.sock_srvc = l_svid(S);
+      ntf.sock_info = &svud->info;
       l_send_message_to(E, svud->user_svid, 0, L_MSG_SOCK_READY_NTF, &ntf, sizeof(l_sock_ready_ntf));
     } else {
       l_sock_disc_cmd cmd;
@@ -3354,6 +3356,7 @@ l_socket_data_service_proc(lnlylib_env* E)
     data_svud->user_svid = l_svfr(S);
     data_svud->outconn = true;
     ntf.sock_srvc = l_svid(S);
+    ntf.sock_info = 0; /* TODO */
     l_send_message_to(E, data_svud->user_svid, 0, L_MSG_SOCK_READY_NTF, &ntf, sizeof(l_sock_ready_ntf));
     }
     break;
