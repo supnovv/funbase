@@ -53,8 +53,6 @@ typedef struct {
   void (*service_proc)(lnlylib_env*); /* service main logic */
 } l_service_callback;
 
-typedef l_service_callback l_service_define;
-
 typedef struct {
   const void* module;
   l_service_callback* cb;
@@ -76,10 +74,10 @@ L_EXTERN void* l_empty_on_create(lnlylib_env* E);
 L_EXTERN void l_empty_on_destroy(lnlylib_env* E);
 L_EXTERN void l_empty_service_proc(lnlylib_env* E);
 
-L_EXTERN l_service_create_para L_USEHDL_SERVICE(l_filehdl hdl, l_service_callback* cb);
-L_EXTERN l_service_create_para L_USEHDL_MODULE(l_filehdl hdl, const void* module);
 L_EXTERN l_service_create_para L_SERVICE(l_service_callback* cb);
 L_EXTERN l_service_create_para L_MODULE(const void* module);
+L_EXTERN l_service_create_para L_USEHDL_SERVICE(l_filehdl hdl, l_service_callback* cb);
+L_EXTERN l_service_create_para L_USEHDL_MODULE(l_filehdl hdl, const void* module);
 
 L_EXTERN void l_create_service(lnlylib_env* E, l_service_create_para para, void* svud, void* ctx);
 L_EXTERN void l_create_access_point(lnlylib_env* E, l_service_access_point* sap, l_ulong remote_svid, void (*access_proc)(lnlylib_env*));
@@ -92,7 +90,6 @@ L_EXTERN void* l_current_svud(lnlylib_env* E);
 L_EXTERN l_ulong l_current_svid(lnlylib_env* E);
 L_EXTERN l_filehdl l_current_evhd(lnlylib_env* E);
 L_EXTERN l_ulong l_current_svfr(lnlylib_env* E);
-L_EXTERN void l_set_current_svud(lnlylib_env* E, void* svud);
 
 L_EXTERN void* l_svud(l_service* S);
 L_EXTERN l_ulong l_svid(l_service* S);

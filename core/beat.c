@@ -1063,8 +1063,8 @@ l_booter_service_proc(lnlylib_env* E)
   l_logm_1(E, "booter handle msg %x", lx(E->MSG->mssg_id));
 }
 
-static l_service_define
-l_booter_service = {
+static l_service_callback
+l_booter_service_callback = {
   l_booter_on_create,
   l_booter_on_destroy,
   l_booter_service_proc
@@ -1089,8 +1089,8 @@ l_empty_service_proc(lnlylib_env* E)
   L_UNUSED(E);
 }
 
-static l_service_define
-l_empty_service = {
+static l_service_callback
+l_empty_service_callback = {
   l_empty_on_create,
   l_empty_on_destroy,
   l_empty_service_proc
@@ -1127,7 +1127,7 @@ l_master_loop(lnlylib_env* main_env)
   l_squeue_init(&work_to_mast);
   l_squeue_init(&srvc_need_hdl);
 
-  booter = l_master_create_service(M, L_SERVICE_BOOTER, L_SERVICE(&l_booter_service));
+  booter = l_master_create_service(M, L_SERVICE_BOOTER, L_SERVICE(&l_booter_service_callback));
   on_create = l_master_create_message(M, booter->srvc_id, L_MSG_SERVICE_ON_CREATE, 0, 0);
   l_squeue_push(&booter->srvc_msgq, &on_create->node);
   stbl->slot_arr[L_SERVICE_BOOTER].service = 0; /* need detach the service from the table first before insert into global q */
@@ -1170,7 +1170,7 @@ l_master_loop(lnlylib_env* main_env)
       switch (MSG->mssg_id) {
       case L_MSG_PROGRAM_EXIT_REQ:
         /* TODO: send L_MSG_SERVICE_EXIT_REQ to all existing services */
-        killer = l_master_create_service(M, L_SERVICE_KILLER, L_SERVICE(&l_empty_service));
+        killer = l_master_create_service(M, L_SERVICE_KILLER, L_SERVICE(&l_empty_service_callback));
         l_squeue_push(&srvc_need_hdl, &killer->node); /* killer service is docked even it is being handled */
         break;
       case L_MSG_PROGRAM_EXIT_RSP:
@@ -3038,14 +3038,14 @@ typedef struct {
   l_umedit conns;
   l_dqueue connq;
   l_dqueue freeq;
-} l_socket_listen_svud;
+} l_socket_listen_service;
 
 static void* l_socket_listen_service_on_create(lnlylib_env* E);
 static void l_socket_listen_service_on_destroy(lnlylib_env* E);
 static void l_socket_listen_service_proc(lnlylib_env* E);
 
-static l_service_define
-l_socket_listen_service = {
+static l_service_callback
+l_socket_listen_service_callback = {
   l_socket_listen_service_on_create,
   l_socket_listen_service_on_destroy,
   l_socket_listen_service_proc
@@ -3054,7 +3054,7 @@ l_socket_listen_service = {
 L_EXTERN void
 l_create_listen_service(lnlylib_env* E, const void* local_ip, l_ushort local_port, l_service_callback* conn_cb, void* ctx)
 {
-  l_create_service(E, L_LISTEN_SERVICE(local_ip, local_port, &l_socket_listen_service), conn_cb, ctx);
+  l_create_service(E, L_LISTEN_SERVICE(local_ip, local_port, &l_socket_listen_service_callback), conn_cb, ctx);
 }
 
 L_EXTERN void
@@ -3065,29 +3065,32 @@ l_stop_listen_service(lnlylib_env* E)
 
 #if 0
 static void
-l_create_connect_service(lnlylib_env* E, const void* remote_ip, l_ushort remote_port, l_uint mgud)
+l_create_connect_service(lnlylib_env* E, const void* remote_ip, l_ushort remote_port, void* ctx)
 {
-  l_socket_data_svud* data_svud = 0;
+  l_socket_data_service* data_srvc = 0;
+  data_srvc = L_MALLOC_TYPE(E, l_socket_data_service);
+  l_zero_n(data_srvc, sizeof(l_socket_data_service));
+  l_create_service(E, L_SERVICE(
 }
 #endif
 
 typedef struct {
   l_linknode node;
-  l_socket_listen_svud* listen;
+  l_socket_listen_service* listen;
   l_bin_ip remote;
   l_ulong user_svid;
   l_squeue wrmq;
   l_squeue rdmq;
-} l_socket_data_svud;
+} l_socket_data_service;
 
 static void
-l_socket_data_svud_init(l_socket_data_svud* s)
+l_socket_data_service_init(l_socket_data_service* s)
 {
   L_UNUSED(s);
 }
 
 static void
-l_socket_data_svud_free(l_socket_data_svud* s)
+l_socket_data_service_free(l_socket_data_service* s)
 {
   L_UNUSED(s);
 }
@@ -3096,8 +3099,8 @@ static void* l_socket_data_service_on_create(lnlylib_env* E);
 static void l_socket_data_service_on_destroy(lnlylib_env* E);
 static void l_socket_data_service_proc(lnlylib_env* E);
 
-static l_service_define
-l_socket_data_service = {
+static l_service_callback
+l_socket_data_service_callback = {
   l_socket_data_service_on_create,
   l_socket_data_service_on_destroy,
   l_socket_data_service_proc
@@ -3107,31 +3110,28 @@ static void*
 l_socket_listen_service_on_create(lnlylib_env* E)
 {
   l_service* S = E->S;
-  l_socket_listen_svud* listen = 0;
+  l_socket_listen_service* listen = 0;
   l_sockaddr local;
 
-  listen = L_MALLOC_TYPE(E, l_socket_listen_svud);
-
+  listen = L_MALLOC_TYPE(E, l_socket_listen_service);
   listen->inconn_cb = (l_service_callback*)l_current_svud(E);
   listen->inconn_ctx = S->p_extra;
-  S->p_extra = 0;
-
   listen->conns = 0;
+
   l_dqueue_init(&listen->connq);
   l_dqueue_init(&listen->freeq);
 
   local = l_sockaddr_local(l_current_evhd(E));
   listen->local = l_get_binary_ip(&local);
 
-  l_set_current_svud(E, listen);
-  return 0;
+  return listen;
 }
 
 static void
 l_socket_listen_service_on_destroy(lnlylib_env* E)
 {
-  l_socket_listen_svud* data = 0;
-  data = (l_socket_listen_svud*)l_current_svud(E);
+  l_socket_listen_service* data = 0;
+  data = (l_socket_listen_service*)l_current_svud(E);
   l_mfree(E, data);
 }
 
@@ -3147,31 +3147,31 @@ l_socket_listen_service_accept_conn(void* ud, l_socketconn* conn)
   /* TODO: do remote address filter here */
 
   if (accept) {
-    l_socket_listen_svud* listen = 0;
-    l_socket_data_svud* data_svud = 0;
+    l_socket_listen_service* listen = 0;
+    l_socket_data_service* data_srvc = 0;
 
-    listen = (l_socket_listen_svud*)l_current_svud(E);
-    data_svud = (l_socket_data_svud*)l_dqueue_pop(&listen->freeq);
-    if (data_svud == 0) {
-      data_svud = L_MALLOC_TYPE(E, l_socket_data_svud);
+    listen = (l_socket_listen_service*)l_current_svud(E);
+    data_srvc = (l_socket_data_service*)l_dqueue_pop(&listen->freeq);
+    if (data_srvc == 0) {
+      data_srvc = L_MALLOC_TYPE(E, l_socket_data_service);
     }
 
-    l_zero_n(data_svud, sizeof(l_socket_data_svud));
+    l_zero_n(data_srvc, sizeof(l_socket_data_service));
 
-    data_svud->listen = listen;
-    data_svud->remote = remote;
+    data_srvc->listen = listen;
+    data_srvc->remote = remote;
 
-    l_create_service(E, L_USEHDL_SERVICE(conn->sock, &l_socket_data_service), data_svud, 0);
+    l_create_service(E, L_USEHDL_SERVICE(conn->sock, &l_socket_data_service_callback), data_srvc, 0);
   }
 }
 
 typedef struct {
-  l_socket_data_svud* data_svud;
+  l_socket_data_service* data_srvc;
 } l_sock_disc_cmd;
 
 typedef struct {
-  l_ulong sock_srvc;
-  l_socket_data_svud* info;
+  l_ulong srvc_id;
+  l_socket_data_service* srvc_ud;
 } l_sock_ready_ntf;
 
 static void
@@ -3179,9 +3179,9 @@ l_socket_listen_service_proc(lnlylib_env* E)
 {
   l_service* S = l_current_service(E);
   l_message* msg = l_current_message(E);
-  l_socket_listen_svud* listen = 0;
+  l_socket_listen_service* listen = 0;
 
-  listen = (l_socket_listen_svud*)l_current_svud(E);
+  listen = (l_socket_listen_service*)l_current_svud(E);
 
   switch (l_mgid(msg)) {
   case L_MSG_SOCK_ACCEPT_IND: /* from master */
@@ -3189,28 +3189,27 @@ l_socket_listen_service_proc(lnlylib_env* E)
     break;
   case L_MSG_SUBSRVC_CREATE_RSP: {
     l_subsrvc_create_rsp* rsp = 0;
-    l_socket_data_svud* data_svud = 0;
+    l_socket_data_service* data_srvc = 0;
     rsp = (l_subsrvc_create_rsp*)l_mgdt(msg);
-    data_svud = (l_socket_data_svud*)rsp->in_svud;
+    data_srvc = (l_socket_data_service*)rsp->in_svud;
     if (rsp->svid) {
       listen->conns += 1;
-      l_dqueue_push(&listen->connq, &data_svud->node);
-
+      l_dqueue_push(&listen->connq, &data_srvc->node);
       l_send_message_to(E, rsp->svid, 0, L_MSG_SOCK_CONN_NTF, 0, 0);
     } else {
-      l_dqueue_push(&listen->freeq, &data_svud->node);
+      l_dqueue_push(&listen->freeq, &data_srvc->node);
     }}
     break;
   case L_MSG_SOCK_DISC_NTF:
   case L_MSG_SOCK_ERROR_NTF:
     break;
   case L_MSG_SOCK_DISC_CMD: { /* from socket data service */
-    l_socket_data_svud* data_svud = 0;
-    data_svud = ((l_sock_disc_cmd*)l_mgdt(msg))->data_svud;
-    l_socket_data_svud_free(data_svud);
+    l_socket_data_service* data_srvc = 0;
+    data_srvc = ((l_sock_disc_cmd*)l_mgdt(msg))->data_srvc;
+    l_socket_data_service_free(data_srvc);
     listen->conns -= 1;
-    l_linknode_remove(&data_svud->node);
-    l_dqueue_push(&listen->freeq, &data_svud->node);
+    l_linknode_remove(&data_srvc->node);
+    l_dqueue_push(&listen->freeq, &data_srvc->node);
     l_stop_dest_service(E, l_mgfr(msg));
     }
     break;
@@ -3235,11 +3234,11 @@ l_socket_data_service_on_create(lnlylib_env* E)
 static void
 l_socket_data_service_on_destroy(lnlylib_env* E)
 {
-  l_socket_data_svud* data_svud = 0;
-  data_svud = (l_socket_data_svud*)l_current_svud(E);
-  if (data_svud->listen == 0) {
-    l_socket_data_svud_free(data_svud);
-    l_mfree(E, data_svud);
+  l_socket_data_service* data_srvc = 0;
+  data_srvc = (l_socket_data_service*)l_current_svud(E);
+  if (data_srvc->listen == 0) {
+    l_socket_data_service_free(data_srvc);
+    l_mfree(E, data_srvc);
   }
 }
 
@@ -3296,16 +3295,13 @@ l_socket_data_service_proc(lnlylib_env* E)
 
   l_service* S = E->S;
   l_message* msg = E->MSG;
-  l_socket_data_svud* svud = 0;
+  l_socket_data_service* data_srvc = 0;
 
-  svud = (l_socket_data_svud*)E->svud;
+  data_srvc = (l_socket_data_service*)E->svud;
 
   switch (msg->mssg_id) {
-  case L_MSG_SOCK_CONN_NTF: { /* from listen service, a incoming connection established */
-    l_socket_data_svud* svud = 0;
-    svud = (l_socket_data_svud*)l_current_svud(E);
-    l_create_service(E, L_SERVICE(svud->listen->inconn_cb), 0, 0);
-    }
+  case L_MSG_SOCK_CONN_NTF: /* from listen service, a incoming connection established */
+    l_create_service(E, L_SERVICE(data_srvc->listen->inconn_cb), 0, 0);
     break;
   case L_MSG_SUBSRVC_CREATE_RSP: {
     l_subsrvc_create_rsp* rsp = 0;
@@ -3315,53 +3311,46 @@ l_socket_data_service_proc(lnlylib_env* E)
       l_subsrvc_create_rsp new_rsp;
 
       new_rsp.svid = S->srvc_id;
-      new_rsp.in_svud = svud->listen->inconn_cb;
-      new_rsp.in_ctx = svud->listen->inconn_ctx;
-      new_rsp.out_svud = svud;
-      l_send_message_to(E, svud->user_svid, 0, L_MSG_SUBSRVC_CREATE_RSP, &new_rsp, sizeof(l_subsrvc_create_rsp));
+      new_rsp.in_svud = data_srvc->listen->inconn_cb;
+      new_rsp.in_ctx = data_srvc->listen->inconn_ctx;
+      new_rsp.out_svud = data_srvc;
+      l_send_message_to(E, data_srvc->user_svid, 0, L_MSG_SUBSRVC_CREATE_RSP, &new_rsp, sizeof(l_subsrvc_create_rsp));
 
-      svud->user_svid = rsp->svid;
-      ntf.sock_srvc = l_svid(S);
-      ntf.info = svud;
-      l_send_message_to(E, svud->user_svid, 0, L_MSG_SOCK_READY_NTF, &ntf, sizeof(l_sock_ready_ntf));
+      data_srvc->user_svid = rsp->svid;
+      ntf.srvc_id = l_svid(S);
+      ntf.srvc_ud = data_srvc;
+      l_send_message_to(E, data_srvc->user_svid, 0, L_MSG_SOCK_READY_NTF, &ntf, sizeof(l_sock_ready_ntf));
     } else {
       l_sock_disc_cmd cmd;
-      cmd.data_svud = svud;
+      cmd.data_srvc = data_srvc;
       l_send_message_to(E, l_svfr(S), 0, L_MSG_SOCK_DISC_CMD, &cmd, sizeof(l_sock_disc_cmd));
     }}
     break;
   case L_MSG_SOCK_CONN_RSP: { /* from master, initiated connection established */
-    l_socket_data_svud* data_svud = 0;
+    l_socket_data_service* new_srvc = 0;
     l_sock_ready_ntf ntf;
 
     /* TODO - complete the connection first */
 
-    data_svud = L_MALLOC_TYPE(E, l_socket_data_svud);
-    l_zero_n(data_svud, sizeof(l_socket_data_svud));
-#if 0
-    data_svud->info.local_port = listen->local_port;
-    data_svud->info.local_ip = listen->local_ip;
-    data_svud->info.remote_port = rmt_port;
-    data_svud->info.remote_ip = data_svud->rmt_ip;
-    data_svud->rmt_ip = rmt_ip;
-#endif
+    new_srvc = L_MALLOC_TYPE(E, l_socket_data_service);
+    l_zero_n(new_srvc, sizeof(l_socket_data_service));
+    // new_srvc->remote = ;
+    new_srvc->user_svid = l_svfr(S);
 
-    data_svud->user_svid = l_svfr(S);
-    data_svud->listen = 0;
-    ntf.sock_srvc = l_svid(S);
-    ntf.info = data_svud;
-    l_send_message_to(E, data_svud->user_svid, 0, L_MSG_SOCK_READY_NTF, &ntf, sizeof(l_sock_ready_ntf));
+    ntf.srvc_id = l_svid(S);
+    ntf.srvc_ud = new_srvc;
+    l_send_message_to(E, new_srvc->user_svid, 0, L_MSG_SOCK_READY_NTF, &ntf, sizeof(l_sock_ready_ntf));
     }
     break;
   /* common socket messages from master */
   case L_MSG_SOCK_READY_RX:
 #if 0
-    if ((msg = (l_message*)l_squeue_top(&svud->rdmq))) {
+    if ((msg = (l_message*)l_squeue_top(&data_srvc->rdmq))) {
       data = msg->mssg_data + msg->mgid_cust;
       size = msg->data_size - msg->mgid_cust;
       done = l_data_read(S->ioev_hdl, data, size);
       if (done == size) {
-        l_squeue_pop(&svud->wrmq);
+        l_squeue_pop(&data_srvc->wrmq);
         /* TODO: send L_MSG_SOCK_READ_RSP to user service */
       } else {
         msg->mgid_cust += done;
@@ -3371,14 +3360,14 @@ l_socket_data_service_proc(lnlylib_env* E)
     break;
   case L_MSG_SOCK_READY_TX:
 #if 0
-    if ((msg = (l_message*)l_squeue_top(&svud->wrmq))) {
+    if ((msg = (l_message*)l_squeue_top(&data_srvc->wrmq))) {
       data = msg->mssg_data + msg->mgid_cust;
       size = msg->data_size - msg->mgid_cust;
       done = l_data_write(S->ioev_hdl, data, size);
       if (done == size) {
-        l_squeue_pop(&svud->wrmq);
-        l_message_reset(E, msg, svud->user_svid, msg->dest_mgud, msg->session, L_MSG_SOCK_WRITE_RSP, 0, 0, 0);
-        msg->extra.a = ++svud->wrid;
+        l_squeue_pop(&data_srvc->wrmq);
+        l_message_reset(E, msg, data_srvc->user_svid, msg->dest_mgud, msg->session, L_MSG_SOCK_WRITE_RSP, 0, 0, 0);
+        msg->extra.a = ++data_srvc->wrid;
         l_impl_deliver_message(E, msg);
       } else {
         msg->mgid_cust += done;
@@ -3388,21 +3377,21 @@ l_socket_data_service_proc(lnlylib_env* E)
     break;
   case L_MSG_SOCK_DISC_NTF:
   case L_MSG_SOCK_ERROR_NTF:
-    l_send_message_to(E, svud->user_svid, 0, L_MSG_SOCK_BAD_STATE_NTF, 0, 0);
+    l_send_message_to(E, data_srvc->user_svid, 0, L_MSG_SOCK_BAD_STATE_NTF, 0, 0);
     break;
   /* messages from user service */
   case L_MSG_SOCK_DATA_RX_REQ:
     if (msg->data_size && msg->mssg_data) {
       msg->mssg_flags |= L_MSSG_FLAG_DONT_AUTO_FREE;
       // msg->mgid_cust = 0; /* use mgid_cust to record how many data alrady read */
-      l_squeue_push(&svud->rdmq, &msg->node);
+      l_squeue_push(&data_srvc->rdmq, &msg->node);
     }
     break;
   case L_MSG_SOCK_DATA_TX_REQ:
     if (msg->data_size && msg->mssg_data) {
       msg->mssg_flags |= L_MSSG_FLAG_DONT_AUTO_FREE;
       // msg->mgid_cust = 0; /* use mgid_cust to record how many data already written */
-      l_squeue_push(&svud->wrmq, &msg->node);
+      l_squeue_push(&data_srvc->wrmq, &msg->node);
     }
     break;
   case L_MSG_SOCK_RECOVER_REQ:
@@ -3413,7 +3402,7 @@ l_socket_data_service_proc(lnlylib_env* E)
       l_stop_service(E); /* stop and destroy self, socket will auto closed when destroy */
     } else {
       l_sock_disc_cmd cmd;
-      cmd.data_svud = svud; /* this service is destroyed after this cmd */
+      cmd.data_srvc = data_srvc; /* this service is destroyed after this cmd */
       l_send_message_to(E, l_svfr(S), 0, L_MSG_SOCK_DISC_CMD, &cmd, sizeof(l_sock_disc_cmd));
     }}
     break;
