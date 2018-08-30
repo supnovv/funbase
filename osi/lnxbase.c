@@ -1157,12 +1157,12 @@ l_get_sock_port(const l_sockaddr* addr)
   return ntohs(sa->addr.sa4.sin_port);
 }
 
-L_EXTERN l_ip_binary
+L_EXTERN l_bin_ip
 l_get_binary_ip(const l_sockaddr* addr)
 {
   l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)addr;
   l_ushort family = sa->addr.sa.sa_family;
-  l_ip_binary ip;
+  l_bin_ip ip;
   ip.port = l_get_sock_port(addr);
   if (family == AF_INET) {
     l_byte* p = (l_byte*)(&sa->addr.sa4.sin_addr.s_addr); /* network byte-order */
@@ -1182,7 +1182,7 @@ l_get_binary_ip(const l_sockaddr* addr)
   return ip;
 }
 
-L_EXTERN l_ip_string
+L_EXTERN l_str_ip
 l_get_string_ip(const l_sockaddr* addr)
 {
   /** inet_ntop - convert ipv4 and ipv6 addresses from binary to text form **
@@ -1203,10 +1203,10 @@ l_get_string_ip(const l_sockaddr* addr)
   there was an error, with errno set to indicate the error. */
 
   l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)addr;
-  l_ip_string buffer;
+  l_str_ip buffer;
   l_byte* out = buffer.s;
 
-  l_assert(LNUL, sizeof(l_ip_string) >= INET6_ADDRSTRLEN);
+  l_assert(LNUL, sizeof(l_str_ip) >= INET6_ADDRSTRLEN);
 
   if (sa->addr.sa.sa_family == AF_INET) {
       if (inet_ntop(AF_INET, &(sa->addr.sa4.sin_addr), (char*)out, INET_ADDRSTRLEN) != 0) {
@@ -1227,10 +1227,10 @@ l_get_string_ip(const l_sockaddr* addr)
   return buffer;
 }
 
-L_EXTERN l_ip_string
-l_get_string_ip_from(const l_ip_binary* ip)
+L_EXTERN l_str_ip
+l_get_string_ip_from(const l_bin_ip* ip)
 {
-  l_ip_string s;
+  l_str_ip s;
   l_stropt b = l_get_stropt(s.s, sizeof(s), 0);
   l_ostream os = l_stropt_ostream(&b);
   switch (ip->type) {

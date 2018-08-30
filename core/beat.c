@@ -3034,10 +3034,10 @@ l_master_check_timers(l_master* M)
 typedef struct {
   l_service_callback* inconn_cb;
   void* inconn_ctx;
+  l_bin_ip local;
+  l_umedit conns;
   l_dqueue connq;
   l_dqueue freeq;
-  l_umedit conns;
-  l_ip_binary local;
 } l_socket_listen_svud;
 
 static void* l_socket_listen_service_on_create(lnlylib_env* E);
@@ -3074,7 +3074,7 @@ l_create_connect_service(lnlylib_env* E, const void* remote_ip, l_ushort remote_
 typedef struct {
   l_linknode node;
   l_socket_listen_svud* listen;
-  l_ip_binary remote;
+  l_bin_ip remote;
   l_ulong user_svid;
   l_squeue wrmq;
   l_squeue rdmq;
@@ -3139,7 +3139,7 @@ static void
 l_socket_listen_service_accept_conn(void* ud, l_socketconn* conn)
 {
   lnlylib_env* E = (lnlylib_env*)ud;
-  l_ip_binary remote;
+  l_bin_ip remote;
   int accept = true;
 
   remote = l_get_binary_ip(&conn->remote);
