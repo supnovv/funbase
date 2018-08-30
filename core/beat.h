@@ -67,8 +67,9 @@ typedef struct {
 
 typedef struct {
   l_ulong svid; /* sub service id, non-zero svid indicates success */
-  void* svud; /* sub service's user data */
-  void* ctx; /* unique data user passed in to identify this creation */
+  void* in_svud; /* user passed in svud for this sub service */
+  void* in_ctx; /* unique data user passed in to identify this creation */
+  void* out_svud; /* service created out itself real service data */
 } l_subsrvc_create_rsp;
 
 L_EXTERN void* l_empty_on_create(lnlylib_env* E);

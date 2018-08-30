@@ -1143,22 +1143,47 @@ l_sockaddr_local(l_socket sock)
   return sockaddr;
 }
 
-L_EXTERN l_ushort
-l_sockaddr_port(l_sockaddr* self)
-{
-  l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)self;
-  return ntohs(sa->addr.sa4.sin_port);
-}
-
 static l_ushort
-l_sockaddr_family(l_sockaddr* self)
+l_sockaddr_family(const l_sockaddr* self)
 {
   l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)self;
   return sa->addr.sa.sa_family;
 }
 
-L_EXTERN l_ipstr
-l_sockaddr_getip(l_sockaddr* self)
+L_EXTERN l_ushort
+l_get_sock_port(const l_sockaddr* addr)
+{
+  l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)addr;
+  return ntohs(sa->addr.sa4.sin_port);
+}
+
+L_EXTERN l_ip_binary
+l_get_binary_ip(const l_sockaddr* addr)
+{
+  l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)addr;
+  l_ushort family = sa->addr.sa.sa_family;
+  l_ip_binary ip;
+  ip.port = l_get_sock_port(addr);
+  if (family == AF_INET) {
+    l_byte* p = (l_byte*)(&sa->addr.sa4.sin_addr.s_addr); /* network byte-order */
+    ip.type = L_IPV4_ADDR;
+    ip.a[0] = p[0]; /* high byte at lower address */
+    ip.a[1] = p[1];
+    ip.a[2] = p[2];
+    ip.a[3] = p[3];
+  } else if (family == AF_INET6) {
+    l_byte* p = sa->addr.sa6.sin6_addr.s6_addr;
+    ip.type = L_IPV6_ADDR;
+    l_copy_n(ip.a, p, 16); /* network byte-order */
+  } else {
+    ip.type = 0;
+    ip.a[0] = 0;
+  }
+  return ip;
+}
+
+L_EXTERN l_ip_string
+l_get_string_ip(const l_sockaddr* addr)
 {
   /** inet_ntop - convert ipv4 and ipv6 addresses from binary to text form **
   #include <arpa/inet.h>
@@ -1177,11 +1202,11 @@ l_sockaddr_getip(l_sockaddr* self)
   On success, inet_ntop() returns a non-null pointer to dst. NULL is returned if
   there was an error, with errno set to indicate the error. */
 
-  l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)self;
-  l_ipstr buffer;
-  l_byte* out = buffer.ip;
+  l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)addr;
+  l_ip_string buffer;
+  l_byte* out = buffer.s;
 
-  l_assert(LNUL, 64 >= INET6_ADDRSTRLEN);
+  l_assert(LNUL, sizeof(l_ip_string) >= INET6_ADDRSTRLEN);
 
   if (sa->addr.sa.sa_family == AF_INET) {
       if (inet_ntop(AF_INET, &(sa->addr.sa4.sin_addr), (char*)out, INET_ADDRSTRLEN) != 0) {
@@ -1200,6 +1225,30 @@ l_sockaddr_getip(l_sockaddr* self)
   }
 
   return buffer;
+}
+
+L_EXTERN l_ip_string
+l_get_string_ip_from(const l_ip_binary* ip)
+{
+  l_ip_string s;
+  l_stropt b = l_get_stropt(s.s, sizeof(s), 0);
+  l_ostream os = l_stropt_ostream(&b);
+  switch (ip->type) {
+  case L_IPV4_ADDR:
+    l_ostream_format_4(&os, "%d.%d.%d.%d", ld(ip->a[0]), ld(ip->a[1]), ld(ip->a[2]), ld(ip->a[3]));
+    break;
+  case L_IPV6_ADDR:
+    l_ostream_format_8(&os, "%.4zx:%.4zx:%.4zx:%.4zx:%.4zx:%.4zx:%.4zx:%.4zx",
+        lx((((l_ushort)ip->a[0]) << 8) | ip->a[1]), lx((((l_ushort)ip->a[2]) << 8) | ip->a[3]),
+        lx((((l_ushort)ip->a[4]) << 8) | ip->a[5]), lx((((l_ushort)ip->a[6]) << 8) | ip->a[7]),
+        lx((((l_ushort)ip->a[8]) << 8) | ip->a[9]), lx((((l_ushort)ip->a[10]) << 8) | ip->a[11]),
+        lx((((l_ushort)ip->a[12]) << 8) | ip->a[13]), lx((((l_ushort)ip->a[14]) << 8) | ip->a[15]));
+    break;
+  default:
+    s.s[0] = 0;
+    break;
+  }
+  return s;
 }
 
 static l_bool

@@ -216,14 +216,25 @@ typedef struct {
   l_sockaddr remote;
 } l_socketconn;
 
+#define L_IPV4_ADDR 0x01
+#define L_IPV6_ADDR 0x02
+
 typedef struct {
-  l_byte ip[64];
-} l_ipstr;
+  l_byte a[16];
+  l_ushort port;
+  l_ushort type;
+} l_ip_binary;
+
+typedef struct {
+  l_byte s[64];
+} l_ip_string;
 
 L_EXTERN l_bool l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port);
 L_EXTERN l_sockaddr l_sockaddr_local(l_socket sock);
-L_EXTERN l_ipstr l_sockaddr_getip(l_sockaddr* self);
-L_EXTERN l_ushort l_sockaddr_port(l_sockaddr* self);
+L_EXTERN l_ip_binary l_get_binary_ip(const l_sockaddr* sa);
+L_EXTERN l_ip_string l_get_string_ip_from(const l_ip_binary* ip);
+L_EXTERN l_ip_string l_get_string_ip(const l_sockaddr* sa);
+L_EXTERN l_ushort l_get_sock_port(const l_sockaddr* sa);
 L_EXTERN void l_socket_prepare();
 L_EXTERN void l_socket_accept(l_socket skt, void (*cb)(void*, l_socketconn*), void* ud);
 L_EXTERN l_socket l_socket_tcp_listen(const l_sockaddr* addr, int backlog);

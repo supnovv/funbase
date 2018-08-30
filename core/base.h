@@ -403,13 +403,12 @@ l_impl_logger_n(struct lnlylib_env* E, const void* tag, const void* s, l_int n, 
 typedef struct {
   void* out;
   l_int (*write)(void* out, const void* p, l_int n);
-  void (*flush)(void* out);
 } l_ostream;
 
 L_INLINE l_ostream
-l_ostream_from(void* out, l_int (*write)(void*, const void*, l_int), void (*flush)(void* out))
+l_ostream_from(void* out, l_int (*write)(void*, const void*, l_int))
 {
-  return (l_ostream){out, write, flush};
+  return (l_ostream){out, write};
 }
 
 L_INLINE l_int
@@ -428,13 +427,8 @@ l_ostream_write_strn(l_ostream* os, l_strn s)
   return l_ostream_write(os, s.p, s.n);
 }
 
-L_INLINE void
-l_ostream_flush(l_ostream* os)
-{
-  if (os->flush) {
-    os->flush(os->out);
-  }
-}
+L_EXTERN l_bool l_ostream_should_flush(const void* p, l_int n);
+L_EXTERN void l_ostream_flush(l_ostream* os);
 
 L_EXTERN l_ostream l_stdout_ostream();
 L_EXTERN l_ostream l_stderr_ostream();
@@ -629,6 +623,20 @@ L_EXTERN l_bool l_strbuf_nt_empty(l_strbuf* b);
 L_EXTERN l_int l_strbuf_add_path(l_strbuf* b, l_strn path);
 L_EXTERN l_int l_strbuf_end_path(l_strbuf* b, l_strn fileanme);
 L_EXTERN l_int l_strbuf_end_path_x(l_strbuf* b, l_strn name_parta, l_strn name_partb);
+
+typedef struct {
+  l_int capacity;
+  l_int size;
+  l_byte* start;
+} l_stropt;
+
+L_INLINE l_stropt
+l_get_stropt(void* buffer_start, l_int total_size, l_int cur_size)
+{
+  return (l_stropt){total_size < 0 ? 0 : total_size, cur_size < 0 ? 0 : cur_size, buffer_start};
+}
+
+L_EXTERN l_ostream l_stropt_ostream(l_stropt* b);
 
 /** variable length string **/
 
