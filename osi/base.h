@@ -230,6 +230,7 @@ typedef struct {
 } l_str_ip;
 
 L_EXTERN l_bool l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port);
+L_EXTERN l_bool l_sockaddr_init_from(l_sockaddr* sockaddr, const l_bin_ip* addr);
 L_EXTERN l_sockaddr l_sockaddr_local(l_socket sock);
 L_EXTERN l_bin_ip l_get_binary_ip(const l_sockaddr* sa);
 L_EXTERN l_str_ip l_get_string_ip_from(const l_bin_ip* ip);

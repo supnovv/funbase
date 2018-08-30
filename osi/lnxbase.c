@@ -1089,6 +1089,7 @@ l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port)
   } else {
     int retn = 0;
     l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)sockaddr;
+    l_zero_n(sa, sizeof(l_impl_lnxsaddr));
     if (l_strn_has(&ip, ':')) {
       retn = inet_pton(AF_INET6, (const char*)ip.p, &(sa->addr.sa6.sin6_addr));
       if (retn == 1) {
@@ -1098,7 +1099,7 @@ l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port)
         return true;
       }
     } else {
-      retn = inet_pton(AF_INET, (const char*)ip.p, &(sa->addr.sa6.sin6_addr));
+      retn = inet_pton(AF_INET, (const char*)ip.p, &(sa->addr.sa4.sin_addr));
       if (retn == 1) {
         sa->len = sizeof(struct sockaddr_in);
         sa->addr.sa4.sin_family = AF_INET;
@@ -1113,6 +1114,31 @@ l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port)
     }
     return false;
   }
+}
+
+L_EXTERN l_bool
+l_sockaddr_init_from(l_sockaddr* sockaddr, const l_bin_ip* addr)
+{
+  l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)sockaddr;
+  l_zero_n(sa, sizeof(l_impl_lnxsaddr));
+  switch (addr->type) {
+  case L_IPV4_ADDR:
+    sa->addr.sa4.sin_addr.s_addr = ((((l_umedit)addr->a[0]) << 24) | (((l_umedit)addr->a[1]) << 16) | (((l_umedit)addr->a[2]) << 8) | addr->a[3]);
+    sa->len = sizeof(struct sockaddr_in);
+    sa->addr.sa4.sin_port = htons(addr->port);
+    sa->addr.sa4.sin_family = AF_INET;
+    return true;
+  case L_IPV6_ADDR:
+    l_copy_n(sa->addr.sa6.sin6_addr.s6_addr, addr->a, 16);
+    sa->len = sizeof(struct sockaddr_in6);
+    sa->addr.sa6.sin6_port = htons(addr->port);
+    sa->addr.sa6.sin6_family = AF_INET6;
+    return true;
+  default:
+    l_loge_1(LNUL, "create sockaddr from invalid family %d", ld(addr->type));
+    break;
+  }
+  return false;
 }
 
 L_EXTERN l_sockaddr
