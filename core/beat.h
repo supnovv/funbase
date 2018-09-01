@@ -20,23 +20,17 @@ typedef struct l_service_access_point {
 #define L_MOVE_DATA_AUTO_FREE 0x80000000
 #define L_MOVE_DATA_DONT_FREE 0x40000000
 
-L_EXTERN void l_send_response(lnlylib_env* E, l_umedit mgid, void* data, l_umedit size);
-L_EXTERN void l_send_response_for(lnlylib_env* E, l_message* msg, l_umedit mgid, void* data, l_umedit size);
+L_EXTERN void l_respond_message(lnlylib_env* E, l_umedit mgid, void* data, l_umedit size);
+L_EXTERN void l_respond_message_for(lnlylib_env* E, l_message* msg, l_umedit mgid, void* data, l_umedit size);
 L_EXTERN void l_send_message(lnlylib_env* E, l_service_access_point* sap, l_umedit session, l_umedit mgid, void* data, l_umedit size);
 L_EXTERN void l_send_message_to(lnlylib_env* E, l_ulong dest_svid, l_umedit session, l_umedit mgid, void* data, l_umedit size);
 
 L_EXTERN l_message* l_current_message(lnlylib_env* E);
-L_EXTERN l_umedit l_current_mgid(lnlylib_env* E);
-L_EXTERN l_umedit l_current_mgss(lnlylib_env* E);
-L_EXTERN void* l_current_mgdt(lnlylib_env* E);
-L_EXTERN l_umedit l_current_mgdt_size(lnlylib_env* E);
-L_EXTERN l_ulong l_current_mgfr(lnlylib_env* E);
-
-L_EXTERN l_umedit l_mgid(l_message* msg);
-L_EXTERN l_umedit l_mgss(l_message* msg);
-L_EXTERN void* l_mgdt(l_message* msg);
-L_EXTERN l_umedit l_mgdt_size(l_message* msg);
-L_EXTERN l_ulong l_mgfr(l_message* msg);
+L_EXTERN l_umedit l_message_id(l_message* msg);
+L_EXTERN l_umedit l_message_session(l_message* msg);
+L_EXTERN void* l_message_data(l_message* msg);
+L_EXTERN l_umedit l_message_data_size(l_message* msg);
+L_EXTERN l_ulong l_message_from(l_message* msg);
 
 #define L_MSG_SUBSRVC_CREATE_RSP  (L_CORE_MSG_GR + 0x0D)
 #define L_MSG_SERVICE_FORCE_QUIT  (L_CORE_MSG_GR + 0x0E)
@@ -64,20 +58,17 @@ L_EXTERN void l_create_service(lnlylib_env* E, l_service_callback* srvc_cb, void
 L_EXTERN void l_create_event_poll_service(lnlylib_env* E, l_service_callback* srvc_cb, void* in_svud, l_filehdl hdl, l_uint creation_ctx);
 L_EXTERN void l_create_access_point(lnlylib_env* E, l_service_access_point* sap, l_ulong remote_svid, void (*access_proc)(lnlylib_env*));
 L_EXTERN void l_delete_access_point(lnlylib_env* E, l_service_access_point* sap);
+L_EXTERN void l_service_add_event(lnlylib_env* E, l_filehdl hdl);
+L_EXTERN void l_service_del_event(lnlylib_env* E);
 L_EXTERN void l_stop_service(lnlylib_env* E);
 L_EXTERN void l_stop_dest_service(lnlylib_env* E, l_ulong svid);
 
 L_EXTERN l_service* l_current_service(lnlylib_env* E);
-L_EXTERN void* l_current_svud(lnlylib_env* E);
-L_EXTERN l_ulong l_current_svid(lnlylib_env* E);
-L_EXTERN l_filehdl l_current_evhd(lnlylib_env* E);
-L_EXTERN l_ulong l_current_svfr(lnlylib_env* E);
+L_EXTERN void* l_service_udata(l_service* S);
+L_EXTERN l_ulong l_service_id(l_service* S);
+L_EXTERN l_filehdl l_service_evhdl(l_service* S);
+L_EXTERN l_ulong l_service_from(l_service* S);
 L_EXTERN l_bool l_set_service_udata(lnlylib_env* E, void* srvc_ud);
-
-L_EXTERN void* l_svud(l_service* S);
-L_EXTERN l_ulong l_svid(l_service* S);
-L_EXTERN l_filehdl l_evhd(l_service* S);
-L_EXTERN l_ulong l_svfr(l_service* S);
 
 #define L_MSG_TIMER_CREATE_RSP (L_CORE_MSG_GR + 0x1A)
 #define L_MSG_TIMER_NOTIFY_IND (L_CORE_MSG_GR + 0x1B)
