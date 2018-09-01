@@ -1208,6 +1208,18 @@ l_get_binary_ip(const l_sockaddr* addr)
   return ip;
 }
 
+L_EXTERN l_bool
+l_bin_ip_init(l_bin_ip* addr, const void* ip, l_ushort port)
+{
+  l_sockaddr sa;
+  if (l_sockaddr_init(&sa, l_strn_c(ip), port)) {
+    *addr = l_get_binary_ip(&sa);
+    return true;
+  } else {
+    return false;
+  }
+}
+
 L_EXTERN l_str_ip
 l_get_string_ip(const l_sockaddr* addr)
 {
@@ -2126,13 +2138,13 @@ l_socket_tcp_connect(const l_sockaddr* addr, l_bool* done)
 
   status = l_impl_socket_connect(sock.fd, sa);
   if (status == 0) {
-    *done = true;
+    if (done) *done = true;
     return sock;
   } else if (status == -1) {
-    *done = false;
+    if (done) *done = false;
     return sock;
   } else {
-    *done = false;
+    if (done) *done = false;
     l_socket_close(&sock);
     return l_empty_socket();
   }

@@ -208,7 +208,7 @@ L_DEFINE_STRUCT_OF_SIZE(l_ioevmgr, L_IMPL_IOEVMGR_TYPE_SIZE);
 typedef l_filehdl l_socket;
 #define l_socket_is_empty l_filehdl_is_empty
 #define l_socket_nt_empty l_filehdl_nt_empty
-#define L_EMPTY_SOCKET L_EMPTY_HDL
+#define L_EMPTY_SOCK L_EMPTY_HDL
 #define l_empty_socket l_empty_filehdl
 
 typedef struct {
@@ -231,6 +231,7 @@ typedef struct {
 
 L_EXTERN l_bool l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port);
 L_EXTERN l_bool l_sockaddr_init_from(l_sockaddr* sockaddr, const l_bin_ip* addr);
+L_EXTERN l_bool l_bin_ip_init(l_bin_ip* addr, const void* ip, l_ushort port);
 L_EXTERN l_sockaddr l_sockaddr_local(l_socket sock);
 L_EXTERN l_bin_ip l_get_binary_ip(const l_sockaddr* sa);
 L_EXTERN l_str_ip l_get_string_ip_from(const l_bin_ip* ip);
