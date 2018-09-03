@@ -1,6 +1,7 @@
 #ifndef LNLYLIB_CORE_BEAT_H
 #define LNLYLIB_CORE_BEAT_H
 #include "core/base.h"
+#include "osi/base.h"
 
 typedef struct lnlylib_env lnlylib_env;
 typedef struct l_service l_service;
@@ -10,9 +11,9 @@ L_EXTERN int lnlylib_main(int (*start)(lnlylib_env*), int argc, char** argv);
 
 typedef struct l_service_access_point {
   l_smplnode node;
-  l_ulong remote_svid;
+  l_ulong peer_svid;
+  struct l_service_access_point* peer_apid;
   void (*access_proc)(lnlylib_env*);
-  struct l_service_access_point* remote_apid;
 } l_service_access_point;
 
 #define L_CORE_MSG_GR (0x00 << 8)
@@ -25,7 +26,15 @@ L_EXTERN void l_respond_message_for(lnlylib_env* E, l_message* msg, l_umedit mgi
 L_EXTERN void l_send_message(lnlylib_env* E, l_service_access_point* sap, l_umedit session, l_umedit mgid, void* data, l_umedit size);
 L_EXTERN void l_send_message_to(lnlylib_env* E, l_ulong dest_svid, l_umedit session, l_umedit mgid, void* data, l_umedit size);
 
+#define L_CURRENT_MESSAGE_DATA(E, type) ((type*)l_current_message_data(E))
+#define L_MESSAGE_DATA(msg, type) ((type*)l_message_data(msg))
+
 L_EXTERN l_message* l_current_message(lnlylib_env* E);
+L_EXTERN l_umedit l_current_message_id(lnlylib_env* E);
+L_EXTERN l_umedit l_current_message_session(lnlylib_env* E);
+L_EXTERN void* l_current_message_data(lnlylib_env* E);
+L_EXTERN l_umedit l_current_message_data_size(lnlylib_env* E);
+L_EXTERN l_ulong l_current_message_from(lnlylib_env* E);
 L_EXTERN l_umedit l_message_id(l_message* msg);
 L_EXTERN l_umedit l_message_session(l_message* msg);
 L_EXTERN void* l_message_data(l_message* msg);
@@ -56,14 +65,21 @@ L_EXTERN void l_empty_service_proc(lnlylib_env* E);
 
 L_EXTERN void l_create_service(lnlylib_env* E, l_service_callback* srvc_cb, void* in_svud, l_uint creation_ctx);
 L_EXTERN void l_create_event_poll_service(lnlylib_env* E, l_service_callback* srvc_cb, void* in_svud, l_filehdl hdl, l_uint creation_ctx);
-L_EXTERN void l_create_access_point(lnlylib_env* E, l_service_access_point* sap, l_ulong remote_svid, void (*access_proc)(lnlylib_env*));
+L_EXTERN void l_create_access_point(lnlylib_env* E, l_service_access_point* sap, l_ulong peer_svid, void (*access_proc)(lnlylib_env*));
 L_EXTERN void l_delete_access_point(lnlylib_env* E, l_service_access_point* sap);
 L_EXTERN void l_service_add_event(lnlylib_env* E, l_filehdl hdl);
 L_EXTERN void l_service_del_event(lnlylib_env* E);
 L_EXTERN void l_stop_service(lnlylib_env* E);
 L_EXTERN void l_stop_dest_service(lnlylib_env* E, l_ulong svid);
 
+#define L_CURRENT_SERVICE_UDATA(E, type) ((type*)l_current_service_udata(E))
+#define L_SERVICE_UDATA(S, type) ((type*)l_service_udata(S))
+
 L_EXTERN l_service* l_current_service(lnlylib_env* E);
+L_EXTERN void* l_current_service_udata(lnlylib_env* E);
+L_EXTERN l_ulong l_current_service_id(lnlylib_env* E);
+L_EXTERN l_filehdl l_current_service_evhdl(lnlylib_env* E);
+L_EXTERN l_ulong l_current_service_from(lnlylib_env* E);
 L_EXTERN void* l_service_udata(l_service* S);
 L_EXTERN l_ulong l_service_id(l_service* S);
 L_EXTERN l_filehdl l_service_evhdl(l_service* S);

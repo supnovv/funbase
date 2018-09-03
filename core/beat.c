@@ -8,7 +8,6 @@
 #include <float.h>
 #include "core/beat.h"
 #include "core/lapi.h"
-#include "osi/base.h"
 
 #define L_THREAD_MASTER 1000
 #define L_THREAD_OTHERS 2001
@@ -371,7 +370,7 @@ static void l_master_stop_service(l_master* M, l_ulong srvc_id);
 static void l_master_destroy_service(l_master* M, l_ulong srvc_id);
 static void l_master_free_service_slot(l_master* M, l_srvcslot* slot, l_service* S);
 static void l_service_add_access_point(lnlylib_env* E, l_service* S, l_service_access_point* sap);
-static l_service_access_point* l_service_find_access_point(lnlylib_env* E, l_service* S, l_ulong remote_svid);
+static l_service_access_point* l_service_find_access_point(lnlylib_env* E, l_service* S, l_ulong peer_svid);
 
 struct l_timer_create_req;
 static void l_master_create_timer(l_master* M, struct l_timer_create_req* req);
@@ -1479,6 +1478,9 @@ l_worker_loop(lnlylib_env* E)
         call = (l_timer_func_call*)MSG->mssg_data;
         call->func(E, call->parm);
         break;
+      case L_MSG_SUBSRVC_CREATE_RSP:
+        S->srvc_cb->service_proc(E);
+        break;
       default:
         if (S->svap_tbl == 0) {
           S->srvc_cb->service_proc(E);
@@ -1489,10 +1491,10 @@ l_worker_loop(lnlylib_env* E)
           break;
         }
         if (MSG->from_apid) {
-          if (sap->remote_apid) {
-            l_logw_2(E, "remote apid is changed from %p to %p", lp(sap->remote_apid), lp(MSG->from_apid));
+          if (sap->peer_apid) {
+            l_logw_2(E, "remote apid is changed from %p to %p", lp(sap->peer_apid), lp(MSG->from_apid));
           }
-          sap->remote_apid = MSG->from_apid;
+          sap->peer_apid = MSG->from_apid;
         }
         sap->access_proc(E);
         break;
@@ -1846,7 +1848,7 @@ l_respond_message_for(lnlylib_env* E, l_message* msg, l_umedit mgid, void* data,
 L_EXTERN void
 l_send_message(lnlylib_env* E, l_service_access_point* sap, l_umedit session, l_umedit mgid, void* data, l_umedit size)
 {
-  l_send_message_to_dest(E, sap->remote_svid, sap->remote_apid, sap, session, mgid, data, size);
+  l_send_message_to_dest(E, sap->peer_svid, sap->peer_apid, sap, session, mgid, data, size);
 }
 
 static void
@@ -2120,15 +2122,15 @@ l_svaptable_add_impl(lnlylib_env* E, l_svaptable* svap_tbl, l_service_access_poi
 {
   l_smplnode* node = 0;
   l_smplnode* slot_arr = svap_tbl->slot_arr;
-  l_ulong remote_svid = sap->remote_svid;
+  l_ulong peer_svid = sap->peer_svid;
 
-  node = slot_arr + (remote_svid & (svap_tbl->capacity - 1));
-  while (node->next && remote_svid < ((l_service_access_point*)node->next)->remote_svid) {
+  node = slot_arr + (peer_svid & (svap_tbl->capacity - 1));
+  while (node->next && peer_svid < ((l_service_access_point*)node->next)->peer_svid) {
     node = node->next;
   }
 
-  if (remote_svid == ((l_service_access_point*)node->next)->remote_svid) {
-    l_loge_1(E, "create multiple access point for remote %svid, ignoring it", lx(remote_svid));
+  if (peer_svid == ((l_service_access_point*)node->next)->peer_svid) {
+    l_loge_1(E, "create multiple access point for remote %svid, ignoring it", lx(peer_svid));
     return;
   }
 
@@ -2202,21 +2204,21 @@ l_svaptable_create(lnlylib_env* E, l_service* S, l_service_access_point* sap)
 static l_service_access_point*
 l_service_del_access_point(lnlylib_env* E, l_service* S, l_service_access_point* sap)
 {
-  l_ulong remote_svid = sap->remote_svid;
+  l_ulong peer_svid = sap->peer_svid;
   l_svaptable* svap_tbl = S->svap_tbl;
   l_smplnode* slot_arr = svap_tbl->slot_arr;
   l_smplnode* node = 0;
 
-  node = slot_arr + (remote_svid & (svap_tbl->capacity - 1));
+  node = slot_arr + (peer_svid & (svap_tbl->capacity - 1));
 
-  for (; node->next && remote_svid <= ((l_service_access_point*)node->next)->remote_svid; node = node->next) {
-    if (remote_svid == ((l_service_access_point*)node->next)->remote_svid) {
+  for (; node->next && peer_svid <= ((l_service_access_point*)node->next)->peer_svid; node = node->next) {
+    if (peer_svid == ((l_service_access_point*)node->next)->peer_svid) {
       svap_tbl->size -= 1;
       return (l_service_access_point*)l_smplnode_remove_next(node);
     }
   }
 
-  l_loge_2(E, "cannot remove %svid access point for %svid", lx(E->S->srvc_id), lx(remote_svid));
+  l_loge_2(E, "cannot remove %svid access point for %svid", lx(E->S->srvc_id), lx(peer_svid));
   return 0;
 }
 
@@ -2231,16 +2233,16 @@ l_service_add_access_point(lnlylib_env* E, l_service* S, l_service_access_point*
 }
 
 static l_service_access_point*
-l_service_find_access_point(lnlylib_env* E, l_service* S, l_ulong remote_svid)
+l_service_find_access_point(lnlylib_env* E, l_service* S, l_ulong peer_svid)
 {
   l_svaptable* svap_tbl = S->svap_tbl;
   l_smplnode* slot_arr = svap_tbl->slot_arr;
   l_smplnode* cur_node = 0;
 
-  cur_node = slot_arr[remote_svid & (svap_tbl->capacity - 1)].next;
+  cur_node = slot_arr[peer_svid & (svap_tbl->capacity - 1)].next;
 
-  for (; cur_node && remote_svid <= ((l_service_access_point*)cur_node)->remote_svid; cur_node = cur_node->next) {
-    if (remote_svid == ((l_service_access_point*)cur_node)->remote_svid) {
+  for (; cur_node && peer_svid <= ((l_service_access_point*)cur_node)->peer_svid; cur_node = cur_node->next) {
+    if (peer_svid == ((l_service_access_point*)cur_node)->peer_svid) {
       return (l_service_access_point*)cur_node;
     }
   }
@@ -2257,15 +2259,15 @@ l_create_access_point(lnlylib_env* E, l_service_access_point* sap, l_ulong dest_
   . it is receiver's responsibilty to map or not map the message to right access point, so we need a way to mark current service is a multi access service or not
   . the sender may not carry the dest access point info, like notification messages (i.e. send from server to client without a client request **/
 
-  if (sap->remote_svid) {
-    l_loge_1(E, "current sap already exist for remote %svid", lx(sap->remote_svid));
+  if (sap->peer_svid) {
+    l_loge_1(E, "current sap already exist for peer %svid", lx(sap->peer_svid));
   } else if (l_service_get_slot_index(dest_svid) <= L_SRVC_MAX_CORE_SVID || dest_svid == E->S->srvc_id) {
     l_loge_1(E, "cannot create access point to service %svid", lx(dest_svid));
   } else {
     l_service* S = E->S;
-    sap->remote_svid = dest_svid;
+    sap->peer_svid = dest_svid;
+    sap->peer_apid = 0;
     sap->access_proc = access_proc;
-    sap->remote_apid = 0;
     l_service_add_access_point(E, S, sap);
   }
 }
@@ -2273,9 +2275,9 @@ l_create_access_point(lnlylib_env* E, l_service_access_point* sap, l_ulong dest_
 L_EXTERN void
 l_delete_access_point(lnlylib_env* E, l_service_access_point* sap)
 {
-  if (sap->remote_svid) {
+  if (sap->peer_svid) {
     l_service_del_access_point(E, E->S, sap);
-    sap->remote_svid = 0;
+    sap->peer_svid = 0;
   }
 }
 
@@ -2996,7 +2998,7 @@ l_master_check_timers(l_master* M)
 /** socket service **/
 
 typedef struct {
-  l_service_callback* response_service_callback;
+  l_service_callback* accept_service_callback;
   l_uint creation_ctx;
   l_bin_ip local;
   l_umedit conns;
@@ -3010,7 +3012,7 @@ typedef struct {
   const void* local_ip;
   l_ushort local_port;
   l_ushort flags;
-  l_service_callback* response_service_callback;
+  l_service_callback* accept_service_callback;
 } l_socket_listen_service_create_req;
 
 static l_bool l_socket_listen_service_on_create(lnlylib_env* E);
@@ -3025,15 +3027,10 @@ l_socket_listen_service_callback = {
 };
 
 L_EXTERN void
-l_create_tcp_listen_service(lnlylib_env* E, const void* local_ip, l_ushort local_port, l_service_callback* response_service_callback, l_uint creation_ctx)
+l_create_tcp_listen_service(lnlylib_env* E, const void* local_ip, l_ushort local_port, l_service_callback* accept_service_callback, l_uint creation_ctx)
 {
-  l_service* S = E->S;
-  if ((S->srvc_id >> 32) == L_SERVICE_BOOTER) {
-    l_socket_listen_service_create_req req = {{&l_socket_listen_service_callback, 0, creation_ctx, 0, L_EMPTY_HDL}, local_ip, local_port, 0, response_service_callback};
-    l_send_message_to_master(E, L_MSG_SERVICE_CREATE_REQ, &req, sizeof(l_socket_listen_service_create_req));
-  } else {
-    l_loge_1(E, "cannot create listen service in non-booter %svid", lx(S->srvc_id));
-  }
+  l_socket_listen_service_create_req req = {{&l_socket_listen_service_callback, 0, creation_ctx, 0, L_EMPTY_HDL}, local_ip, local_port, 0, accept_service_callback};
+  l_send_message_to_master(E, L_MSG_SERVICE_CREATE_REQ, &req, sizeof(l_socket_listen_service_create_req));
 }
 
 L_EXTERN void
@@ -3105,7 +3102,7 @@ l_socket_listen_service_on_create(lnlylib_env* E)
   listen = L_MALLOC_TYPE(E, l_socket_listen_service);
   local = l_sockaddr_local(sock);
   listen->local = l_get_binary_ip(&local);
-  listen->response_service_callback = req->response_service_callback;
+  listen->accept_service_callback = req->accept_service_callback;
   listen->creation_ctx = req->head.creation_ctx;
   listen->conns = 0;
   listen->flags = 0;
@@ -3389,13 +3386,13 @@ l_socket_data_service_proc(lnlylib_env* E)
 
   switch (msg->mssg_id) {
   case L_MSG_SOCK_CONN_NTF: /* from listen service, a incoming connection established, create a user response service to handle it */
-    l_create_service(E, data_srvc->listen->response_service_callback, 0, 0);
+    l_create_service(E, data_srvc->listen->accept_service_callback, 0, 0);
     break;
   case L_MSG_SUBSRVC_CREATE_RSP: {
     l_subsrvc_create_rsp* rsp = (l_subsrvc_create_rsp*)msg->mssg_data;
     if (rsp->srvc_id) {
       /* user response service created success */
-      l_subsrvc_create_rsp new_rsp = {S->srvc_id, data_srvc, data_srvc->listen->response_service_callback, data_srvc->listen->creation_ctx, L_EMPTY_HDL};
+      l_subsrvc_create_rsp new_rsp = {S->srvc_id, data_srvc, data_srvc->listen->accept_service_callback, data_srvc->listen->creation_ctx, L_EMPTY_HDL};
       l_sock_ready_ntf ntf = {S->srvc_id, data_srvc};
 
       data_srvc->user_svid = rsp->srvc_id;
