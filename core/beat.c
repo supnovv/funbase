@@ -18,6 +18,7 @@
 #define L_SRVC_FLAG_SERVICE_STOP    0x0004
 #define L_SRVC_FLAG_SERVICE_DESTROY 0x0008
 #define L_SRVC_FLAG_SERVICE_RESTART 0x0010
+#define L_SRVC_FLAG_CREATE_REPORTED 0x0020
 #define L_SRVC_FLAG_SOCK_LISTEN     0x0100
 #define L_SRVC_FLAG_EVENT_ADDED     0x0200
 #define L_SRVC_FLAG_EVENT_MASKS     0x0300
@@ -29,6 +30,7 @@
 
 #define L_WORK_FLAG_PROGRAM_EXIT 0x01
 #define L_FREE_IN_SVUD_ON_FAIL 0x01
+#define L_DONT_AUTO_RSP_ON_SUCCESS 0x02
 
 #define L_SRVC_MIN_TABLE_SIZE 512
 #define L_SRVC_MIN_USER_SVID 256
@@ -44,6 +46,9 @@
 #define L_TIMER_IMMED_FIRED_ID 0x0f
 #define L_TIMER_MIN_VALID_TMID 0x0f
 
+/* REQ is sent from client to server and requires server RSP. CMD is sent from client to server, no response.
+   IND is sent from server to client and requires client CNF, NTF is sent from server to client, no response. */
+
 #define L_MSG_MIN_USER_MSG_ID        0xff
 #define L_MSG_SERVICE_CREATE_REQ     0x01
 #define L_MSG_SERVICE_ON_CREATE      0x02
@@ -56,7 +61,7 @@
 #define L_MSG_SERVICE_ROUND_FIN      0x09
 #define L_MSG_PROGRAM_EXIT_REQ       0x0A
 #define L_MSG_PROGRAM_EXIT_RSP       0x0B
-#define L_MSG_SUBSRVC_CREATE_RSP     (L_CORE_MSG_GR + 0x0D)
+#define L_MSG_SERVICE_CREATE_RSP     (L_CORE_MSG_GR + 0x0D)
 #define L_MSG_SERVICE_FORCE_QUIT     (L_CORE_MSG_GR + 0x0E)
 #define L_MSG_SERVICE_RESTART_CMD    (L_CORE_MSG_GR + 0x0F)
 
@@ -305,6 +310,7 @@ typedef struct l_service {
   struct l_svaptable* svap_tbl;
   l_service_callback* srvc_cb;
   void* srvc_ud;
+  void* p_extra;
 } l_service;
 
 typedef struct {
@@ -363,6 +369,7 @@ static void l_master_send_message_to_service(l_master* M, l_ulong dest_svid, l_u
 static l_message* l_create_message(lnlylib_env* E, l_ulong dest_svid, l_umedit mgid, void* data, l_umedit size);
 static void l_send_message_impl(lnlylib_env* E, l_ulong dest_svid, l_umedit mgid, void* data, l_umedit size);
 static void l_message_free_data(lnlylib_env* E, l_message* msg);
+static void l_release_message(lnlylib_env* E, l_message* msg);
 
 static l_medit l_service_get_slot_index(l_ulong svid);
 static l_service* l_master_create_service(l_master* M, l_medit svid, l_service_callback* srvc_cb, l_filehdl hdl);
@@ -608,6 +615,7 @@ l_service_init(l_service* S, l_medit svid, l_umedit seed)
   S->svap_tbl = 0;
   S->srvc_cb = 0;
   S->srvc_ud = 0;
+  S->p_extra = 0;
 }
 
 static void
@@ -1019,15 +1027,17 @@ l_master_handle_messages(l_master* M, l_squeue* txms)
         /* service create success message reported after on_create */
         S->from_id = msg->from_svid;
         S->srvc_ud = req->in_svud;
-        l_master_send_message_to_service(M, S->srvc_id, L_MSG_SERVICE_ON_CREATE, msg->mssg_data, msg->data_size);
+        S->p_extra = msg;
+        msg->mssg_flags |= L_MSSG_FLAG_DONT_AUTO_FREE;
+        l_master_send_message_to_service(M, S->srvc_id, L_MSG_SERVICE_ON_CREATE, 0, 0);
       } else {
         /* report service create failed */
-        l_subsrvc_create_rsp rsp = {0, 0, req->in_svud, req->creation_ctx, req->hdl};
+        l_service_create_rsp rsp = {0, 0, req->in_svud, req->creation_ctx, req->hdl};
         if (req->creation_flags & L_FREE_IN_SVUD_ON_FAIL) {
           l_mfree(M->E, req->in_svud);
           rsp.in_svud = 0;
         }
-        l_master_send_message_to_service(M, msg->from_svid, L_MSG_SUBSRVC_CREATE_RSP, &rsp, sizeof(l_subsrvc_create_rsp));
+        l_master_send_message_to_service(M, msg->from_svid, L_MSG_SERVICE_CREATE_RSP, &rsp, sizeof(l_service_create_rsp));
       }}
       break;
     case L_MSG_SERVICE_ADD_LISTEN_CMD: {
@@ -1104,8 +1114,7 @@ l_master_handle_messages(l_master* M, l_squeue* txms)
       break;
     }
 
-    l_message_free_data(M->E, msg);
-    l_squeue_push(M->mast_frmq, &msg->node);
+    l_release_message(M->E, msg);
   }
 }
 
@@ -1226,7 +1235,7 @@ l_master_loop(lnlylib_env* main_env)
         l_condv_broadcast(QCNDV);
       }
     } else {
-      l_thread_sleep_ms(1);
+      l_thread_sleep_us(100);
     }
 
     l_master_update_time(M);
@@ -1389,22 +1398,6 @@ l_worker_send_exit_rsp(lnlylib_env* E)
   l_worker_to_master_message(W, msg);
 }
 
-static void
-l_release_message(lnlylib_env* E, l_message* msg)
-{
-  if (msg->mssg_flags & L_MSSG_FLAG_DONT_AUTO_FREE) {
-    msg->mssg_flags &= (~L_MSSG_FLAG_DONT_AUTO_FREE);
-  } else {
-    l_message_free_data(E, msg);
-    if (E->T == &L_MASTER->T) {
-      l_squeue_push(L_MASTER->mast_frmq, &msg->node);
-    } else {
-      l_worker* W = (l_worker*)E->T;
-      l_squeue_push(W->work_frmq, &msg->node);
-    }
-  }
-}
-
 static int
 l_worker_loop(lnlylib_env* E)
 {
@@ -1418,7 +1411,6 @@ l_worker_loop(lnlylib_env* E)
 
   l_timer_func_call* call = 0;
   l_service_access_point* sap = 0;
-  l_service_create_req* create_req = 0;
 
   l_logm_1(E, "worker %d started", ld(W->T.thridx));
 
@@ -1449,23 +1441,10 @@ l_worker_loop(lnlylib_env* E)
       E->MSG = MSG;
       switch (MSG->mssg_id) {
       case L_MSG_SERVICE_ON_CREATE:
-        create_req = (l_service_create_req*)MSG->mssg_data;
         if (S->srvc_cb->on_create(E)) {
-          /* report service create success */
-          if (S->from_id) {
-            l_subsrvc_create_rsp rsp = {S->srvc_id, S->srvc_ud, create_req->in_svud, create_req->creation_ctx, create_req->hdl};
-            l_send_message_impl(E, S->from_id, L_MSG_SUBSRVC_CREATE_RSP, &rsp, sizeof(l_subsrvc_create_rsp));
-          }
+          l_report_service_created(E, true);
         } else {
-          /* report service create fail */
-          if (S->from_id) {
-            l_subsrvc_create_rsp rsp = {0, 0, create_req->in_svud, create_req->creation_ctx, create_req->hdl};
-            if (create_req->creation_flags & L_FREE_IN_SVUD_ON_FAIL) {
-              l_mfree(E, create_req->in_svud);
-              rsp.in_svud = 0;
-            }
-            l_send_message_impl(E, S->from_id, L_MSG_SUBSRVC_CREATE_RSP, &rsp, sizeof(l_subsrvc_create_rsp));
-          }
+          l_report_service_created(E, false);
           /* service create fail, destroy it */
           S->srvc_flags |= L_SRVC_FLAG_SERVICE_DESTROY;
         }
@@ -1478,7 +1457,7 @@ l_worker_loop(lnlylib_env* E)
         call = (l_timer_func_call*)MSG->mssg_data;
         call->func(E, call->parm);
         break;
-      case L_MSG_SUBSRVC_CREATE_RSP:
+      case L_MSG_SERVICE_CREATE_RSP:
         S->srvc_cb->service_proc(E);
         break;
       default:
@@ -1865,6 +1844,22 @@ l_message_free_data(lnlylib_env* E, l_message* msg)
   msg->mssg_data = 0;
 }
 
+static void
+l_release_message(lnlylib_env* E, l_message* msg)
+{
+  if (msg->mssg_flags & L_MSSG_FLAG_DONT_AUTO_FREE) {
+    msg->mssg_flags &= (~L_MSSG_FLAG_DONT_AUTO_FREE);
+  } else {
+    l_message_free_data(E, msg);
+    if (E->T == &L_MASTER->T) {
+      l_squeue_push(L_MASTER->mast_frmq, &msg->node);
+    } else {
+      l_worker* W = (l_worker*)E->T;
+      l_squeue_push(W->work_frmq, &msg->node);
+    }
+  }
+}
+
 /** lua message handling **/
 
 #if 0
@@ -2001,6 +1996,12 @@ l_current_service(lnlylib_env* E)
   return E->S;
 }
 
+L_EXTERN l_message*
+l_current_create_req_message(lnlylib_env* E)
+{
+  return l_get_create_req_message(E->S);
+}
+
 L_EXTERN l_bool
 l_set_service_udata(lnlylib_env* E, void* srvc_ud)
 {
@@ -2017,7 +2018,6 @@ l_set_service_udata(lnlylib_env* E, void* srvc_ud)
   }
   return true;
 }
-
 
 L_EXTERN void*
 l_service_udata(l_service* S)
@@ -2500,8 +2500,8 @@ l_create_service(lnlylib_env* E, l_service_callback* srvc_cb, void* in_svud, l_u
 {
   if (srvc_cb == 0) {
     l_loge_s(E, "cannot create service with empty callback");
-    l_subsrvc_create_rsp rsp = {0, 0, in_svud, creation_ctx, L_EMPTY_HDL};
-    l_send_message_to_self(E, L_MSG_SUBSRVC_CREATE_RSP, &rsp, sizeof(l_subsrvc_create_rsp));
+    l_service_create_rsp rsp = {0, 0, in_svud, creation_ctx, L_EMPTY_HDL};
+    l_send_message_to_self(E, L_MSG_SERVICE_CREATE_RSP, &rsp, sizeof(l_service_create_rsp));
   } else {
     l_service_create_req req = {srvc_cb, in_svud, creation_ctx, 0, L_EMPTY_HDL};
     l_send_message_to_master(E, L_MSG_SERVICE_CREATE_REQ, &req, sizeof(l_service_create_req));
@@ -2513,12 +2513,64 @@ l_create_event_poll_service(lnlylib_env* E, l_service_callback* srvc_cb, void* i
 {
   if (srvc_cb == 0 || l_filehdl_is_empty(&hdl)) {
     l_loge_s(E, "cannot create service with empty callback");
-    l_subsrvc_create_rsp rsp = {0, 0, in_svud, creation_ctx, hdl};
-    l_send_message_to_self(E, L_MSG_SUBSRVC_CREATE_RSP, &rsp, sizeof(l_subsrvc_create_rsp));
+    l_service_create_rsp rsp = {0, 0, in_svud, creation_ctx, hdl};
+    l_send_message_to_self(E, L_MSG_SERVICE_CREATE_RSP, &rsp, sizeof(l_service_create_rsp));
   } else {
     l_service_create_req req = {srvc_cb, in_svud, creation_ctx, 0, hdl};
     l_send_message_to_master(E, L_MSG_SERVICE_CREATE_REQ, &req, sizeof(l_service_create_req));
   }
+}
+
+L_EXTERN l_message*
+l_get_create_req_message(l_service* S)
+{
+  if (S->srvc_flags & L_SRVC_FLAG_CREATE_REPORTED) {
+    return 0;
+  } else {
+    return (l_message*)S->p_extra;
+  }
+}
+
+L_EXTERN void
+l_report_service_created(lnlylib_env* E, l_bool success)
+{
+  l_service* S = E->S;
+  l_message* create_req_msg = (l_message*)S->p_extra;
+  l_service_create_req* req = 0;
+
+  if (S->srvc_flags & L_SRVC_FLAG_CREATE_REPORTED) {
+    return;
+  }
+
+  S->srvc_flags |= L_SRVC_FLAG_CREATE_REPORTED;
+
+  if (create_req_msg == 0) {
+    return;
+  }
+
+  req = (l_service_create_req*)create_req_msg->mssg_data;
+
+  if (success) {
+    if (req->creation_flags & L_DONT_AUTO_RSP_ON_SUCCESS) {
+      req->creation_flags &= (~L_DONT_AUTO_RSP_ON_SUCCESS);
+      S->srvc_flags &= (~L_SRVC_FLAG_CREATE_REPORTED);
+      return;
+    } else {
+      l_service_create_rsp rsp = {S->srvc_id, S->srvc_ud, req->in_svud, req->creation_ctx, req->hdl};
+      l_send_message_impl(E, create_req_msg->from_svid, L_MSG_SERVICE_CREATE_RSP, &rsp, sizeof(l_service_create_rsp));
+    }
+  } else {
+    l_service_create_rsp rsp = {0, 0, req->in_svud, req->creation_ctx, req->hdl};
+    if ((req->creation_flags & L_FREE_IN_SVUD_ON_FAIL) && req->in_svud) {
+      l_mfree(E, req->in_svud);
+      rsp.in_svud = req->in_svud = 0;
+    }
+    l_send_message_impl(E, create_req_msg->from_svid, L_MSG_SERVICE_CREATE_RSP, &rsp, sizeof(l_service_create_rsp));
+  }
+
+  l_assert(E, (create_req_msg->mssg_flags & L_MSSG_FLAG_DONT_AUTO_FREE) == 0);
+  l_release_message(E, create_req_msg);
+  S->p_extra = 0;
 }
 
 L_EXTERN void
@@ -3078,7 +3130,7 @@ l_socket_data_service_callback = {
 static l_bool
 l_socket_listen_service_on_create(lnlylib_env* E)
 {
-  l_message* msg = E->MSG;
+  l_message* msg = l_current_create_req_message(E);
   l_socket_listen_service_create_req* req = 0;
   l_socket_listen_service* listen = 0;
   l_socket sock;
@@ -3168,7 +3220,7 @@ l_create_tcp_connect_service(lnlylib_env* E, const void* ip, l_ushort port, l_ui
     data_srvc->user_svid = E->S->srvc_id;
     l_squeue_init(&data_srvc->wrmq);
     l_squeue_init(&data_srvc->rdmq); {
-    l_service_create_req req = {&l_socket_data_service_callback, data_srvc, creation_ctx, L_FREE_IN_SVUD_ON_FAIL, L_EMPTY_HDL};
+    l_service_create_req req = {&l_socket_data_service_callback, data_srvc, creation_ctx, L_FREE_IN_SVUD_ON_FAIL | L_DONT_AUTO_RSP_ON_SUCCESS, L_EMPTY_HDL};
     l_send_message_to_master(E, L_MSG_SERVICE_CREATE_REQ, &req, sizeof(l_service_create_req));
   }}
 }
@@ -3176,11 +3228,6 @@ l_create_tcp_connect_service(lnlylib_env* E, const void* ip, l_ushort port, l_ui
 typedef struct {
   l_socket_data_service* data_srvc;
 } l_sock_disc_cmd;
-
-typedef struct {
-  l_ulong srvc_id;
-  l_socket_data_service* srvc_ud;
-} l_sock_ready_ntf;
 
 typedef struct {
   l_ulong sock_svid;
@@ -3200,9 +3247,9 @@ l_socket_listen_service_proc(lnlylib_env* E)
   case L_MSG_SOCK_ACCEPT_IND: /* from master */
     l_socket_accept(S->ioev_hdl, l_socket_listen_service_accept_conn, E);
     break;
-  case L_MSG_SUBSRVC_CREATE_RSP: {
-    l_subsrvc_create_rsp* rsp = 0;
-    rsp = (l_subsrvc_create_rsp*)msg->mssg_data;
+  case L_MSG_SERVICE_CREATE_RSP: {
+    l_service_create_rsp* rsp = 0;
+    rsp = (l_service_create_rsp*)msg->mssg_data;
     data_srvc = (l_socket_data_service*)rsp->in_svud;
     if (rsp->srvc_id) {
       /* service data service is created successfully */
@@ -3249,22 +3296,12 @@ typedef struct {
 } l_socket_read_req;
 
 typedef struct {
-  l_uint read_id;
-  l_int size;
-} l_socket_read_rsp;
-
-typedef struct {
   l_ulong from_svid;
   l_uint write_id;
   const l_byte* start;
   const l_byte* buffer_end;
   const l_byte* cur_pos;
 } l_socket_write_req;
-
-typedef struct {
-  l_uint write_id;
-  l_int size;
-} l_socket_write_rsp;
 
 L_EXTERN void
 l_send_socket_read_req(lnlylib_env* E, l_ulong sock_svid, void* buffer, l_int maxlen, l_int min_read, l_uint read_id)
@@ -3285,6 +3322,18 @@ l_send_socket_write_req(lnlylib_env* E, l_ulong sock_svid, const void* data, l_i
     l_socket_write_req req = {E->S->srvc_id, write_id, data, data + size, data};
     l_send_message_to(E, sock_svid, 0, L_MSG_SOCK_WRITE_REQ, &req, sizeof(l_socket_write_req));
   }
+}
+
+L_EXTERN void
+l_send_socket_recover_req(lnlylib_env* E, l_ulong sock_svid)
+{
+  l_send_message_to(E, sock_svid, 0, L_MSG_SOCK_RECOVER_REQ, 0, 0);
+}
+
+L_EXTERN void
+l_send_socket_close_cmd(lnlylib_env* E, l_ulong sock_svid)
+{
+  l_send_message_to(E, sock_svid, 0, L_MSG_SOCK_CLOSE_CMD, 0, 0);
 }
 
 static l_bool
@@ -3332,101 +3381,59 @@ l_socket_data_service_on_destroy(lnlylib_env* E)
 static void
 l_socket_data_service_proc(lnlylib_env* E)
 {
-  /** related messages **
-  REQ is sent from client to server and requires server RSP. CMD is sent from client to server, no response.
-  IND is sent from server to client and requires client CNF, NTF is sent from server to client, no response.
-  (1) socket user service
-  [RX] L_MSG_SOCK_READY_NTF (all these are freom socket data txrx service)
-       L_MSG_SOCK_READ_RSP
-       L_MSG_SOCK_WRITE_RSP
-       L_MSG_SOCK_BAD_STATE_NTF
-       L_MSG_SOCK_RECOVER_RSP
-  [TX] L_MSG_SOCK_DATA_RX_REQ     <- l_socket_service_read(sock_srvc)
-       L_MSG_SOCK_DATA_TX_REQ     <- l_socket_service_write(sock_svrc)
-       L_MSG_SOCK_RECOVER_REQ     <- l_socket_service_recover(sock_srvc)
-       L_MSG_SOCK_CLOSE_CMD       <- l_socket_service_close(sock_srvc)
-       L_MSG_STOP_SKLS_CMD        <- l_stop_listen_server(E)
-  (2) socket data txrx service
-  [RX] L_MSG_SOCK_CONN_NTF (from listen server after incoming connection accepted)
-       L_MSG_SOCK_CONN_RSP (from master after initiated connection established)
-       L_MSG_SOCK_READY_TX (these are common socket messages from master)
-       L_MSG_SOCK_READY_RX
-       L_MSG_SOCK_DISC_NTF
-       L_MSG_SOCK_ERROR_NTF
-       L_MSG_SOCK_DATA_TX_REQ (these are from user service)
-       L_MSG_SOCK_DATA_RX_REQ
-       L_MSG_SOCK_RECOVER_REQ
-       L_MSG_SOCK_CLOSE_CMD
-       L_MSG_STOP_SKLS_CMD
-  [TX] L_MSG_SOCK_DISC_CMD (these are sent to listen server)
-       L_MSG_STOP_SKLS_CMD
-       L_MSG_SOCK_READY_NTF (these are sent to user service)
-       L_MSG_SOCK_BAD_STATE_NTF
-       L_MSG_SOCK_WRITE_RSP
-       L_MSG_SOCK_READ_RSP
-       L_MSG_SOCK_RECOVER_RSP
-  (3) socket listen server service
-  [RX] L_MSG_SOCK_ACCEPT_IND (from master when a connection incoming)
-       L_MSG_SOCK_ERROR_NTF (from master when socket error)
-  ----
-  flow for incoming socket connection
-       1. user pass inconn cb to service (3) via svud on create
-       2. service (3) get inconn cb and replace svud to its real svud on create
-       3. when (3) received L_MSG_SOCK_ACCEPT_IND, it creates a service (2) for each connection incoming
-       4. when the service created success, (3) send L_MSG_SOCK_CONN_NTF to it
-       5. when service (2) received L_MSG_SOCK_CONN_NTF, it create a service (1) to handle user logic (i.e. inconn cb)
-       6. if the user service created success, (2) send L_MSG_SOCK_READY_NTF to it
-       7. if created failed, (2) is no need to exist, send L_MSG_SOCK_DISC_CMD to (3) to release connection and destroy itself
-       8. now, service (1) can tx/rx socket data via socket service (2), and if needed, (1) can also create outconn socket services
-  **/
-
   l_service* S = E->S;
   l_message* msg = E->MSG;
   l_socket_data_service* data_srvc = (l_socket_data_service*)E->svud;
 
   switch (msg->mssg_id) {
-  case L_MSG_SOCK_CONN_NTF: /* from listen service, a incoming connection established, create a user response service to handle it */
+  /** Socket Data Service for socket listen
+   *  after listen socket service accepted a connection:
+   *  1. create a socket data service and wait service create success
+   *  2. send L_MSG_SOCK_CONN_NTF to this socket data service
+   *  3. socket data service create a user service and wait user service create sucess
+   *  4. send L_MSG_SERVICE_CREATE_RSP to user service say socket data service created success
+   *  5. send L_SOCK_READY_NTF to user service, then user service can do anything it want
+   */
+  case L_MSG_SOCK_CONN_NTF:
     l_create_service(E, data_srvc->listen->accept_service_callback, 0, 0);
     break;
-  case L_MSG_SUBSRVC_CREATE_RSP: {
-    l_subsrvc_create_rsp* rsp = (l_subsrvc_create_rsp*)msg->mssg_data;
+  case L_MSG_SERVICE_CREATE_RSP: {
+    l_service_create_rsp* rsp = (l_service_create_rsp*)msg->mssg_data;
     if (rsp->srvc_id) {
-      /* user response service created success */
-      l_subsrvc_create_rsp new_rsp = {S->srvc_id, data_srvc, data_srvc->listen->accept_service_callback, data_srvc->listen->creation_ctx, L_EMPTY_HDL};
-      l_sock_ready_ntf ntf = {S->srvc_id, data_srvc};
-
+      /* user service created success */
+      l_service_create_rsp new_rsp = {S->srvc_id, data_srvc, data_srvc->listen->accept_service_callback, data_srvc->listen->creation_ctx, L_EMPTY_HDL};
       data_srvc->user_svid = rsp->srvc_id;
-      l_send_message_impl(E, data_srvc->user_svid, L_MSG_SUBSRVC_CREATE_RSP, &new_rsp, sizeof(l_subsrvc_create_rsp));
-      l_send_message_impl(E, data_srvc->user_svid, L_MSG_SOCK_READY_NTF, &ntf, sizeof(l_sock_ready_ntf));
+      l_send_message_impl(E, data_srvc->user_svid, L_MSG_SERVICE_CREATE_RSP, &new_rsp, sizeof(l_service_create_rsp));
+      l_send_message_impl(E, data_srvc->user_svid, L_MSG_SOCK_READY_NTF, 0, 0);
     } else {
-      /* user response service created failed */
+      /* user service created failed */
       l_sock_disc_cmd cmd = {data_srvc};
       l_send_message_impl(E, S->from_id, L_MSG_SOCK_DISC_CMD, &cmd, sizeof(l_sock_disc_cmd));
     }}
     break;
-  /* common socket messages from master */
-  case L_MSG_SOCK_DISC_NTF:
-  case L_MSG_SOCK_ERROR_NTF: {
-    l_sock_bad_state_ntf ntf = {S->srvc_id};
-    l_send_message_impl(E, data_srvc->user_svid, L_MSG_SOCK_BAD_STATE_NTF, &ntf, sizeof(l_sock_bad_state_ntf));
-    l_service_del_event(E); /* only del event, user service may be do recovery */
-    }
-    break;
-  case L_MSG_SOCK_READY_TX: {
-    l_message* write_req_msg = 0;
-    if (data_srvc->listen == 0) {
-      if (l_socket_cmpl_connect(S->ioev_hdl)) {
-        l_sock_ready_ntf ntf = {S->srvc_id, data_srvc};
-        l_send_message_impl(E, data_srvc->user_svid, L_MSG_SOCK_READY_NTF, &ntf, sizeof(l_sock_ready_ntf));
-        data_srvc->listen = (void*)(l_uint)1;
-      } else {
-        l_sock_bad_state_ntf ntf = {S->srvc_id};
-        l_send_message_impl(E, data_srvc->user_svid, L_MSG_SOCK_BAD_STATE_NTF, &ntf, sizeof(l_sock_bad_state_ntf));
-        l_service_del_event(E); /* only del event, user service may be do recovery */
+  /** Socket Data Service for socket connect
+   *  user service is created first and then create connect service
+   *  1. a socket data service is created, and connect to remote socket
+   *  2. master send L_MSG_SOCK_READY_TX to socket data service indicate connect success
+   *  3. send L_MSG_SERVICE_CREATE_RSP to user service say socket data service created success
+   *  4. send L_SOCK_READY_NTF to user service, then user service can do anything it want
+   */
+  case L_MSG_SOCK_READY_TX:
+    if ((l_uint)data_srvc->listen <= 1) {
+      if ((l_uint)data_srvc->listen == 1) {
         return;
+      } else if (!l_socket_cmpl_connect(S->ioev_hdl)) {
+        l_report_service_created(E, false);
+        l_service_del_event(E); /* only del event, user service may be do recovery */
+        data_srvc->listen = (void*)(l_uint)1;
+        return;
+      } else {
+        l_report_service_created(E, true);
+        l_send_message_impl(E, data_srvc->user_svid, L_MSG_SOCK_READY_NTF, 0, 0);
+        data_srvc->listen = (void*)(l_uint)2;
       }
-    }
-    write_req_msg = (l_message*)l_squeue_top(&data_srvc->wrmq);
+    }{
+    l_message* write_req_msg = (l_message*)l_squeue_top(&data_srvc->wrmq);
     if (write_req_msg) {
       l_socket_write_req* req = (l_socket_write_req*)write_req_msg->mssg_data;
       req->cur_pos += l_data_write(S->ioev_hdl, req->cur_pos, req->buffer_end - req->cur_pos);
@@ -3449,12 +3456,29 @@ l_socket_data_service_proc(lnlylib_env* E)
       }
     }}
     break;
+  case L_MSG_SOCK_DISC_NTF:
+  case L_MSG_SOCK_ERROR_NTF:
+    if ((l_uint)data_srvc->listen <= 1) {
+      if ((l_uint)data_srvc->listen == 1) {
+        return;
+      }
+      l_report_service_created(E, false);
+      l_service_del_event(E); /* only del event, user service may be do recovery */
+      data_srvc->listen = (void*)(l_uint)1;
+    } else {
+      l_sock_bad_state_ntf ntf = {S->srvc_id};
+      l_send_message_impl(E, data_srvc->user_svid, L_MSG_SOCK_BAD_STATE_NTF, &ntf, sizeof(l_sock_bad_state_ntf));
+      l_service_del_event(E); /* only del event, user service may be do recovery */
+    }
+    break;
   /* messages from user service */
   case L_MSG_SOCK_READ_REQ:
+    /* TODO: need read data on request */
     msg->mssg_flags |= L_MSSG_FLAG_DONT_AUTO_FREE;
     l_squeue_push(&data_srvc->rdmq, &msg->node);
     break;
   case L_MSG_SOCK_WRITE_REQ:
+    /* TODO: need write data on request */
     msg->mssg_flags |= L_MSSG_FLAG_DONT_AUTO_FREE;
     l_squeue_push(&data_srvc->wrmq, &msg->node);
     break;

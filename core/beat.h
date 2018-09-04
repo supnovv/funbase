@@ -41,7 +41,7 @@ L_EXTERN void* l_message_data(l_message* msg);
 L_EXTERN l_umedit l_message_data_size(l_message* msg);
 L_EXTERN l_ulong l_message_from(l_message* msg);
 
-#define L_MSG_SUBSRVC_CREATE_RSP  (L_CORE_MSG_GR + 0x0D)
+#define L_MSG_SERVICE_CREATE_RSP  (L_CORE_MSG_GR + 0x0D)
 #define L_MSG_SERVICE_FORCE_QUIT  (L_CORE_MSG_GR + 0x0E)
 #define L_MSG_SERVICE_RESTART_CMD (L_CORE_MSG_GR + 0x0F)
 
@@ -57,7 +57,7 @@ typedef struct {
   void* in_svud; /* user passed in service udata */
   l_uint creation_ctx;
   l_filehdl hdl;
-} l_subsrvc_create_rsp;
+} l_service_create_rsp;
 
 L_EXTERN l_bool l_empty_on_create(lnlylib_env* E);
 L_EXTERN void l_empty_on_destroy(lnlylib_env* E);
@@ -80,10 +80,12 @@ L_EXTERN void* l_current_service_udata(lnlylib_env* E);
 L_EXTERN l_ulong l_current_service_id(lnlylib_env* E);
 L_EXTERN l_filehdl l_current_service_evhdl(lnlylib_env* E);
 L_EXTERN l_ulong l_current_service_from(lnlylib_env* E);
+L_EXTERN l_message* l_current_create_req_message(lnlylib_env* E);
 L_EXTERN void* l_service_udata(l_service* S);
 L_EXTERN l_ulong l_service_id(l_service* S);
 L_EXTERN l_filehdl l_service_evhdl(l_service* S);
 L_EXTERN l_ulong l_service_from(l_service* S);
+L_EXTERN l_message* l_get_create_req_message(l_service* S);
 L_EXTERN l_bool l_set_service_udata(lnlylib_env* E, void* srvc_ud);
 
 #define L_MSG_TIMER_CREATE_RSP (L_CORE_MSG_GR + 0x1A)
@@ -123,11 +125,22 @@ L_EXTERN void l_cancel_timer(lnlylib_env* E, l_timer* timer);
 
 L_EXTERN void l_create_tcp_listen_service(lnlylib_env* E, const void* local_ip, l_ushort local_port, l_service_callback* response_service_callback, l_uint creation_ctx);
 L_EXTERN void l_create_tcp_connect_service(lnlylib_env* E, const void* ip, l_ushort port, l_uint creation_ctx);
+L_EXTERN void l_report_service_created(lnlylib_env* E, l_bool success);
 L_EXTERN void l_stop_listen_service(lnlylib_env* E);
-L_EXTERN void l_socket_service_read(lnlylib_env* E, l_ulong sock_srvc);
-L_EXTERN void l_socket_service_write(lnlylib_env* E, l_ulong sock_srvc);
-L_EXTERN void l_socket_service_recover(lnlylib_env* E, l_ulong sock_srvc);
-L_EXTERN void l_socket_service_close(lnlylib_env* E, l_ulong sock_srvc);
+
+typedef struct {
+  l_uint read_id;
+  l_int size;
+} l_socket_read_rsp;
+
+typedef struct {
+  l_uint write_id;
+  l_int size;
+} l_socket_write_rsp;
+
+L_EXTERN void l_send_socket_read_req(lnlylib_env* E, l_ulong sock_svid, void* buffer, l_int maxlen, l_int min_read, l_uint read_id);
+L_EXTERN void l_send_socket_write_req(lnlylib_env* E, l_ulong sock_svid, const void* data, l_int size, l_uint write_id);
+L_EXTERN void l_send_socket_close_cmd(lnlylib_env* E, l_ulong sock_svid);
 
 #endif /* LNLYLIB_CORE_BEAT_H */
 

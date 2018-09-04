@@ -36,6 +36,19 @@ l_http_accept_service_on_destroy(lnlylib_env* E)
 static void
 l_http_accept_service_access_proc(lnlylib_env* E)
 {
+  l_message* msg = l_current_message(E);
+  switch (l_message_id(msg)) {
+  case L_MSG_SOCK_READY_NTF:
+    break;
+  case L_MSG_SOCK_READ_RSP:
+    break;
+  case L_MSG_SOCK_WRITE_RSP:
+    break;
+  case L_MSG_SOCK_BAD_STATE_NTF:
+    break;
+  default:
+    break;
+  }
 }
 
 static void
