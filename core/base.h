@@ -105,10 +105,109 @@ l_strn_s(const void* s, l_int m, l_int n)
   return l_strn_l(l_strc(s) + m, n - m);
 }
 
-/** memory operation **/
+L_EXTERN l_bool l_is_lower(l_byte ch);
+L_EXTERN l_bool l_is_upper(l_byte ch);
+L_EXTERN l_bool l_is_letter(l_byte ch);
+L_EXTERN l_bool l_is_printable(l_byte ch);
+L_EXTERN l_bool l_is_digit(l_byte ch);
+L_EXTERN l_bool l_is_hex_digit(l_byte ch);
+L_EXTERN l_bool l_is_alphanum(l_byte ch);
+L_EXTERN l_bool l_is_alphanum_underscore(l_byte ch);
+L_EXTERN l_bool l_is_alphanum_underscore_hyphen(l_byte ch);
 
-typedef void* (*l_allocfunc)(void* ud, void* p, l_ulong oldsz, l_ulong newsz);
-L_EXTERN l_allocfunc l_alloc_func; /* note the allocated memory is not initialized */
+L_INLINE l_bool
+l_nt_lower(l_byte ch)
+{
+  return !l_is_lower(ch);
+}
+
+L_INLINE l_bool
+l_nt_upper(l_byte ch)
+{
+  return !l_is_upper(ch);
+}
+
+L_INLINE l_bool
+l_nt_letter(l_byte ch)
+{
+  return !l_is_letter(ch);
+}
+
+L_INLINE l_bool
+l_nt_printable(l_byte ch)
+{
+  return !l_is_printable(ch);
+}
+
+L_INLINE l_bool
+l_nt_digit(l_byte ch)
+{
+  return !l_is_digit(ch);
+}
+
+L_INLINE l_bool
+l_nt_hex_digit(l_byte ch)
+{
+  return !l_is_hex_digit(ch);
+}
+
+L_INLINE l_bool
+l_nt_alphanum(l_byte ch)
+{
+  return !l_is_alphanum(ch);
+}
+
+L_INLINE l_bool
+l_nt_alphanum_underscore(l_byte ch)
+{
+  return !l_is_alphanum_underscore(ch);
+}
+
+L_INLINE l_bool
+l_nt_alphanum_underscore_hyphen(l_byte ch)
+{
+  return !l_is_alphanum_underscore_hyphen(ch);
+}
+
+L_INLINE l_byte
+l_to_lower(l_byte ch)
+{
+  return l_is_upper(ch) ? ch + 32 : ch;
+}
+
+L_INLINE l_byte
+l_to_upper(l_byte ch)
+{
+  return l_is_lower(ch) ? ch - 32 : ch;
+}
+
+L_INLINE l_byte
+l_flip_case(l_byte ch)
+{
+  return l_is_upper(ch) ? ch + 32 : (l_is_lower(ch) ? ch - 32 : ch);
+}
+
+#define l_lower_most_bit(n) (n & (-n))
+#define l_remove_lower_most_bit(n) (n & (n - 1))
+#define l_is_power_of_two_int(n) (l_remote_lower_most_bit(n) == 0)
+
+#define l_bit_belong_which_byte(which_bit_0_n) (which_bit_0_n >> 3)
+#define l_bit_belong_which_ushort(which_bit_0_n) (which_bit_0_n >> 4)
+#define l_bit_belong_which_umedit(which_bit_0_n) (which_bit_0_n >> 5)
+#define l_bit_belong_which_ulong(which_bit_0_n) (which_bit_0_n >> 6)
+
+#define l_bit_mask_of_byte(which_bit_0_7) (1 << (which_bit_0_7 & 7))
+#define l_bit_mask_of_ushort(which_bit_0_15) (1 << (which_bit_0_15 & 15))
+#define l_bit_mask_of_umedit(which_bit_0_31) (1 << (which_bit_0_31 & 31))
+#define l_bit_mask_of_ulong(which_bit_0_63) (1 << (which_bit_0_63 & 63))
+
+#define l_bit_of_byte_need_moved_bits_to_high(which_bit_0_7) (7 - (which_bit_0_7 & 7))
+#define l_bit_of_ushort_need_moved_bits_to_high(which_bit_0_15) (15 - (which_bit_0_15 & 15))
+#define l_bit_of_umedit_need_moved_bits_to_high(which_bit_0_31) (31 - (which_bit_0_31 & 31))
+#define l_bit_of_ulong_need_moved_bits_to_high(which_bit_0_63) (63 - (which_bit_0_63 & 63))
+
+L_EXTERN l_byte l_bit_1_count_of_byte(l_byte ch);
+L_EXTERN l_int l_bit_pos_of_power_of_two(l_ulong x); /* x should > 0 and be 2^n, return n */
 
 #undef l_malloc
 #undef l_ralloc
@@ -122,10 +221,10 @@ L_EXTERN l_allocfunc l_alloc_func; /* note the allocated memory is not initializ
 #define L_MALLOC_TYPE(E, type) (type*)l_malloc((E), sizeof(type))
 #define L_MALLOC_TYPE_N(E, type, n) (type*)l_malloc((E), sizeof(type) * (n))
 
+typedef void* (*l_allocfunc)(void* ud, void* p, l_ulong oldsz, l_ulong newsz);
+L_EXTERN l_allocfunc l_alloc_func; /* note the allocated memory is not initialized */
 L_EXTERN l_bool l_zero_n(void* p, l_ulong size);
 L_EXTERN l_ulong l_copy_n(void* dest, const void* from, l_ulong size);
-
-/** debug and logging **/
 
 #undef L_MKSTR
 #undef L_X_MKSTR
@@ -375,8 +474,6 @@ l_impl_logger_n(struct lnlylib_env* E, const void* tag, const void* s, l_int n, 
   l_impl_logger_func(E, tag, s, n, a);
 }
 
-/** output stream **/
-
 #define L_HEX         0x01000000
 #define L_OCT         0x02000000
 #define L_BIN         0x04000000
@@ -501,8 +598,6 @@ l_ostream_format_9(l_ostream* os, const void* fmt, l_value a, l_value b, l_value
 {
   return l_impl_ostream_format(os, fmt, 9, a, b, c, d, e, f, g, h, i);
 }
-
-/** fixed length string buffer **/
 
 typedef struct {
   l_uint a[2 + 16 / sizeof(l_uint)];
@@ -638,8 +733,6 @@ l_get_stropt(void* buffer_start, l_int total_size, l_int cur_size)
 
 L_EXTERN l_ostream l_stropt_ostream(l_stropt* b);
 
-/** variable length string **/
-
 typedef struct {
   l_allocfunc alloc;
   l_int implsz;
@@ -693,8 +786,6 @@ l_string_nt_empty(l_string* s)
   return s->implsz != 0;
 }
 
-/** standard file stream **/
-
 typedef struct {
   void* file;
 } l_file;
@@ -724,8 +815,6 @@ L_EXTERN void l_file_redirect_stdout(const void* name);
 L_EXTERN void l_file_redirect_stderr(const void* name);
 L_EXTERN void l_file_redirect_stdin(const void* name);
 L_EXTERN l_ostream l_file_ostream(l_file* s);
-
-/** single linked list and queue **/
 
 typedef struct l_smplnode {
   struct l_smplnode* next;
@@ -778,7 +867,7 @@ l_squeue_nt_empty(l_squeue* sq)
   return (sq->head.next != 0);
 }
 
-L_INLINE void
+L_INLINE void /* push to the tail */
 l_squeue_push(l_squeue* sq, l_smplnode* newnode)
 {
   l_smplnode_insert_after(sq->tail == 0 ? &sq->head : sq->tail, newnode);
@@ -819,7 +908,7 @@ l_squeue_top(l_squeue* sq)
   return sq->head.next;
 }
 
-L_INLINE l_smplnode*
+L_INLINE l_smplnode* /* pop from head */
 l_squeue_pop(l_squeue* sq)
 {
   l_smplnode* node = 0;
@@ -830,7 +919,52 @@ l_squeue_pop(l_squeue* sq)
   return node;
 }
 
-/** double linked list and queue **/
+typedef struct {
+  l_smplnode head;
+  l_bool (*less)(l_smplnode*, l_smplnode*); /* if less is really less then the biggest is in the top */
+} l_spriorq;
+
+L_INLINE void
+l_spriorq_init(l_spriorq* q, l_bool (*less)(l_smplnode*, l_smplnode*))
+{
+  q->head.next = 0;
+  q->less = less;
+}
+
+L_INLINE l_bool
+l_spriorq_is_empty(l_spriorq* q)
+{
+  return q->head.next == 0;
+}
+
+L_INLINE l_bool
+l_spriorq_nt_empty(l_spriorq* q)
+{
+  return q->head.next != 0;
+}
+
+L_INLINE void
+l_spriorq_push(l_spriorq* q, l_smplnode* newnode)
+{
+  l_smplnode* node = &q->head;
+  while (node->next && q->less(newnode, node->next)) {
+    node = node->next;
+  }
+  newnode->next = node->next;
+  node->next = newnode;
+}
+
+L_INLINE l_smplnode*
+l_spriorq_top(l_spriorq* q)
+{
+  return q->head.next;
+}
+
+L_INLINE l_smplnode* /* pop from head */
+l_spriorq_pop(l_spriorq* q)
+{
+  return l_smplnode_remove_next(&q->head);
+}
 
 typedef struct l_linknode {
   struct l_linknode* next;
