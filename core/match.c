@@ -1,3 +1,5 @@
+#define LNLYLIB_API_IMPL
+#include "core/match.h"
 
 static const l_byte
 l_bit_1_count_g[256] = {
@@ -55,7 +57,7 @@ typedef struct {
 } l_char_match_dict;
 
 typedef struct {
-  l_ulong char_256_bits[8];
+  l_ulong char_256_bits[4];
   l_ulong strs_match_the_range;
 } l_match_range; /* 5-ulong 40-byte */
 
@@ -88,7 +90,7 @@ typedef struct {
   l_ulong strs_match_cur_char[1]; /* 1 ~ 64-ulong, max 512-byte */
 } l_64_string_char_slice; /* 616-byte + 64 * 40-byte (max 3KB) */
 
-typedef struct {
+typedef struct l_string_pattern {
   l_short slice_type;
   l_short case_insensitive;
   l_medit num_slices;
@@ -133,15 +135,30 @@ l_string_pattern_create_impl(const l_char_slice_info* slice_arr, l_int num_slice
   l_byte prev_bit_1_count = 0;
   l_byte* bit_1_count_byte = 0;
   l_int ulong_i = 0;
+  l_int temp_i = 0;
 
   /* count the ranges and move all ranges together */
   for (i = 0, slice = slice_arr; i < num_slices; i += 1, slice += 1) {
     slice->num_ranges = 0;
-    for (range_i = 0, range = slice->range; range_i < 64; range_i += 1, range += 1) {
+    for (range_i = 0; range_i < 64; range_i += 1) {
+      range = slice->range + range_i;
       if (range->strs_match_the_range == 0) continue;
-      /* TODO - check current range is the same range or not comparing to the ranges already have */
+      /* check current range is the same range or not comparing to the ranges already have */
+      for (temp_i = 0; temp_i < slice->num_ranges; ++temp_i) {
+        if (slice->range[temp_i].char_256_bits[0] == range->char_256_bits[0] &&
+            slice->range[temp_i].char_256_bits[1] == range->char_256_bits[1] &&
+            slice->range[temp_i].char_256_bits[2] == range->char_256_bits[2] &&
+            slice->range[temp_i].char_256_bits[3] == range->char_256_bits[3]) {
+          slice->range[temp_i].strs_match_the_range |= range->strs_match_the_range;
+          break;
+        }
+      }
+      if (temp_i < slice->num_ranges) {
+        continue;
+      }
+      /* this is a different range */
       if (slice->num_ranges != range_i) {
-        slice->range[s->num_ranges] = slice->range[range_i];
+        slice->range[s->num_ranges] = *range;
       }
       slice->num_ranges += 1;
     }
@@ -380,8 +397,17 @@ l_add_string_match_char_class(const l_char_slice_info* slice, l_int string_i, l_
   }
 }
 
+L_EXTERN void
+l_destroy_string_pattern(l_string_pattern** patt)
+{
+  if (*patt) {
+    l_mfree(LNUL, *patt);
+    *patt = 0;
+  }
+}
+
 L_EXTERN l_string_pattern*
-l_string_pattern_create(const l_strn* strn, l_int num_of_strings, l_bool case_insensitive)
+l_create_string_pattern(const l_strn* strn, l_int num_of_strings, l_bool case_insensitive)
 {
   if (strn == 0 || num_of_strings <= 0 || num_of_strings > 64) {
     return 0;
@@ -468,7 +494,7 @@ l_string_pattern_create(const l_strn* strn, l_int num_of_strings, l_bool case_in
           l_loge_1(LNUL, "wrong pattern format %s", ls(s->cur-1));
           return 0;
         }
-        ch = l_hex_string_to_n(s->cur, 2);
+        ch = l_hex_string_to_int(l_strn_l(s->cur, 2));
         if (case_insensitive) {
           l_add_string_match_the_char(slice, i, l_to_lower(ch));
         } else {
@@ -559,10 +585,10 @@ l_string_pattern_create(const l_strn* strn, l_int num_of_strings, l_bool case_in
             return 0;
           }
           if (is_range_begin) {
-            range_start_ch = l_hex_string_to_n(s->cur + 1, 2);
+            range_start_ch = l_hex_string_to_int(l_strn_l(s->cur + 1, 2));
             is_range_begin = false;
           } else {
-            if (!l_add_string_match_the_range(slice, i, range_start_ch, l_hex_string_to_n(s->cur + 1, 2))) {
+            if (!l_add_string_match_the_range(slice, i, range_start_ch, l_hex_string_to_int(l_strn_l(s->cur + 1, 2)))) {
               return 0;
             }
             is_range_begin = true;
@@ -625,7 +651,7 @@ l_string_pattern_create(const l_strn* strn, l_int num_of_strings, l_bool case_in
             l_loge_1(LNUL, "wrong pattern format %s", ls(s->cur));
             return 0;
           }
-          if (!l_add_string_match_the_range(slice, i, l_hex_string_to_n(s->cur + 1, 2), l_hex_string_to_n(s->cur + 3, 2))) {
+          if (!l_add_string_match_the_range(slice, i, l_hex_string_to_int(l_strn_l(s->cur + 1, 2)), l_hex_string_to_int(l_strn_l(s->cur + 3, 2)))) {
             return 0;
           }
           if (end_ch == '|') {
@@ -688,7 +714,7 @@ l_string_pattern_create(const l_strn* strn, l_int num_of_strings, l_bool case_in
   return l_string_pattern_create_impl(slice_info, num_slices, slice_type, case_insensitive);
 }}}}
 
-L_EXTERN l_ulong
+static l_ulong
 l_match_current_slice(const l_char_slice* slice, l_int slice_type, l_int ch, l_int case_insensitive)
 {
   l_int belong_ulong = 0;
@@ -837,7 +863,7 @@ l_string_match_repeat(const l_string_pattern* patt, const l_byte* start, const l
 }
 
 L_EXTERN const l_byte* /* return 0 - too short to match, otherwise success */
-l_string_match_to(const l_string_pattern* patt, const l_byte* start, const l_byte* pend, l_byte** last_match_start)
+l_skip_chars_until_match_the_pattern(const l_string_pattern* patt, const l_byte* start, const l_byte* pend, l_byte** last_match_start)
 {
   const l_byte* e = 0;
   while ((e = l_string_match(patt, start, pend)) == 0) { /* continue if unmatch */

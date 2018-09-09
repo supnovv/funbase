@@ -89,13 +89,14 @@ AUTOOBJS = $(OUTDIR)/autoconf$(OBJ)
 AUTOINCS = core/prefix.h
 
 COREOBJS = $(OUTDIR)/core/lapi$(OBJ) \
-           $(OUTDIR)/core/beat$(OBJ)
-
+           $(OUTDIR)/core/beat$(OBJ) \
+           $(OUTDIR)/core/match$(OBJ)
 COREINCS = autoconf.h \
            core/prefix.h \
            core/base.h \
            core/lapi.h \
-           core/beat.h
+           core/beat.h \
+           core/match.h
 
 OSIOBJS = $(OUTDIR)/osi/lnxbase$(OBJ)
 

@@ -114,6 +114,8 @@ L_EXTERN l_bool l_is_hex_digit(l_byte ch);
 L_EXTERN l_bool l_is_alphanum(l_byte ch);
 L_EXTERN l_bool l_is_alphanum_underscore(l_byte ch);
 L_EXTERN l_bool l_is_alphanum_underscore_hyphen(l_byte ch);
+L_EXTERN l_int l_dec_string_to_int(l_strn s);
+L_EXTERN l_int l_hex_string_to_int(l_strn s);
 
 L_INLINE l_bool
 l_nt_lower(l_byte ch)
@@ -186,6 +188,20 @@ l_flip_case(l_byte ch)
 {
   return l_is_upper(ch) ? ch + 32 : (l_is_lower(ch) ? ch - 32 : ch);
 }
+
+#define l_enlarge_to_times_of_2(n)    ((((n - 1) >> 1) + 1) << 1) /* n should > 0 */
+#define l_enlarge_to_times_of_4(n)    ((((n - 1) >> 2) + 1) << 2) /* n should > 0 */
+#define l_enlarge_to_times_of_8(n)    ((((n - 1) >> 3) + 1) << 3) /* n should > 0 */
+#define l_enlarge_to_times_of_16(n)   ((((n - 1) >> 4) + 1) << 4) /* n should > 0 */
+#define l_enlarge_to_times_of_32(n)   ((((n - 1) >> 5) + 1) << 5) /* n should > 0 */
+#define l_enlarge_to_times_of_64(n)   ((((n - 1) >> 6) + 1) << 6) /* n should > 0 */
+#define l_enlarge_to_times_of_128(n)  ((((n - 1) >> 7) + 1) << 7) /* n should > 0 */
+#define l_enlarge_to_times_of_256(n)  ((((n - 1) >> 8) + 1) << 8) /* n should > 0 */
+#define l_enlarge_to_times_of_512(n)  ((((n - 1) >> 9) + 1) << 9) /* n should > 0 */
+#define l_enlarge_to_times_of_1024(n) ((((n - 1) >> 10) + 1) << 10) /* n should > 0 */
+#define l_enlarge_to_times_of_2048(n) ((((n - 1) >> 11) + 1) << 11) /* n should > 0 */
+#define l_enlarge_to_times_of_4096(n) ((((n - 1) >> 12) + 1) << 12) /* n should > 0 */
+#define l_enlarge_to_times_of_8192(n) ((((n - 1) >> 13) + 1) << 13) /* n should > 0 */
 
 #define l_lower_most_bit(n) (n & (-n))
 #define l_remove_lower_most_bit(n) (n & (n - 1))

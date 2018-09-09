@@ -3719,55 +3719,55 @@ static const l_strn l_hex_digit[] = {
   l_literal_strn("0123456789ABCDEF")
 };
 
-L_EXTERN int
+L_EXTERN l_bool
 l_is_printable(l_byte c)
 {
   return l_char_table[c];
 }
 
-L_EXTERN int
-l_is_dec_digit(l_byte c)
+L_EXTERN l_bool
+l_is_digit(l_byte c)
 {
   return l_char_table[c] == 0x3d;
 }
 
-L_EXTERN int
+L_EXTERN l_bool
 l_is_letter(l_byte c)
 {
   return l_char_table[c] & 0x02;
 }
 
-L_EXTERN int
-l_is_upper_letter(l_byte c)
+L_EXTERN l_bool
+l_is_upper(l_byte c)
 {
   return (l_char_table[c] & 0x03) == 2;
 }
 
-L_EXTERN int
-l_is_lower_letter(l_byte c)
+L_EXTERN l_bool
+l_is_lower(l_byte c)
 {
   return (l_char_table[c] & 0x03) == 3;
 }
 
-L_EXTERN int
+L_EXTERN l_bool
 l_is_hex_digit(l_byte c)
 {
   return l_char_table[c] & 0x04;
 }
 
-L_EXTERN int
+L_EXTERN l_bool
 l_is_alphanum(l_byte c)
 {
   return l_char_table[c] & 0x08;
 }
 
-L_EXTERN int
+L_EXTERN l_bool
 l_is_alphanum_underscore(l_byte c)
 {
   return l_char_table[c] & 0x10;
 }
 
-L_EXTERN int
+L_EXTERN l_bool
 l_is_alphanum_underscore_hyphen(l_byte c)
 {
   return l_char_table[c] & 0x20;
@@ -3905,12 +3905,6 @@ l_ostream_format_c(l_ostream* os, int c, l_umedit flags)
 
 #define L_HEX_FMT_BFSZ 159
 
-static l_umedit
-l_right_most_bit(l_umedit n)
-{
-  return n & (-n);
-}
-
 L_EXTERN l_int
 l_ostream_format_u(l_ostream* os, l_ulong u, l_umedit flags)
 {
@@ -3928,7 +3922,7 @@ l_ostream_format_u(l_ostream* os, l_ulong u, l_umedit flags)
   flags &= L_FORMAT_MASK;
   base = (flags & L_BASE_MASK);
 
-  switch (l_right_most_bit(base)) {
+  switch (l_lower_most_bit(base)) {
   case 0:
     *--p = (u % 10) + '0';
     while ((u /= 10)) {
