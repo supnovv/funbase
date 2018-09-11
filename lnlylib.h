@@ -7,6 +7,7 @@ extern "C" {
 #include "core/base.h"
 #include "core/lapi.h"
 #include "core/beat.h"
+#include "core/match.h"
 #include "osi/base.h"
 
 #ifdef __cplusplus

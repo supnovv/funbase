@@ -105,6 +105,24 @@ l_strn_s(const void* s, l_int m, l_int n)
   return l_strn_l(l_strc(s) + m, n - m);
 }
 
+typedef struct {
+  const l_byte* s;
+  const l_byte* e;
+} l_strp;
+
+#define l_strp_c(s) l_strp_l(l_strc(s), (s) ? strlen((char*)(s)) : 0)
+#define l_empty_strp() l_literal_strp("")
+#define l_literal_strp(s) l_strp_l(l_strc("" s), sizeof(s) - 1)
+
+L_INLINE l_strp
+l_strp_l(const void* p, l_int len)
+{
+  l_strp s;
+  s.s = l_strc(p);
+  s.e = s.s + (len > 0 ? len : 0);
+  return s;
+}
+
 L_EXTERN l_bool l_is_lower(l_byte ch);
 L_EXTERN l_bool l_is_upper(l_byte ch);
 L_EXTERN l_bool l_is_letter(l_byte ch);
@@ -212,15 +230,15 @@ l_flip_case(l_byte ch)
 #define l_bit_belong_which_umedit(which_bit_0_n) (which_bit_0_n >> 5)
 #define l_bit_belong_which_ulong(which_bit_0_n) (which_bit_0_n >> 6)
 
-#define l_bit_mask_of_byte(which_bit_0_7) (1 << (which_bit_0_7 & 7))
-#define l_bit_mask_of_ushort(which_bit_0_15) (1 << (which_bit_0_15 & 15))
-#define l_bit_mask_of_umedit(which_bit_0_31) (1 << (which_bit_0_31 & 31))
-#define l_bit_mask_of_ulong(which_bit_0_63) (1 << (which_bit_0_63 & 63))
-
 #define l_bit_of_byte_need_moved_bits_to_high(which_bit_0_7) (7 - (which_bit_0_7 & 7))
 #define l_bit_of_ushort_need_moved_bits_to_high(which_bit_0_15) (15 - (which_bit_0_15 & 15))
 #define l_bit_of_umedit_need_moved_bits_to_high(which_bit_0_31) (31 - (which_bit_0_31 & 31))
 #define l_bit_of_ulong_need_moved_bits_to_high(which_bit_0_63) (63 - (which_bit_0_63 & 63))
+
+#define l_bit_mask_of_byte(which_bit_0_7) (((l_byte)1) << (which_bit_0_7 & 7))
+#define l_bit_mask_of_ushort(which_bit_0_15) (((l_ushort)1) << (which_bit_0_15 & 15))
+#define l_bit_mask_of_umedit(which_bit_0_31) (((l_umedit)1) << (which_bit_0_31 & 31))
+#define l_bit_mask_of_ulong(which_bit_0_63) (((l_ulong)1) << (which_bit_0_63 & 63))
 
 L_EXTERN l_byte l_bit_1_count_of_byte(l_byte ch);
 L_EXTERN l_int l_bit_pos_of_power_of_two(l_ulong x); /* x should > 0 and be 2^n, return n */
@@ -302,9 +320,20 @@ L_EXTERN l_ulong l_copy_n(void* dest, const void* from, l_ulong size);
 #define l_impl_assert_pass(E,expr) l_impl_logger_func(E, "51[V] " L_FILE_LINE, "assert pass: %s", ls(expr))
 #define l_impl_assert_fail(E,expr) l_impl_logger_func(E, "01[F] " L_FILE_LINE, "assert fail: %s", ls(expr))
 #define l_impl_assert_s_fail(E,expr,s) l_impl_logger_func(E, "02[F] " L_FILE_LINE, "assert fail - %s: %s", ls(s), ls(expr))
+#define l_impl_assert_eq_c_fail(E,expr,a,b) l_impl_logger_func(E, "03[F] " L_FILE_LINE, "assert fail - %c != %c - %s", lc(a), lc(b), ls(expr))
+#define l_impl_assert_eq_d_fail(E,expr,a,b) l_impl_logger_func(E, "03[F] " L_FILE_LINE, "assert fail - %d != %d - %s", ld(a), ld(b), ls(expr))
+#define l_impl_assert_eq_x_fail(E,expr,a,b) l_impl_logger_func(E, "03[F] " L_FILE_LINE, "assert fail - %x != %x - %s", lx(a), lx(b), ls(expr))
+#define l_impl_assert_eq_p_fail(E,expr,a,b) l_impl_logger_func(E, "03[F] " L_FILE_LINE, "assert fail - %p != %p - %s", lp(a), lp(b), ls(expr))
+#define l_impl_assert_eq_f_fail(E,expr,a,b) l_impl_logger_func(E, "03[F] " L_FILE_LINE, "assert fail - %f != %f - %s", lf(a), lf(b), ls(expr))
 
-#define l_assert_s(E,e,s) ((e) ? l_impl_assert_pass(E, #e) : l_impl_assert_s_fail(E, #e, (s))) /* 0: assert or fatal */
-#define l_assert(E,e) ((e) ? l_impl_assert_pass(E, #e) : l_impl_assert_fail(E, #e))
+#define l_assert(E,e) ((e) ? l_impl_assert_pass(E, #e) : l_impl_assert_fail(E, #e)) /* 0: assert or fatal */
+#define l_assert_s(E,e,s) ((e) ? l_impl_assert_pass(E, #e) : l_impl_assert_s_fail(E, #e, (s)))
+#define l_assert_eq_c(E,a,b) (((a)==(b)) ? l_impl_assert_pass(E, #a " == " #b) : l_impl_assert_eq_c_fail(E, #a " == " #b, (a), (b))
+#define l_assert_eq_d(E,a,b) (((a)==(b)) ? l_impl_assert_pass(E, #a " == " #b) : l_impl_assert_eq_d_fail(E, #a " == " #b, (a), (b))
+#define l_assert_eq_x(E,a,b) (((a)==(b)) ? l_impl_assert_pass(E, #a " == " #b) : l_impl_assert_eq_x_fail(E, #a " == " #b, (a), (b))
+#define l_assert_eq_p(E,a,b) (((a)==(b)) ? l_impl_assert_pass(E, #a " == " #b) : l_impl_assert_eq_p_fail(E, #a " == " #b, (a), (b))
+#define l_assert_eq_f(E,a,b) (((a)==(b)) ? l_impl_assert_pass(E, #a " == " #b) : l_impl_assert_eq_f_fail(E, #a " == " #b, (a), (b))
+
 #define l_loge_s(E,s)                   l_impl_logger_s(E, "10[E] " L_FILE_LINE, (s)) /* 1:error */
 #define l_loge_1(E,fmt,a)               l_impl_logger_1(E, "11[E] " L_FILE_LINE, (fmt), a)
 #define l_loge_n(E,fmt,n,a)             l_impl_logger_n(E, "1n[E] " L_FILE_LINE, (fmt), n,a)
@@ -422,6 +451,7 @@ lsvid(l_ulong svid)
 
 struct lnlylib_env;
 L_EXTERN int l_set_log_level(int n);
+L_EXTERN void l_flush_logging(struct lnlylib_env* E);
 L_EXTERN void l_impl_logger_func(struct lnlylib_env* E, const void* tag, const void* fmt, ...);
 
 L_INLINE void

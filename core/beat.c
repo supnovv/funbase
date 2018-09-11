@@ -385,7 +385,6 @@ static void l_master_cancel_timer(l_master* M, l_timer timer);
 static void l_master_check_timers(l_master* M);
 static void l_master_update_time(l_master* M);
 
-static void l_finish_logging(lnlylib_env* E);
 static l_int l_ostream_file_write(void* out, const void* p, l_int len);
 
 typedef struct {
@@ -583,7 +582,7 @@ l_thread_proc(void* para)
   lnlylib_env* env = (lnlylib_env*)para;
   l_threadlocal_set(env);
   exit_code = (void*)(l_int)env->T->start(env);
-  l_finish_logging(env);
+  l_flush_logging(env);
   l_thread_free(env->T);
   return exit_code;
 }
@@ -1535,7 +1534,7 @@ lnlylib_main(int (*start)(lnlylib_env*), int argc, char** argv)
   }
 
   l_logm_s(main_env, "master exited");
-  l_finish_logging(main_env);
+  l_flush_logging(main_env);
 
   l_master_clean(main_env);
   l_threadlocal_release();
@@ -3612,8 +3611,8 @@ l_set_log_level(int n)
   return oldval;
 }
 
-static void
-l_finish_logging(lnlylib_env* E)
+L_EXTERN void
+l_flush_logging(lnlylib_env* E)
 {
   if (E == 0) {
     E = l_get_lnlylib_env();
@@ -3797,7 +3796,7 @@ l_dec_string_to_int(l_strn s)
 
   end = s.p;
   while (start < end--) {
-    value += *end * times;
+    value += (*end - '0') * times;
     times *= 10;
   }
 
@@ -3835,7 +3834,13 @@ l_hex_string_to_int(l_strn s)
 
   end = s.p;
   while (start < end--) {
-    value += *end * times;
+    if (*end <= '9') {
+      value += (*end - '0') * times;
+    } else if (*end <= 'F') {
+      value += (*end - 'A' + 10) * times;
+    } else {
+      value += (*end - 'a' + 10) * times;
+    }
     times *= 16;
   }
 
