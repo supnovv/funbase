@@ -907,6 +907,9 @@ l_master_insert_message(l_master* M, l_message* msg)
   }
 }
 
+/* it should be ET epoll or something like, the unread data doesn't
+trigger read ready events repeatedly in ET mode */
+
 static void
 l_master_generate_io_messages(l_service* S, l_srvcslot* slot)
 {
@@ -958,7 +961,7 @@ l_master_generate_io_messages(l_service* S, l_srvcslot* slot)
 }
 
 static void
-l_master_dispatch_io_event(l_ulong ud, l_ushort events)
+l_master_poll_io_events(l_ulong ud, l_ushort events)
 {
   l_master* M = L_MASTER;
   l_srvctable* stbl = M->stbl;
@@ -969,7 +972,13 @@ l_master_dispatch_io_event(l_ulong ud, l_ushort events)
   l_umedit seed = (l_umedit)(ud & 0xffffffff);
 
   slot = stbl->slot_arr + svid;
-  if (events == 0 || (slot->flags & L_SERVICE_ALIVE) == 0 || slot->seed_num != seed) {
+
+  if (events == 0) {
+    return;
+  }
+
+  if ((slot->flags & L_SERVICE_ALIVE) == 0 || slot->seed_num != seed) {
+    l_loge_1(LNUL, "service %svid destroyed or invalid", lsvid(ud));
     return;
   }
 
@@ -1318,11 +1327,7 @@ l_master_loop(lnlylib_env* main_env)
     }
 
     if (M->evmgr) {
-      int num_events = 0;
-      num_events = l_ioevmgr_try_wait(M->evmgr, l_master_dispatch_io_event);
-      if (num_events > 0) {
-        num_events += l_ioevmgr_try_wait(M->evmgr, l_master_dispatch_io_event);
-      }
+      l_ioevmgr_try_wait(M->evmgr, l_master_poll_io_events);
     }
 
     while ((S = (l_service*)l_squeue_pop(temp_svcq))) {
@@ -3097,9 +3102,28 @@ typedef struct {
   l_bin_ip remote;
   l_umedit flags;
   l_ulong user_svid;
-  l_squeue wrmq;
-  l_squeue rdmq;
+  l_squeue write_q;
+  l_byte* in_buffer_s;
+  l_byte* in_buffer_e;
+  l_byte* in_current;
+  l_int min_bytes_in;
+  l_timer read_timer;
 } l_socket_data_service;
+
+static void
+l_socket_data_service_init(l_socket_data_service* data_srvc, l_socket_listen_service* listen, const l_bin_ip* remote, l_ulong user_svid)
+{
+  data_srvc->listen = listen;
+  data_srvc->remote = *remote;
+  data_srvc->flags = 0;
+  data_srvc->user_svid = user_svid;
+  l_squeue_init(&data_srvc->write_q);
+  data_srvc->in_buffer_s = 0;
+  data_srvc->in_buffer_e = 0;
+  data_srvc->in_current = 0;
+  data_srvc->min_bytes_in = 1;
+  data_srvc->read_timer.id = 0;
+}
 
 static void
 l_socket_data_service_free(lnlylib_env* E, l_socket_data_service* s)
@@ -3107,9 +3131,7 @@ l_socket_data_service_free(lnlylib_env* E, l_socket_data_service* s)
   l_message* msg = 0;
   l_squeue msgq;
 
-  msgq = l_squeue_move(&s->wrmq);
-  l_squeue_push_queue(&msgq, &s->rdmq);
-
+  msgq = l_squeue_move(&s->write_q);
   while ((msg = (l_message*)l_squeue_pop(&msgq))) {
     l_release_message(E, msg);
   }
@@ -3188,17 +3210,12 @@ l_socket_listen_service_accept_conn(void* ud, l_socketconn* conn)
     l_socket_data_service* data_srvc = 0;
 
     listen = (l_socket_listen_service*)E->svud;
+
     data_srvc = (l_socket_data_service*)l_dqueue_pop(&listen->freeq);
     if (data_srvc == 0) {
       data_srvc = L_MALLOC_TYPE(E, l_socket_data_service);
     }
-
-    data_srvc->listen = listen;
-    data_srvc->remote = remote;
-    data_srvc->flags = 0;
-    data_srvc->user_svid = 0;
-    l_squeue_init(&data_srvc->wrmq);
-    l_squeue_init(&data_srvc->rdmq);
+    l_socket_data_service_init(data_srvc, listen, &remote, 0);
 
     l_create_event_poll_service(E, &l_socket_data_service_callback, data_srvc, conn->sock, 0);
   }
@@ -3213,15 +3230,12 @@ l_create_tcp_connect_service(lnlylib_env* E, const void* ip, l_ushort port, l_ui
   } else {
     l_socket_data_service* data_srvc = 0;
     data_srvc = L_MALLOC_TYPE(E, l_socket_data_service);
-    data_srvc->listen = 0;
-    data_srvc->remote = remote;
-    data_srvc->flags = 0;
-    data_srvc->user_svid = E->S->srvc_id;
-    l_squeue_init(&data_srvc->wrmq);
-    l_squeue_init(&data_srvc->rdmq); {
-    l_service_create_req req = {&l_socket_data_service_callback, data_srvc, creation_ctx, L_FREE_IN_SVUD_ON_FAIL | L_DONT_AUTO_RSP_ON_SUCCESS, L_EMPTY_HDL};
-    l_send_message_to_master(E, L_MSG_SERVICE_CREATE_REQ, &req, sizeof(l_service_create_req));
-  }}
+    l_socket_data_service_init(data_srvc, 0, &remote, E->S->srvc_id);
+
+    { l_service_create_req req = {&l_socket_data_service_callback, data_srvc, creation_ctx, L_FREE_IN_SVUD_ON_FAIL | L_DONT_AUTO_RSP_ON_SUCCESS, L_EMPTY_HDL};
+      l_send_message_to_master(E, L_MSG_SERVICE_CREATE_REQ, &req, sizeof(l_service_create_req));
+    }
+  }
 }
 
 typedef struct {
@@ -3287,32 +3301,11 @@ l_socket_listen_service_proc(lnlylib_env* E)
 
 typedef struct {
   l_ulong from_svid;
-  l_uint read_id;
-  l_byte* start;
-  l_byte* buffer_end;
-  l_byte* cur_pos;
-  l_int min_read;
-} l_socket_read_req;
-
-typedef struct {
-  l_ulong from_svid;
   l_uint write_id;
   const l_byte* start;
   const l_byte* buffer_end;
   const l_byte* cur_pos;
 } l_socket_write_req;
-
-L_EXTERN void
-l_send_socket_read_req(lnlylib_env* E, l_ulong sock_svid, void* buffer, l_int maxlen, l_int min_read, l_uint read_id)
-{
-  min_read = min_read > 1 ? min_read : 1;
-  if (buffer && maxlen >= min_read) {
-    l_socket_read_req req = {E->S->srvc_id, read_id, buffer, buffer + maxlen, buffer, min_read};
-    l_send_message_to(E, sock_svid, 0, L_MSG_SOCK_READ_REQ, &req, sizeof(l_socket_read_req));
-  } else {
-    l_loge_3(E, "read buffer %p %d is not big enough %d", lp(buffer), ld(maxlen), ld(min_read));
-  }
-}
 
 L_EXTERN void
 l_send_socket_write_req(lnlylib_env* E, l_ulong sock_svid, const void* data, l_int size, l_uint write_id)
@@ -3377,6 +3370,127 @@ l_socket_data_service_on_destroy(lnlylib_env* E)
   }
 }
 
+#define L_SOCK_FLAG_READY_RX_DATA 0x01
+#define L_SOCK_FLAG_READY_TX_DATA 0x02
+#define L_SOCK_FLAG_USER_READ_REQ 0x04
+
+typedef struct {
+  l_byte* in_buffer_s;
+  l_byte* in_buffer_e;
+  l_int min_bytes_in;
+  l_long timeout_ms;
+} l_socket_read_req;
+
+L_EXTERN void
+l_socket_data_read_req(lnlylib_env* E, l_ulong sock_svid, void* in_buffer_s, void* in_buffer_e, l_int min_bytes_in, l_long timeout_ms)
+{
+  if (!in_buffer_s || in_buffer_s <= in_buffer_e || min_bytes_in > in_buffer_e - in_buffer_s) {
+    l_loge_3(E, "invalid input buffer %p %p %d", lp(in_buffer_s), lp(in_buffer_e), ld(min_bytes_in));
+  } else {
+    l_socket_read_req req = {in_buffer_s, in_buffer_e, min_bytes_in < 1 ? 1 : min_bytes_in, timeout_ms};
+    l_send_message_to(E, sock_svid, 0, L_MSG_SOCK_READ_REQ, &req, sizeof(l_socket_read_req));
+  }
+}
+
+static l_bool
+l_socket_data_service_read_data(lnlylib_env* E, l_socket_data_service* data_srvc)
+{
+  l_int left_size = data_srvc->in_buffer_e - data_srvc->in_current;
+  l_service* S = E->S;
+  l_int n = 0;
+  l_error error_no = 0;
+
+  if (data_srvc->flags & L_SOCK_FLAG_READY_RX_DATA) {
+    n = l_read_data(S->ioev_hdl, data_srvc->in_current, left_size, &error_no);
+    if (error_no == L_STATUS_EAGAIN) {
+      data_srvc->flags &= (~L_SOCK_FLAG_READY_RX_DATA);
+    }
+  }
+
+  if (n > 0) {
+    data_srvc->in_current += n;
+    if (data_srvc->in_current - data_srvc->in_buffer_s >= data_srvc->min_bytes_in) {
+      l_socket_read_rsp rsp = {n, error_no};
+      l_send_message_impl(E, data_srvc->user_svid, L_MSG_SOCK_READ_RSP, &rsp, sizeof(l_socket_read_rsp));
+
+      if (data_srvc->read_timer.id) {
+        l_cancel_timer(E, &data_srvc->read_timer);
+        data_srvc->read_timer.id = 0;
+      }
+
+      data_srvc->flags &= (~L_SOCK_FLAG_USER_READ_REQ);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+static void
+l_socket_data_service_read_data_timeout(lnlylib_env* E, void* para)
+{
+  l_socket_data_service* data_srvc = (l_socket_data_service*)para;
+  if (data_srvc->read_timer.id) {
+    l_socket_read_rsp rsp = {0, L_STATUS_ETIMEOUT};
+    l_send_message_impl(E, data_srvc->user_svid, L_MSG_SOCK_READ_RSP, &rsp, sizeof(l_socket_read_rsp));
+    data_srvc->read_timer.id = 0;
+  }
+}
+
+static void
+l_socket_data_service_handle_user_message(lnlylib_env* E, l_socket_data_service* data_srvc, l_message* msg)
+{
+  l_service* S = E->S;
+  switch (msg->mssg_id) {
+  case L_MSG_SOCK_READ_REQ:
+    if (data_srvc->flags & L_SOCK_FLAG_USER_READ_REQ) {
+      l_loge_s(E, "previous read request is not finished yet");
+    } else {
+      l_socket_read_req* req = (l_socket_read_req*)msg->mssg_data;
+      data_srvc->in_buffer_s = req->in_buffer_s;
+      data_srvc->in_buffer_e = req->in_buffer_e;
+      data_srvc->in_current = data_srvc->in_buffer_s;
+      data_srvc->min_bytes_in = req->min_bytes_in;
+      data_srvc->read_timer.id = 0;
+      if (!l_socket_data_service_read_data(E, data_srvc)) {
+        data_srvc->flags |= L_SOCK_FLAG_USER_READ_REQ;
+        if (req->timeout_ms > 0) {
+          l_create_timer(E, (l_uint)&data_srvc->read_timer, req->timeout_ms, l_socket_data_service_read_data_timeout, data_srvc);
+        }
+      }
+    }
+    break;
+  case L_MSG_SOCK_WRITE_REQ:
+    /* TODO: need write data on request */
+    msg->mssg_flags |= L_MSSG_FLAG_DONT_AUTO_FREE;
+    l_squeue_push(&data_srvc->write_q, &msg->node);
+    break;
+  case L_MSG_SOCK_RECOVER_REQ:
+    if (l_socket_nt_empty(&S->ioev_hdl)) { /* the socket doesn't in error state */
+    } else {
+      /* TODO */
+    }
+    break;
+  case L_MSG_SOCK_CLOSE_CMD: {
+    if (l_is_initiating_service(data_srvc)) {
+      l_service_del_event(E);
+      l_stop_service(E);
+    } else {
+      l_sock_disc_cmd cmd = {data_srvc}; /* this service is destroyed after this cmd */
+      l_send_message_impl(E, S->from_id, L_MSG_SOCK_DISC_CMD, &cmd, sizeof(l_sock_disc_cmd));
+    }}
+    break;
+  case L_MSG_STOP_SKLS_CMD:
+    if (!l_is_initiating_service(data_srvc)) {
+      /* TODO */
+    }
+    break;
+  default:
+    l_loge_1(E, "invalid socket user message %x", lx(msg->mssg_id));
+    break;
+  }
+}
+
 static void
 l_socket_data_service_proc(lnlylib_env* E)
 {
@@ -3432,28 +3546,22 @@ l_socket_data_service_proc(lnlylib_env* E)
         data_srvc->listen = (void*)(l_uint)2;
       }
     }{
-    l_message* write_req_msg = (l_message*)l_squeue_top(&data_srvc->wrmq);
+    l_message* write_req_msg = (l_message*)l_squeue_top(&data_srvc->write_q);
     if (write_req_msg) {
       l_socket_write_req* req = (l_socket_write_req*)write_req_msg->mssg_data;
       req->cur_pos += l_data_write(S->ioev_hdl, req->cur_pos, req->buffer_end - req->cur_pos);
       if (req->cur_pos == req->buffer_end) {
         l_socket_write_rsp rsp = {req->write_id, req->cur_pos - req->start};
         l_send_message_impl(E, req->from_svid, L_MSG_SOCK_WRITE_RSP, &rsp, sizeof(l_socket_write_rsp));
-        l_release_message(E, (l_message*)l_squeue_pop(&data_srvc->wrmq));
+        l_release_message(E, (l_message*)l_squeue_pop(&data_srvc->write_q));
       }
     }}
     break;
-  case L_MSG_SOCK_READY_RX: {
-    l_message* read_req_msg = (l_message*)l_squeue_top(&data_srvc->rdmq);
-    if (read_req_msg) {
-      l_socket_read_req* req = (l_socket_read_req*)read_req_msg->mssg_data;
-      req->cur_pos += l_data_read(S->ioev_hdl, req->cur_pos, req->buffer_end - req->cur_pos);
-      if (req->cur_pos - req->start >= req->min_read || req->cur_pos == req->buffer_end) {
-        l_socket_read_rsp rsp = {req->read_id, req->cur_pos - req->start};
-        l_send_message_impl(E, req->from_svid, L_MSG_SOCK_READ_RSP, &rsp, sizeof(l_socket_read_rsp));
-        l_release_message(E, (l_message*)l_squeue_pop(&data_srvc->rdmq));
-      }
-    }}
+  case L_MSG_SOCK_READY_RX:
+    data_srvc->flags |= L_SOCK_FLAG_READY_RX_DATA;
+    if (data_srvc->flags & L_SOCK_FLAG_USER_READ_REQ) {
+      l_socket_data_service_read_data(E, data_srvc);
+    }
     break;
   case L_MSG_SOCK_DISC_NTF:
   case L_MSG_SOCK_ERROR_NTF:
@@ -3470,39 +3578,23 @@ l_socket_data_service_proc(lnlylib_env* E)
       l_service_del_event(E); /* only del event, user service may be do recovery */
     }
     break;
-  /* messages from user service */
-  case L_MSG_SOCK_READ_REQ:
-    /* TODO: need read data on request */
-    msg->mssg_flags |= L_MSSG_FLAG_DONT_AUTO_FREE;
-    l_squeue_push(&data_srvc->rdmq, &msg->node);
-    break;
-  case L_MSG_SOCK_WRITE_REQ:
-    /* TODO: need write data on request */
-    msg->mssg_flags |= L_MSSG_FLAG_DONT_AUTO_FREE;
-    l_squeue_push(&data_srvc->wrmq, &msg->node);
-    break;
-  case L_MSG_SOCK_RECOVER_REQ:
-    if (l_socket_nt_empty(&S->ioev_hdl)) { /* the socket doesn't in error state */
+  case L_MSG_TIMER_CREATE_RSP: {
+    l_timer_create_rsp* rsp = (l_timer_create_rsp*)msg->mssg_data;
+    l_timer* timer = (l_timer*)rsp->timer_ctx;
+    if (rsp->timer.id > L_TIMER_MIN_VALID_TMID) {
+      *timer = rsp->timer;
     } else {
-      /* TODO */
-    }
-    break;
-  case L_MSG_SOCK_CLOSE_CMD: {
-    if (l_is_initiating_service(data_srvc)) {
-      l_service_del_event(E);
-      l_stop_service(E);
-    } else {
-      l_sock_disc_cmd cmd = {data_srvc}; /* this service is destroyed after this cmd */
-      l_send_message_impl(E, S->from_id, L_MSG_SOCK_DISC_CMD, &cmd, sizeof(l_sock_disc_cmd));
+      *timer = (l_timer){0};
+      l_loge_s(E, "create timer failed");
     }}
     break;
-  case L_MSG_STOP_SKLS_CMD:
-    if (!l_is_initiating_service(data_srvc)) {
-      /* TODO */
-    }
-    break;
+  /* messages from user service */
   default:
-    l_loge_2(E, "invalid message %x to socket data service %svid", lx(msg->mssg_id), lx(S->srvc_id));
+    if (msg->from_svid != data_srvc->user_svid) {
+      l_loge_2(E, "invalid message %x to socket data service %svid", lx(msg->mssg_id), lx(S->srvc_id));
+    } else {
+      l_socket_data_service_handle_user_message(E, data_srvc, msg);
+    }
     break;
   }
 }

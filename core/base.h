@@ -57,6 +57,16 @@ l_int l_uint - pointer-size integer **/
 #undef L_UNUSED
 #define L_UNUSED(a) ((void)a)
 
+typedef enum {
+  L_STATUS_OK,
+  L_STATUS_ERROR = (l_int)-10,
+  L_STATUS_EARGS = L_STATUS_ERROR - 1,
+  L_STATUS_EREAD = L_STATUS_ERROR - 2,
+  L_STATUS_EWRITE = L_STATUS_ERROR - 3,
+  L_STATUS_EAGAIN = L_STATUS_ERROR - 4,
+  L_STATUS_ETIMEOUT = L_STATUS_ERROR - 5
+} l_error;
+
 typedef struct {
   const l_byte* p;
   l_int n;
@@ -122,6 +132,27 @@ l_strp_l(const void* p, l_int len)
   s.e = s.s + (len > 0 ? len : 0);
   return s;
 }
+
+#define L_NUL '\0'   /* \x00 Null */
+#define L_BEL '\a'   /* \x07 Bell */
+#define L_BS  '\b'   /* \x08 Backspace */
+#define L_HT  '\t'   /* \x09 Horizontal Tab */
+#define L_LF  '\n'   /* \x0A Line Feed */
+#define L_VT  '\v'   /* \x0B Vertical Tab */
+#define L_FF  '\f'   /* \x0C Form Feed */
+#define L_CR  '\r'   /* \x0D Carriage Return */
+#define L_ESC '\x1B' /* \x1B Escape */
+#define L_SP  '\x20' /* \x20 Space */
+#define L_DEL '\x7F' /* \x7F Delete */
+#define L_TAB L_HT
+
+#define L_S_HT  "\t"   /* \x09 Horizontal Tab */
+#define L_S_LF  "\n"   /* \x0A Line Feed */
+#define L_S_VT  "\v"   /* \x0B Vertical Tab */
+#define L_S_FF  "\f"   /* \x0C Form Feed */
+#define L_S_CR  "\r"   /* \x0D Carriage Return */
+#define L_S_SP  "\x20" /* \x20 Space */
+#define L_S_TAB L_S_HT
 
 L_EXTERN l_bool l_is_lower(l_byte ch);
 L_EXTERN l_bool l_is_upper(l_byte ch);

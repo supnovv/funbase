@@ -129,8 +129,8 @@ L_EXTERN void l_report_service_created(lnlylib_env* E, l_bool success);
 L_EXTERN void l_stop_listen_service(lnlylib_env* E);
 
 typedef struct {
-  l_uint read_id;
-  l_int size;
+  l_int bytes_read; /* bytes_read can be > 0 when status indicates error */
+  l_error status; /* 0 success, L_STATUS_EARGS, L_STATUS_EREAD, or L_STATUS_ETIMEOUT */
 } l_socket_read_rsp;
 
 typedef struct {
@@ -138,7 +138,7 @@ typedef struct {
   l_int size;
 } l_socket_write_rsp;
 
-L_EXTERN void l_send_socket_read_req(lnlylib_env* E, l_ulong sock_svid, void* buffer, l_int maxlen, l_int min_read, l_uint read_id);
+L_EXTERN void l_socket_data_read_req(lnlylib_env* E, l_ulong sock_svid, void* in_buffer_s, void* in_buffer_e, l_int min_bytes_in, l_long timeout_ms);
 L_EXTERN void l_send_socket_write_req(lnlylib_env* E, l_ulong sock_svid, const void* data, l_int size, l_uint write_id);
 L_EXTERN void l_send_socket_close_cmd(lnlylib_env* E, l_ulong sock_svid);
 

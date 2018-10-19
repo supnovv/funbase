@@ -2231,6 +2231,46 @@ l_impl_read(int fd, void* out, l_int size)
   }
 }
 
+L_EXTERN l_int
+l_read_data(l_filehdl hdl, void* out, l_int size, l_error* error_no)
+{
+  if (out == 0 || size <= 0 || size > 0x7fff0000) {
+    l_loge_2(LNUL, "l_read_data error %p %d", lp(out), ld(size));
+    if (error_no) *error_no = L_STATUS_EARGS;
+    return 0;
+  } else {
+    l_int done = 0;
+    ssize_t n = 0;
+    int status = 0;
+continue_read:
+    if ((n = read(hdl.fd, l_strc(out) + done, (size_t)(size - done))) < 0) {
+      status = errno;
+      if (status == EINTR) {
+        /* interrupted by a signal before read any bytes,
+        try to read again. */
+        goto continue_read;
+      } else if (status == EAGAIN || status == EWOULDBLOCK) {
+        if (error_no) *error_no = L_STATUS_EAGAIN; /* data currently not availabe, all data is read */
+        return done;
+      } else {
+        l_loge_1(LNUL, "read %s", lserror(status));
+        if (error_no) *error_no = L_STATUS_EREAD;
+        return done;
+      }
+    }
+    /* note that one case about read bytes n < count is: at least
+    one byte is read and then interrupted by a signal, the call is
+    returned success in this case. */
+    done += n;
+    if (done < size) {
+      goto continue_read; /* read until block or error */
+    } else {
+      if (error_no) *error_no = 0;
+      return size;
+    }
+  }
+}
+
 static l_int
 l_impl_write(int fd, const void* data, l_int size)
 {

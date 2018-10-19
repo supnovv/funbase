@@ -414,8 +414,8 @@ l_destroy_string_pattern(l_string_pattern** patt)
   }
 }
 
-L_EXTERN l_string_pattern*
-l_create_string_pattern(const l_strn* strn, l_int num_of_strings, l_bool case_insensitive)
+static l_string_pattern*
+l_create_string_pattern_x(const l_strn* strn, l_int num_of_strings, l_bool case_insensitive)
 {
   if (strn == 0 || num_of_strings <= 0 || num_of_strings > 64) {
     return 0;
@@ -722,6 +722,18 @@ l_create_string_pattern(const l_strn* strn, l_int num_of_strings, l_bool case_in
   return l_string_pattern_create_impl(slice_info, num_slices, slice_type, case_insensitive);
 }}}}
 
+L_EXTERN l_string_pattern*
+l_create_string_pattern(const l_strn* strn, l_int num_of_strings)
+{
+  return l_create_string_pattern_x(strn, num_of_strings, true);
+}
+
+L_EXTERN l_string_pattern*
+l_create_string_pattern_case_sensitive(const l_strn* strn, l_int num_of_strings)
+{
+  return l_create_string_pattern_x(strn, num_of_strings, false);
+}
+
 static l_ulong
 l_match_current_slice(const l_char_slice* slice, l_int slice_type, l_int ch)
 {
@@ -838,6 +850,22 @@ l_string_match(const l_string_pattern* patt, const l_byte* start, const l_byte* 
   return l_string_match_x(patt, start, pend, 0, 0);
 }
 
+L_EXTERN l_match_result
+l_skip_space_and_match(const l_string_pattern* space_patt, const l_string_pattern* match_patt, const l_byte* start, const l_byte* pend)
+{
+  const l_byte* e = 0;
+  while ((e = l_string_match(space_patt, start, pend)) > l_string_too_short) {
+    start = e; /* continue to match space */
+  }
+  if (e == l_string_too_short) {
+    return (l_match_result){l_string_too_short, 0, 0};
+  } else {
+    l_match_result m;
+    m.pend = l_string_match_x(match_patt, start, pend, &m.string_i, &m.match_len);
+    return m;
+  }
+}
+
 L_EXTERN const l_byte* /* match exactly n times, return 0 or l_string_too_short for fail */
 l_string_match_times(const l_string_pattern* patt, const l_byte* start, const l_byte* pend, l_int n)
 {
@@ -906,7 +934,7 @@ l_string_match_test()
         l_literal_strn("HEAD"),
         l_literal_strn("POST")
       };
-    l_string_pattern* patt = l_create_string_pattern(http_methods, 3, true);
+    l_string_pattern* patt = l_create_string_pattern_x(http_methods, 3, true);
 
     l_assert(LNUL, patt->slice_type == 0);
     l_assert(LNUL, patt->case_insensitive == true);
@@ -1062,7 +1090,7 @@ l_string_match_test()
        d        a        r        %[az]    %[az]    e        s        s<e>
        e        a        r        t        h        q        u        a        k        e        s */
 
-    l_string_pattern* patt = l_create_string_pattern(range_match_test, 10, false);
+    l_string_pattern* patt = l_create_string_pattern_x(range_match_test, 10, false);
 
     l_assert(LNUL, patt->slice_type == 1);
     l_assert(LNUL, patt->case_insensitive == false);

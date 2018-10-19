@@ -244,8 +244,8 @@ L_EXTERN l_socket l_socket_tcp_connect(const l_sockaddr* addr, l_bool* done);
 L_EXTERN l_bool l_socket_cmpl_connect(l_socket sock);
 L_EXTERN void l_socket_close(l_socket* sock);
 L_EXTERN void l_socket_shutdown(l_socket* sock, l_byte r_w_a);
-L_EXTERN l_int l_data_read(l_filehdl hdl, void* out, l_int size);
 L_EXTERN l_int l_data_write(l_filehdl hdl, const void* from, l_int size);
+L_EXTERN l_int l_read_data(l_filehdl hdl, void* out, l_int size, l_error* error_no);
 
 /** io events **/
 
