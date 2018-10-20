@@ -5251,6 +5251,20 @@ l_file_open_read_write(const void* name)
   return l_impl_file_open(name, "rb+");
 }
 
+L_EXTERN l_file
+l_file_open_read_append(const void* name)
+{
+  l_file f;
+
+  f.file = fopen((const char*)name, "rb");
+
+  if (f.file && freopen((const char*)name, "ab+", (FILE*)f.file)) {
+    return f;
+  }
+
+  return (l_file){0};
+}
+
 L_EXTERN void
 l_file_close(l_file* s)
 {
@@ -5423,6 +5437,49 @@ l_file_get(l_file* s, l_byte* ch)
     return 0;
   }
   return 1;
+}
+
+L_EXTERN l_bool
+l_file_read_line(l_file* s, l_byte* out, l_int len)
+{
+  int ch = 0;
+  l_byte* pend = out + len - 1; /* 1 for terminate zero char */
+
+  if (!out || len <= 1) {
+    return false;
+  }
+
+  /* there is no char left in the file */
+  if ((ch = getc((FILE*)s->file)) == EOF) {
+    return false;
+  }
+
+  *out++ = (l_byte)ch;
+
+  while (out < pend) {
+    if ((ch = getc((FILE*)s->file)) != EOF) {
+      *out++ = (l_byte)ch;
+      if (ch == '\n') {
+        *out = 0;
+        return true;
+      }
+    } else {
+      *out = 0;
+      return true;
+    }
+  }
+
+  *out = 0;
+
+  /* skip rest characters in the line */
+
+  while ((ch = getc((FILE*)s->file)) != EOF) {
+    if (ch == '\n') {
+      break;
+    }
+  }
+
+  return true;
 }
 
 L_EXTERN l_bool

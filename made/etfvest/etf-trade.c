@@ -36,7 +36,7 @@ l_read_a_trade_item(const l_byte* line, l_trade_item* item)
   /* date     price buy-sell shares fee-rate trade-type cost     cost-price total-shares total-cost market-value dest-value
      20180119 0.999 B        30000  3        VR         29978.99 (0.999)    30000        29978.99   29970.00     31000 */
 
-  n = sscanf(line, " %8s %f %c %d %f %2s", item->date, &item->price, &buy_or_sell, &item->shares, &item->fee_rate, trade_type);
+  n = sscanf(line,  "%8s %lf %c %d %lf %2s", item->date, &item->price, &buy_or_sell, &item->shares, &item->fee_rate, trade_type);
 
   if (n != 6) {
     goto read_fail;
@@ -76,18 +76,59 @@ read_fail:
 }
 
 typedef struct {
-  l_trade_item trade;
-  double cost;
   l_int total_shares;
   double total_cost;
-  double cost_price;
   double market_value;
   double dest_value;
-} l_eft_trade;
+} l_trade_sum;
+
+static l_bool
+l_read_a_trade_sum(const l_byte* line, l_trade_sum* sum)
+{
+}
+
+static l_bool
+l_read_a_trade_item_and_sum(const l_byte* line, l_trade_item* item, l_trade_sum* sum)
+{
+}
+
+static l_bool
+l_process_etf_file(const l_byte* name)
+{
+  l_byte text[1024] = {0};
+  l_trade_item item_0, item_1, item_2, item_3, item_4, item_5;
+  l_trade_sum sum_0, sum_1, sum_2, sum_3, sum4, sum5;
+  l_int cur_items = 0;
+  l_int max_items = 5;
+  l_file file;
+
+  file = l_file_open_read_append(name);
+  if (l_file_nt_open(&file)) {
+    return false;
+  }
+
+  /* date     price buy-sell shares fee-rate trade-type cost     cost-price total-shares total-cost market-value dest-value
+     20180119 0.999 B        30000  3        VR         29978.99 (0.999)    30000        29978.99   29970.00     31000 */
+  // print "add <date> <price> <buy-sell> <shares> <fee-rate> <trade-type> - add 20180119 0.999 B 30000 3 VR\n"
+  // print "del <n>\n"
+  // print "commit\n"
+
+  if (!l_file_read_line(&file, text, 1024)) {
+    /* 1st time file read - read nothing out */
+    l_trade_sum_reset(&prev_sum);
+  } else {
+    /* there is somthing, read until nothing can be read */
+    while (l_file_read_line(&file, text, 1024)) {
+      /* print out the line */
+    }
+    if (!l_read_a_trade_sum(text, &prev_sum)) {
+     goto close_and_fail;
+    }
+  }
+
   
-typedef struct {  
-  l_byte* file;
-  l_int* line_end;
-  l_int eidx[1024];
-} l_file_lines;
+close_and_fail:
+  l_file_close(&file);
+  return false;
+}
 

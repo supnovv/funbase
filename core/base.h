@@ -867,13 +867,27 @@ typedef struct {
   void* file;
 } l_file;
 
-L_EXTERN l_file l_file_open_read(const void* name);
-L_EXTERN l_file l_file_open_read_nobuf(const void* name);
-L_EXTERN l_file l_file_open_write(const void* name);
-L_EXTERN l_file l_file_open_write_nobuf(const void* name);
-L_EXTERN l_file l_file_open_append(const void* name);
-L_EXTERN l_file l_file_open_append_nobuf(const void* name);
-L_EXTERN l_file l_file_open_read_write(const void* name);
+L_INLINE l_bool
+l_file_is_open(const l_file* s)
+{
+  return s->file != 0;
+}
+
+L_INLINE l_bool
+l_file_nt_open(const l_file* s)
+{
+  return s->file == 0;
+}
+
+L_EXTERN l_file l_file_open_read(const void* name); /* the file must exist */
+L_EXTERN l_file l_file_open_read_nobuf(const void* name); /* the file must exist */
+L_EXTERN l_file l_file_open_write(const void* name); /* create new file if not exist */
+L_EXTERN l_file l_file_open_write_nobuf(const void* name); /* create new file if not exist */
+L_EXTERN l_file l_file_open_append(const void* name); /* create new file if not exist */
+L_EXTERN l_file l_file_open_append_nobuf(const void* name); /* create new file if not exist */
+L_EXTERN l_file l_file_open_read_write(const void* name); /* the file must exist */
+L_EXTERN l_file l_file_open_read_append(const void* name); /* the file must exist */
+L_EXTERN l_bool l_file_read_line(l_file* s, l_byte* out, l_int len); /* return true means read something */
 L_EXTERN void l_file_close(l_file* s);
 L_EXTERN void l_file_clearerr(l_file* s);
 L_EXTERN l_bool l_file_flush(l_file* s);
