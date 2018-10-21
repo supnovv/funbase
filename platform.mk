@@ -74,6 +74,7 @@ CMPL = $(CC) $(CMPL_OPTIONS) -c -o$@
 LINK_OPTIONS = $(LDFLAGS) $(LDPATH)
 LINK = $(CC) $(LINK_OPTIONS) -o$@
 
+AR = ar rcv $@
 RM = rm -rf
 MKDIR = mkdir -p
 
@@ -104,6 +105,8 @@ OSIINCS = $(COREINCS) \
           osi/base.h \
           osi/lnxdefs.h
 
+LNLYLIB = liblnly$(LIB)
+
 LNLYTEST = $(OUTDIR)/test$(EXE)
 TESTOBJS = $(OUTDIR)/test$(OBJ)
 TESTDEPS = core/test.c \
@@ -112,7 +115,7 @@ TESTDEPS = core/test.c \
 ifeq ($(PLAT), none)
 default: none
 else
-default: echo makeout $(AUTOCONF) $(LNLYTEST)
+default: echo makeout $(AUTOCONF) $(LNLYLIB) $(LNLYTEST)
 endif
 
 none:
@@ -143,6 +146,10 @@ $(AUTOCONF): $(AUTOOBJS) $(AUTOINCS)
 	@echo "$@ <- $(AUTOOBJS) | $(LINK) $(LDLIBS)"
 	@$(LINK) $(AUTOOBJS) $(LDLIBS)
 	./$@
+
+$(LNLYLIB): $(COREOBJS) $(OSIOBJS)
+	@echo "$@ <- $(AR) $(COREOBJS) $(OSIOBJS)"
+	@$(AR) $(COREOBJS) $(OSIOBJS)
 
 $(LNLYTEST): $(COREOBJS) $(COREINCS) $(OSIOBJS) $(OSIINCS) $(TESTOBJS) $(TESTDEPS)
 	@echo "$@ <- $(TESTOBJS) | $(LINK) $(LDLIBS)"
