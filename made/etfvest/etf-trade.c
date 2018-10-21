@@ -361,7 +361,10 @@ l_process_etf_file(const char* name, l_trade_entry* init_entry, l_file* file)
       } else {
         curidx = 1;
         l_trade_entry_reset(&entry_arr[0]);
-        l_file_rewind(file);
+        if (!l_file_rewind(file)) {
+          printf("Rewind file failed.\n");
+          return;
+        }
         while (l_file_read_line(file, text_line, 1024)) {
           printf(" .. get line %s\n", text_line);
           if (curidx == L_MAX_TRADE_ENTRIES) {
@@ -380,7 +383,10 @@ l_process_etf_file(const char* name, l_trade_entry* init_entry, l_file* file)
           curidx += 1;
         }
         l_display_trade_entries(entry_arr, 1, curidx);
-        l_file_rewind(file);
+        if (!l_file_rewind(file)) {
+          printf("Rewind file before commit failed.\n");
+          return;
+        }
         l_commit_trade_entries(file, entry_arr, 1, curidx);
         return;
       }
@@ -420,6 +426,8 @@ int main(int argc, char* argv[])
   l_byte text_line[1024];
   l_trade_entry init_entry;
   l_file file;
+
+  lnlylib_setup();
 
   if (argc < 2) {
     printf("Usage: " L_PROGRAM " filename.etf\n");

@@ -1500,6 +1500,12 @@ l_worker_loop(lnlylib_env* E)
 
 /** main function **/
 
+L_EXTERN void
+lnlylib_setup()
+{
+  l_threadlocal_prepare();
+}
+
 L_EXTERN int
 lnlylib_main(int (*start)(lnlylib_env*), int argc, char** argv)
 {

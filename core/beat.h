@@ -7,6 +7,7 @@ typedef struct lnlylib_env lnlylib_env;
 typedef struct l_service l_service;
 typedef struct l_message l_message;
 
+L_EXTERN void lnlylib_setup();
 L_EXTERN int lnlylib_main(int (*start)(lnlylib_env*), int argc, char** argv);
 
 typedef struct l_service_access_point {
