@@ -129,7 +129,7 @@ makeout:
 	$(MKDIR) $(OUTDIR)/osi
 
 clean:
-	$(RM) $(OUTDIR) autoconf.h
+	$(RM) $(OUTDIR) autoconf.h ./*.log
 
 .PHONY: default none echo makeout clean
 
