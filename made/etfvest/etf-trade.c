@@ -9,6 +9,7 @@
 #define L_TRADE_FLAG_VT 0x08
 #define L_TRADE_FLAG_CB 0x10
 #define L_TRADE_FLAG_BO 0x20
+#define L_TRADE_FLAG_BI 0x40
 
 typedef struct {
   char date[16];
@@ -16,7 +17,7 @@ typedef struct {
   int flags;
   int shares;
   double fee_rate;
-  char strategy[8];
+  char strategy[16];
   double bonus;
 } l_etf_trade;
 
@@ -38,6 +39,8 @@ l_etf_trade_reset(l_etf_trade* trade)
   trade->flags = 0;
   trade->shares = 0;
   trade->fee_rate = 0;
+  trade->strategy[0] = 0;
+  trade->bonus = 0;
 }
 
 static void
@@ -91,15 +94,15 @@ static l_bool
 l_trade_entry_build(l_trade_entry* curr, l_trade_entry* prev)
 {
   l_etf_trade* trade = &curr->trade;
-  double trade_cost = trade->price * trade->shares;
-  double trade_fee = l_double_round(trade_cost * trade->fee_rate, 2);
+  double trade_value = trade->price * trade->shares;
+  double trade_fee = l_double_round(trade_value * trade->fee_rate, 2);
 
   if (trade->flags & L_TRADE_FLAG_BUY) {
-    curr->trade_cost = trade_cost + trade_fee;
+    curr->trade_cost = trade_value + trade_fee;
     curr->total_shares = prev->total_shares + trade->shares;
     curr->total_cost = prev->total_cost + curr->trade_cost;
   } else {
-    curr->trade_cost = trade_cost;
+    curr->trade_cost = trade_value;
     curr->total_shares = prev->total_shares - trade->shares;
     if (curr->total_shares < 0) return false;
     curr->total_cost = prev->total_cost - curr->trade_cost + trade_fee;
@@ -123,6 +126,8 @@ l_trade_entry_build(l_trade_entry* curr, l_trade_entry* prev)
     curr->dest_value = (curr->market_value > prev->total_cost ? curr->market_value : prev->total_cost);
   } else if (trade->flags & L_TRADE_FLAG_BO) {
     curr->dest_value = prev->dest_value - trade->bonus;
+  } else if (trade->flags & L_TRADE_FLAG_BI) {
+    curr->dest_value = prev->dest_value + curr->trade_cost;
   } else {
     return false;
   }
@@ -140,9 +145,9 @@ l_read_etf_trade(const l_byte* stream, l_etf_trade* trade)
      20180119 0.999 B        30000  3        VR */
 
   if (stream) {
-    n = sscanf((const char*)stream,  " %8s %lf %c %d %lf %s", trade->date, &trade->price, &buy_or_sell, &trade->shares, &trade->fee_rate, trade->strategy);
+    n = sscanf((const char*)stream, " %8s %lf %c %d %lf %15s", trade->date, &trade->price, &buy_or_sell, &trade->shares, &trade->fee_rate, trade->strategy);
   } else {
-    n = scanf(" %8s %lf %c %d %lf %s", trade->date, &trade->price, &buy_or_sell, &trade->shares, &trade->fee_rate, trade->strategy);
+    n = scanf(" %8s %lf %c %d %lf %15s", trade->date, &trade->price, &buy_or_sell, &trade->shares, &trade->fee_rate, trade->strategy);
   }
 
   printf(" .. trade elements %d 6\n", n);
@@ -211,6 +216,11 @@ l_read_etf_trade(const l_byte* stream, l_etf_trade* trade)
     if (trade->bonus < 0) {
       goto read_fail;
     }
+  } else if (trade->strategy[0] == 'B' && trade->strategy[1] == 'I') {
+    trade->flags |= L_TRADE_FLAG_BI;
+    if ((trade->flags & L_TRADE_FLAG_BUY) == 0) {
+      goto read_fail;
+    }
   } else {
     goto read_fail;
   }
@@ -271,11 +281,11 @@ l_display_trade_entries(l_trade_entry* entry_arr, l_int index_s, l_int index_e)
   /* date     price buy-sell shares fee-rate strategy cost     total-shares total-cost cost-price market-value dest-value
      20180119 0.999 B        30000  3        VR       29978.99 30000        29978.99   0.999      29970.00     31000 */
 
-  printf("\nDATE     PRICE BUY-SELL SHARES FEE-RATE STRATEGY COST     TOTAL-SHARES TOTAL-COST COST-PRICE MARKET-VALUE DEST-VALUE\n");
+  printf("\nDATE     PRICE BUY-SELL SHARES FEE-RATE TRADE-STRATEGY TRADE-COST TOTAL-SHARES TOTAL-COST COST-PRICE MARKET-VALUE DEST-VALUE\n");
 
   for (; curr < entry_e; curr += 1) {
     trade = &curr->trade;
-    printf("%8s %5.3lf %-8c %6d %8.1lf %-8s %8.2lf %12d %10.2lf %10.3lf %12.2lf %10.2lf\n",
+    printf("%8s %5.3lf %-8c %6d %8.1lf %-14s %10.2lf %12d %10.2lf %10.3lf %12.2lf %10.2lf\n",
       trade->date, trade->price, (trade->flags & L_TRADE_FLAG_BUY) ? 'B' : 'S', trade->shares, trade->fee_rate * 10000, trade->strategy,
       curr->trade_cost, curr->total_shares, curr->total_cost, curr->cost_price, curr->market_value, curr->dest_value);
   }
@@ -291,7 +301,7 @@ l_commit_trade_entries(l_file* f, l_trade_entry* entry_arr, l_int index_s, l_int
 
   for (; curr < entry_e; curr += 1) {
     trade = &curr->trade;
-    n = fprintf((FILE*)f->file, "%8s %5.3lf %-8c %6d %8.1lf %-8s %8.2lf %12d %10.2lf %10.3lf %12.2lf %10.2lf\n",
+    n = fprintf((FILE*)f->file, "%8s %5.3lf %-8c %6d %8.1lf %-14s %10.2lf %12d %10.2lf %10.3lf %12.2lf %10.2lf\n",
       trade->date, trade->price, (trade->flags & L_TRADE_FLAG_BUY) ? 'B' : 'S', trade->shares, trade->fee_rate * 10000, trade->strategy,
       curr->trade_cost, curr->total_shares, curr->total_cost, curr->cost_price, curr->market_value, curr->dest_value);
     if (n <= 0) {
@@ -303,17 +313,20 @@ l_commit_trade_entries(l_file* f, l_trade_entry* entry_arr, l_int index_s, l_int
 }
 
 #define L_PROGRAM "etf-trace"
-#define L_MAX_TRADE_ENTRIES 100
+#define L_MAX_TRADE_ENTRIES 1024
 
 static void
 l_process_etf_file(const char* name, l_trade_entry* init_entry, l_file* file)
 {
   l_trade_entry entry_arr[L_MAX_TRADE_ENTRIES + 1];
+  l_trade_entry* cur_entry = 0;
   l_int curidx = 1;
+  l_byte text_line[1024] = {0};
   char cmd[80] = {0};
 
   printf("\n" L_PROGRAM " %s commands:\n", name);
   printf(" add <date> <price> <buy-sell> <shares> <fee-rate> <strategy> - add 20180119 0.999 B 30000 3 VR\n");
+  printf(" regen\n");
   printf(" del\n");
   printf(" commit\n");
   printf(" exit\n");
@@ -324,13 +337,13 @@ l_process_etf_file(const char* name, l_trade_entry* init_entry, l_file* file)
     printf("\n" L_PROGRAM " %s > ", name);
     if (scanf(" %8s", cmd) != 1) {
       printf("Read command failed.\n");
-      break;
+      return;
     }
     if (strcmp(cmd, "add") == 0) {
       if (curidx == L_MAX_TRADE_ENTRIES) {
         printf("Buffer is full, cannot add more items.\n");
       } else {
-        l_trade_entry* cur_entry = entry_arr + curidx;
+        cur_entry = entry_arr + curidx;
         if (l_read_etf_trade(0, &cur_entry->trade)) {
           if (l_trade_entry_build(cur_entry, cur_entry - 1)) {
             curidx += 1;
@@ -339,8 +352,37 @@ l_process_etf_file(const char* name, l_trade_entry* init_entry, l_file* file)
             printf("Build trade entry failed.\n");
           }
         } else {
-          printf("Read input trade failed.\n");
+          printf("Input trade information failed.\n");
         }
+      }
+    } else if (strcmp(cmd, "regen") == 0) {
+      if (curidx > 1) {
+        printf("Please delete new content first.\n");
+      } else {
+        curidx = 1;
+        l_trade_entry_reset(&entry_arr[0]);
+        l_file_rewind(file);
+        while (l_file_read_line(file, text_line, 1024)) {
+          printf(" .. get line %s\n", text_line);
+          if (curidx == L_MAX_TRADE_ENTRIES) {
+            printf("Buffer is full, cannot add more items %d.\n", (int)curidx);
+            return;
+          }
+          cur_entry = entry_arr + curidx;
+          if (!l_read_etf_trade(text_line, &cur_entry->trade)) {
+            printf("Input trade information failed.\n");
+            return;
+          }
+          if (!l_trade_entry_build(cur_entry, cur_entry - 1)) {
+            printf("Build trade entry failed.\n");
+            return;
+          }
+          curidx += 1;
+        }
+        l_display_trade_entries(entry_arr, 1, curidx);
+        l_file_rewind(file);
+        l_commit_trade_entries(file, entry_arr, 1, curidx);
+        return;
       }
     } else if (strcmp(cmd, "del") == 0) {
       if (curidx > 1) {
@@ -365,7 +407,7 @@ l_process_etf_file(const char* name, l_trade_entry* init_entry, l_file* file)
       if (curidx > 1) {
         printf("Please commit the content before exit.\n");
       } else {
-        break;
+        return;
       }
     } else {
       printf("Invalid command '%s'.\n", cmd);
@@ -384,7 +426,7 @@ int main(int argc, char* argv[])
     return 0;
   }
 
-  file = l_file_open_read_append(argv[1]);
+  file = l_file_open_read_write(argv[1]);
   if (l_file_nt_open(&file)) {
     printf("Cannot open file '%s'.\n", argv[1]);
     return 0;
@@ -394,7 +436,7 @@ int main(int argc, char* argv[])
     /* the first line read failed */
     l_trade_entry_reset(&init_entry);
   } else {
-    printf("\nDATE     PRICE BUY-SELL SHARES FEE-RATE STRATEGY COST     TOTAL-SHARES TOTAL-COST COST-PRICE MARKET-VALUE DEST-VALUE\n");
+    printf("\nDATE     PRICE BUY-SELL SHARES FEE-RATE TRADE-STRATEGY TRADE-COST TOTAL-SHARES TOTAL-COST COST-PRICE MARKET-VALUE DEST-VALUE\n");
     printf("%s", text_line);
     while (l_file_read_line(&file, text_line, 1024)) {
       printf("%s", text_line);
