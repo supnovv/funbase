@@ -13,6 +13,7 @@
 
 typedef struct {
   char date[16];
+  int date_n;
   double price;
   int flags;
   int shares;
@@ -35,6 +36,7 @@ static void
 l_etf_trade_reset(l_etf_trade* trade)
 {
   trade->date[0] = 0;
+  trade->date_n = 0;
   trade->price = 0;
   trade->flags = 0;
   trade->shares = 0;
@@ -139,6 +141,7 @@ static l_bool
 l_read_etf_trade(const l_byte* stream, l_etf_trade* trade)
 {
   l_byte buy_or_sell = 0;
+  char* date_char = 0;
   int n = 0;
   
   /* date     price buy-sell shares fee-rate strategy
@@ -159,6 +162,20 @@ l_read_etf_trade(const l_byte* stream, l_etf_trade* trade)
   if (strlen(trade->date) != 8) {
     goto read_fail;
   }
+  if (trade->date[0] <= '0' || trade->date[0] > '9') {
+    goto read_fail;
+  }
+  date_char = trade->date + 1;
+  while (*date_char) {
+    if (*date_char < '0' || *date_char > '9') {
+      goto read_fail;
+    }
+    date_char += 1;
+  }
+  if (sscanf(trade->date, "%d", &trade->date_n) != 1) {
+    goto read_fail;
+  }
+  printf(" .. trade date n %d\n", trade->date_n);
 
   printf(" .. trade price %lf\n", trade->price);
   if (trade->price <= 0) {
