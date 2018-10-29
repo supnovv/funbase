@@ -143,7 +143,7 @@ l_read_etf_trade(const l_byte* stream, l_etf_trade* trade)
   l_byte buy_or_sell = 0;
   char* date_char = 0;
   int n = 0;
-  
+
   /* date     price buy-sell shares fee-rate strategy
      20180119 0.999 B        30000  3        VR */
 
@@ -241,7 +241,7 @@ l_read_etf_trade(const l_byte* stream, l_etf_trade* trade)
   } else {
     goto read_fail;
   }
-  
+
   return true;
 
 read_fail:
@@ -329,7 +329,7 @@ l_commit_trade_entries(l_file* f, l_trade_entry* entry_arr, l_int index_s, l_int
   return true;
 }
 
-#define L_PROGRAM "etf-trace"
+#define L_PROGRAM "etftrade"
 #define L_MAX_TRADE_ENTRIES 1024
 
 static void

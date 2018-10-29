@@ -1,36 +1,27 @@
-CC = gcc -std=c99
-CFLAGS = -g -O2
-CWARNS = -Wall -Wextra -Werror -Wno-error=unused-function -Wno-unused-function
-CINCPATH = -I./../../
-CMACRO = -DL_PLAT_LINUX
+LNLY_ROOT := ./../..
 
-CMPL_OPTIONS = $(CFLAGS) $(CWARNS) $(CINCPATH) $(CMACRO)
-CMPL = $(CC) $(CMPL_OPTIONS) -c -o$@
+include $(LNLY_ROOT)/lnxbase.mk
 
-LDFLAGS =
-LDPATH = -L./../../
-LDLIBS = -llnly -llua -lpthread -ldl -lm
-
-LINK_OPTIONS = $(LDFLAGS) $(LDPATH)
-LINK = $(CC) $(LINK_OPTIONS) -o$@
-
-RM = rm -rf
-
-OBJ = .o
-EXE =
-
+CCPATH += -I$(LNLY_ROOT)/
+LDPATH += -L$(LNLY_ROOT)/
+LDLIBS += -llnly -llua -lpthread -ldl -lm
 OUTDIR = .
 
-ETFTRADE_EXE = $(OUTDIR)/etf-trade$(EXE)
-ETFTRADE_OBJ = $(OUTDIR)/etf-trade$(OBJ)
+ETFTRADE_EXE = $(OUTDIR)/etftrade$(EXE)
+ETFTRADE_OBJ = $(OUTDIR)/etftrade$(OBJ)
 ETFTRADE_INC =
 
-default: $(ETFTRADE_EXE)
+default: echo $(ETFTRADE_EXE)
+
+echo:
+	@echo "CCPATH = $(CCPATH)"
+	@echo "LDPATH = $(LDPATH)"
+	@echo "LDLIBS = $(LDLIBS)"
 
 clean:
 	$(RM) $(ETFTRADE_OBJ) $(ETFTRADE_EXE)
 
-.PHONY: default clean
+.PHONY: default echo clean
 
 $(OUTDIR)/%$(OBJ): %.c
 	@echo "$@ <- $? | $(CMPL)"

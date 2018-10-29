@@ -222,6 +222,8 @@ typedef struct {
 } l_worknode;
 
 typedef struct {
+  int argc;
+  char** argv;
 } l_cmdline;
 
 typedef struct l_master {
@@ -735,11 +737,57 @@ l_timertable_free(l_timertable* ttbl)
 /** master init and free **/
 
 static void
-l_parse_cmd_line(l_master* M, int argc, char** argv)
+l_cmdline_init(l_master* M, int argc, char** argv)
 {
-  L_UNUSED(M);
-  L_UNUSED(argc);
-  L_UNUSED(argv);
+  l_cmdline* cmds = M->cmds;
+  cmds->argc = argc;
+  cmds->argv = argv;
+}
+
+#define L_MAX_OPTION_ARGS (64)
+
+typedef struct l_option {
+  const char* optstring; /* "a" no argument, "a:" argument required, "a::" argument optional */
+  const char* longopt;
+  const char* argspec;
+  int appeared_index;
+  l_bool already_read;
+  int num_args;
+  l_strn arg[L_MAX_OPTION_ARGS+1];
+  struct l_option* next;
+} l_option;
+
+L_EXTERN l_option*
+lnlylib_parse_cmdline(int argc, char* const argv[], l_option* option)
+{
+  /** linux <getopt.h> standard rules **
+   @optstring contains the option characters. If such a character is
+   followed by a colon, the option requires an argument. Two colons
+   mean an option takes an optional arg. If optstring contains W
+   followed by a semicolon (W;), the -W foo is treated as the long
+   option --foo. (The -W option is reserved by POSIX.2 for implemenation
+   extensions.)
+   The getopt_long() function works like getopt() except that it also
+   accepts long options, started with two dashes. A long option may take
+   a parameter, of the form --arg=param or --arg param.
+   ---
+   -aSINGLE_ARG
+   -a SINGLE_ARG
+   -a ARG1 ARG2 ARG3 'SINGLE_QUOTED_ARG' "DOUBLE_QUOTED_ARG -a ARG1 ARG2"
+   --arg=SINGLE_ARG
+   --arg SINGLE_ARG
+   --arg ARG1 ARG2 ARG3
+   */
+  l_option* opt_1st = 0;
+  int optidx = 0;
+  int i = 1;
+
+  for (; ;) {
+    while (i < argc) {
+    }
+  }
+
+  return opt_1st;
 }
 
 static lnlylib_env*
@@ -801,7 +849,7 @@ l_master_init(int (*start)(lnlylib_env*), int argc, char** argv)
   main_env->logout = &M->T.logout;
   main_env->alloc = M->T.thrd_alloc;
 
-  l_parse_cmd_line(M, argc, argv);
+  l_cmdline_init(M, argc, argv);
 
   /* init service table */
 
