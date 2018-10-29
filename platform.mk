@@ -35,7 +35,7 @@ PLATS = linux macosx
 CC = gcc -std=c99
 CFLAGS = -g -O2
 CWARNS = -Wall -Wextra -Werror -Wno-error=unused-function -Wno-unused-function
-CINCPATH = -I./
+CCPATH = -I./
 CMACRO =
 
 POSINDEPCODE = -fPIC # position independent code
@@ -68,7 +68,7 @@ SHARED = $(POSINDEPCODE) -dynamiclib -Wl,-undefined,dynamic_lookup -ldl
 CMACRO += -DL_PLAT_MACOSX
 endif
 
-CMPL_OPTIONS = $(CFLAGS) $(CWARNS) $(CINCPATH) $(CMACRO)
+CMPL_OPTIONS = $(CFLAGS) $(CWARNS) $(CCPATH) $(CMACRO)
 CMPL = $(CC) $(CMPL_OPTIONS) -c -o$@
 
 LINK_OPTIONS = $(LDFLAGS) $(LDPATH)
