@@ -222,8 +222,24 @@ typedef struct {
 } l_worknode;
 
 typedef struct {
+  const char* optstring; /* "a" no argument, "a:" argument required, "a::" argument optional */
+  const char* longopt;
+  const char* argspec;
+  int appear_count;
+} l_option;
+
+typedef struct l_option_chain {
+  int argidx;
+  l_strn arg;
+  l_option* opt;
+  int opt_times;
+  struct l_option_chain* next;
+} l_option_chain;
+
+typedef struct {
   int argc;
   char** argv;
+  l_option_chain chain;
 } l_cmdline;
 
 typedef struct l_master {
@@ -739,26 +755,24 @@ l_timertable_free(l_timertable* ttbl)
 static void
 l_cmdline_init(l_master* M, int argc, char** argv)
 {
-  l_cmdline* cmds = M->cmds;
-  cmds->argc = argc;
-  cmds->argv = argv;
+  l_cmdline* cl = M->cmds;
+  l_option_chain* chain = 0;
+
+  cl->argc = argc;
+  cl->argv = argv;
+
+  chain = &cl->chain;
+  l_zero_n(chain, sizeof(l_option_chain));
+
+  if (argc > 0 && argv) {
+    chain->argidx = 0;
+    chain->arg.p = (const l_byte*)argv[0];
+    chain->arg.n = strlen(argv[0]);
+  }
 }
 
-#define L_MAX_OPTION_ARGS (64)
-
-typedef struct l_option {
-  const char* optstring; /* "a" no argument, "a:" argument required, "a::" argument optional */
-  const char* longopt;
-  const char* argspec;
-  int appeared_index;
-  l_bool already_read;
-  int num_args;
-  l_strn arg[L_MAX_OPTION_ARGS+1];
-  struct l_option* next;
-} l_option;
-
-L_EXTERN l_option*
-lnlylib_parse_cmdline(int argc, char* const argv[], l_option* option)
+L_EXTERN l_cmdline*
+lnlylib_parse_cmdline(lnlylib_env* E, l_option* option)
 {
   /** linux <getopt.h> standard rules **
    @optstring contains the option characters. If such a character is
@@ -778,16 +792,18 @@ lnlylib_parse_cmdline(int argc, char* const argv[], l_option* option)
    --arg SINGLE_ARG
    --arg ARG1 ARG2 ARG3
    */
-  l_option* opt_1st = 0;
-  int optidx = 0;
+
+  l_cmdline* cmdline = E->M->cmds;
   int i = 1;
+  (void)option;
 
   for (; ;) {
-    while (i < argc) {
+    while (i < cmdline->argc) {
+      i += 1;
     }
   }
 
-  return opt_1st;
+  return cmdline;
 }
 
 static lnlylib_env*
@@ -1548,10 +1564,18 @@ l_worker_loop(lnlylib_env* E)
 
 /** main function **/
 
-L_EXTERN void
-lnlylib_setup()
+L_EXTERN lnlylib_env*
+lnlylib_setup(int argc, char** argv)
 {
   l_threadlocal_prepare();
+  return l_master_init(0, argc, argv);
+}
+
+L_EXTERN void
+lnlylib_clean(lnlylib_env* main_env)
+{
+  l_master_clean(main_env);
+  l_threadlocal_release();
 }
 
 L_EXTERN int
@@ -1565,10 +1589,9 @@ lnlylib_main(int (*start)(lnlylib_env*), int argc, char** argv)
   l_medit i = 0;
   int exit_code = 0;
 
-  l_threadlocal_prepare();
-
-  main_env = l_master_init(start, argc, argv);
+  main_env = lnlylib_setup(argc, argv);
   M = main_env->M;
+  M->T.start = start;
   conf = M->conf;
 
   l_logm_s(main_env, "master started");
@@ -1595,8 +1618,7 @@ lnlylib_main(int (*start)(lnlylib_env*), int argc, char** argv)
   l_logm_s(main_env, "master exited");
   l_flush_logging(main_env);
 
-  l_master_clean(main_env);
-  l_threadlocal_release();
+  lnlylib_clean(main_env);
   return 0;
 }
 

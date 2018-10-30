@@ -17,7 +17,7 @@ clean:
 do_optunit:
 	$(OPTUNIT_EXE) a b c                  # -> [a] [b] [c]
 	$(OPTUNIT_EXE) -a100 -b200            # -> [-a100] [-b200]
-	$(OPTUNIT_EXE) -a 100 200             # -> [-a] [100] [200]
+	$(OPTUNIT_EXE) -a  100  200           # -> [-a] [100] [200]
 	$(OPTUNIT_EXE) -a' 100 200 '          # -> [-a 100 200 ]
 	$(OPTUNIT_EXE) -b" 200 300 "          # -> [-b 200 300 ]
 	$(OPTUNIT_EXE) --a=10 --b = 20        # -> [--a=10] [--b] [=] [20]
