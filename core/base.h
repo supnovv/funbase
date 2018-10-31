@@ -83,7 +83,9 @@ typedef struct {
 #define l_literal_strn(s) ((l_strn){l_strc("" s), sizeof(s) - 1})
 
 L_EXTERN l_bool l_strn_equal(const l_strn* a, l_strn b);
-L_EXTERN l_bool l_strn_has(const l_strn* a, l_byte c);
+L_EXTERN l_bool l_strn_equal_p(const l_strn* a, const l_strn* b);
+L_EXTERN l_bool l_strn_contains(const l_strn* a, l_byte c);
+L_EXTERN l_int l_strn_find(const l_strn* a, l_byte c); /* < 0 not found, >= 0 found */
 
 L_INLINE l_bool
 l_strn_nt_empty(const l_strn* s)
@@ -800,15 +802,15 @@ typedef struct {
   l_int capacity;
   l_int size;
   l_byte* start;
-} l_stropt;
+} l_strmanip;
 
-L_INLINE l_stropt
-l_get_stropt(void* buffer_start, l_int total_size, l_int cur_size)
+L_INLINE l_strmanip
+l_get_strmanip(void* buffer_start, l_int total_size, l_int cur_size)
 {
-  return (l_stropt){total_size < 0 ? 0 : total_size, cur_size < 0 ? 0 : cur_size, buffer_start};
+  return (l_strmanip){total_size < 0 ? 0 : total_size, cur_size < 0 ? 0 : cur_size, buffer_start};
 }
 
-L_EXTERN l_ostream l_stropt_ostream(l_stropt* b);
+L_EXTERN l_ostream l_strmanip_ostream(l_strmanip* b);
 
 typedef struct {
   l_allocfunc alloc;

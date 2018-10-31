@@ -232,6 +232,7 @@ typedef struct l_option_chain {
   int argidx;
   l_strn arg;
   l_option* opt;
+  l_strn opt_arg;
   int opt_times;
   struct l_option_chain* next;
 } l_option_chain;
@@ -239,7 +240,10 @@ typedef struct l_option_chain {
 typedef struct {
   int argc;
   char** argv;
+  int chain_size;
   l_option_chain chain;
+  l_option_chain* tail;
+  l_option* option;
 } l_cmdline;
 
 typedef struct l_master {
@@ -760,6 +764,7 @@ l_cmdline_init(l_master* M, int argc, char** argv)
 
   cl->argc = argc;
   cl->argv = argv;
+  cl->chain_size = 1;
 
   chain = &cl->chain;
   l_zero_n(chain, sizeof(l_option_chain));
@@ -769,6 +774,109 @@ l_cmdline_init(l_master* M, int argc, char** argv)
     chain->arg.p = (const l_byte*)argv[0];
     chain->arg.n = strlen(argv[0]);
   }
+
+  cl->tail = chain;
+  cl->option = 0;
+}
+
+static void
+l_cmdline_reset(l_cmdline* cmdline)
+{
+  l_option_chain* chain = 0;
+  chain = &cmdline->chain;
+  cmdline->tail = chain;
+  cmdline->option = 0;
+  cmdline->chain_size = 1;
+}
+
+static l_bool
+l_append_option_impl(lnlylib_env* E, l_cmdline* cmdline, l_strn arg, l_option* opt_match, l_strn* opt_arg)
+{
+  l_option_chain* new_opt;
+  l_option_chain* tail = cmdline->tail;
+
+  new_opt = tail->next;
+  if (new_opt == 0) {
+    if (!(new_opt = L_MALLOC_TYPE(E, l_option_chain))) {
+      return false;
+    }
+  }
+
+  l_zero_n(new_opt, sizeof(l_option_chain));
+  new_opt->argidx = ++cmdline->chain_size;
+  new_opt->arg = arg;
+
+  if (opt_match) {
+    new_opt->opt = opt_match;
+    if (opt_arg) {
+      new_opt->opt_arg = *opt_arg;
+    }
+    opt_match->appear_count += 1;
+    new_opt->opt_times = opt_match->appear_count;
+  }
+
+  tail->next = new_opt;
+  tail = new_opt;
+  return true;
+}
+
+static l_bool
+l_append_normal_argument(lnlylib_env* E, l_cmdline* cmdline, l_strn arg)
+{
+  return l_append_option_impl(E, cmdline, arg, 0, 0);
+}
+
+static l_bool
+l_append_short_option(lnlylib_env* E, l_cmdline* cmdline, l_strn arg, l_strn* opt_arg)
+{
+  l_byte opt = 0;
+  l_option* cur_opt = 0;
+  l_option* opt_match = 0;
+
+  opt = arg.p[1];
+  cur_opt = cmdline->option;
+
+  while (cur_opt && cur_opt->optstring) {
+    if (cur_opt->optstring[0] == opt) {
+      opt_match = cur_opt;
+      break;
+    }
+    cur_opt += 1;
+  }
+
+  if (opt_match == 0) {
+    l_loge_1(E, "short option '%c' is not found", lc(opt));
+    return false;
+  }
+
+  return l_append_option_impl(E, cmdline, arg, opt_match, opt_arg);
+}
+
+static l_bool
+l_append_long_option(lnlylib_env* E, l_cmdline* cmdline, l_strn arg, l_strn* opt_arg)
+{
+  l_strn long_opt = l_strn_s(arg.p, 2, arg.n);
+  l_option* cur_opt = 0;
+  l_option* opt_match = 0;
+
+  cur_opt = cmdline->option;
+
+  while (cur_opt && cur_opt->optstring) {
+    if (cur_opt->longopt) {
+      if (l_strn_equal(&long_opt, l_strn_c(cur_opt->longopt))) {
+        opt_match = cur_opt;
+        break;
+      }
+    }
+    cur_opt += 1;
+  }
+
+  if (opt_match == 0) {
+    l_loge_1(E, "long option '%strn' is not found", lstrn(&arg));
+    return false;
+  }
+
+  return l_append_option_impl(E, cmdline, arg, opt_match, opt_arg);
 }
 
 L_EXTERN l_cmdline*
@@ -794,16 +902,59 @@ lnlylib_parse_cmdline(lnlylib_env* E, l_option* option)
    */
 
   l_cmdline* cmdline = E->M->cmds;
-  int i = 1;
-  (void)option;
+  l_strn cur_arg;
+  l_strn opt_arg;
 
-  for (; ;) {
-    while (i < cmdline->argc) {
-      i += 1;
+  int i = 0;
+  int equal_chidx = 0;
+
+  cmdline->option = option;
+
+  for (i = 1; i < cmdline->argc; i += 1) {
+    cur_arg = l_strn_c(cmdline->argv[i]);
+    if (cur_arg.n < 2) {
+      l_append_normal_argument(E, cmdline, cur_arg);
+      continue;
+    }
+    if (cur_arg.p[0] != '-') {
+      l_append_normal_argument(E, cmdline, cur_arg);
+      continue;
+    }
+    if (cur_arg.p[1] == '-') {
+      if (cur_arg.n == 2) {
+        l_append_normal_argument(E, cmdline, cur_arg);
+        continue;
+      }
+      equal_chidx = l_strn_find(&cur_arg, '=');
+      if (equal_chidx < 0) { /* not found */
+        if (!l_append_long_option(E, cmdline, cur_arg, 0)) {
+          goto parse_fail;
+        }
+      } else {
+        opt_arg = l_strn_c(cur_arg.p + equal_chidx + 1);
+        if (!l_append_long_option(E, cmdline, l_strn_s(cur_arg.p, 0, equal_chidx), &opt_arg)) {
+          goto parse_fail;
+        }
+      }
+    } else {
+      if (cur_arg.n == 2) {
+        if (!l_append_short_option(E, cmdline, cur_arg, 0)) {
+          goto parse_fail;
+        }
+      } else {
+        opt_arg = l_strn_c(cur_arg.p + 2);
+        if (!l_append_short_option(E, cmdline, cur_arg, &opt_arg)) {
+          goto parse_fail;
+        }
+      }
     }
   }
 
   return cmdline;
+
+parse_fail:
+  l_cmdline_reset(cmdline);
+  return 0;
 }
 
 static lnlylib_env*
@@ -3754,17 +3905,37 @@ l_copy_n(void* dest, const void* from, l_ulong size)
 L_EXTERN l_bool
 l_strn_equal(const l_strn* a, l_strn b)
 {
-  if (a->n != b.n) {
-    return false;
-  } else {
-    return strncmp((const char*)a->p, (const char*)b.p, b.n) == 0;
-  }
+  return l_strn_equal_p(a, &b);
 }
 
 L_EXTERN l_bool
-l_strn_has(const l_strn* a, l_byte c)
+l_strn_equal_p(const l_strn* a, const l_strn* b)
+{
+  if (a->n != b->n) {
+    return false;
+  }
+
+  return strncmp((const char*)a->p, (const char*)b->p, a->n) == 0;
+}
+
+L_EXTERN l_bool
+l_strn_contains(const l_strn* a, l_byte c)
 {
   return memchr(a->p, c, a->n) != 0;
+}
+
+L_EXTERN l_int
+l_strn_find(const l_strn* a, l_byte c)
+{
+  l_int i = 0;
+  l_int chidx = -1;
+  for (i = 0; i < a->n; i += 1) {
+    if (a->p[i] == c) {
+      chidx = i;
+      break;
+    }
+  }
+  return chidx;
 }
 
 /** debug and logging **/
@@ -4636,7 +4807,7 @@ l_ostream_flush(l_ostream* os)
 static l_int
 l_ostream_stropt_write(void* out, const void* p, l_int len)
 {
-  l_stropt* b = (l_stropt*)out;
+  l_strmanip* b = (l_strmanip*)out;
   if (l_ostream_should_flush(p, len)) {
     return 0;
   } else if (b->size + len < b->capacity) {
@@ -4650,7 +4821,7 @@ l_ostream_stropt_write(void* out, const void* p, l_int len)
 }
 
 L_EXTERN l_ostream
-l_stropt_ostream(l_stropt* b)
+l_strmanip_ostream(l_strmanip* b)
 {
   return l_ostream_from(b, l_ostream_stropt_write);
 }

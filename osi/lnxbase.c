@@ -1090,7 +1090,7 @@ l_sockaddr_init(l_sockaddr* sockaddr, l_strn ip, l_ushort port)
     int retn = 0;
     l_impl_lnxsaddr* sa = (l_impl_lnxsaddr*)sockaddr;
     l_zero_n(sa, sizeof(l_impl_lnxsaddr));
-    if (l_strn_has(&ip, ':')) {
+    if (l_strn_contains(&ip, ':')) {
       retn = inet_pton(AF_INET6, (const char*)ip.p, &(sa->addr.sa6.sin6_addr));
       if (retn == 1) {
         sa->len = sizeof(struct sockaddr_in6);
@@ -1269,8 +1269,8 @@ L_EXTERN l_str_ip
 l_get_string_ip_from(const l_bin_ip* ip)
 {
   l_str_ip s;
-  l_stropt b = l_get_stropt(s.s, sizeof(s), 0);
-  l_ostream os = l_stropt_ostream(&b);
+  l_strmanip b = l_get_strmanip(s.s, sizeof(s), 0);
+  l_ostream os = l_strmanip_ostream(&b);
   switch (ip->type) {
   case L_IPV4_ADDR:
     l_ostream_format_4(&os, "%d.%d.%d.%d", ld(ip->a[0]), ld(ip->a[1]), ld(ip->a[2]), ld(ip->a[3]));
