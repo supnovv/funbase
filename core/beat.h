@@ -4,12 +4,30 @@
 #include "osi/base.h"
 
 typedef struct lnlylib_env lnlylib_env;
-typedef struct l_service l_service;
-typedef struct l_message l_message;
+typedef struct l_cmdline l_cmdline;
 
 L_EXTERN lnlylib_env* lnlylib_setup(int argc, char** argv);
 L_EXTERN void lnlylib_clean(lnlylib_env* main_env);
 L_EXTERN int lnlylib_main(int (*start)(lnlylib_env*), int argc, char** argv);
+
+/* optstring
+ - "a" no argument
+ - "a:" argument required
+ - "a:1d2c8s4s" argument required, need 1 int 2 char 1 max 8-char str 1 max 4-char str
+ - "a::" argument optional
+ - "a::2d" if argument exist, there are 2 int
+ */
+
+typedef struct {
+  const char* optstring;
+  const char* longopt;
+  int appear_count;
+} l_option;
+
+L_EXTERN l_cmdline* lnlylib_parse_cmdline(lnlylib_env* E, l_option* option);
+
+typedef struct l_service l_service;
+typedef struct l_message l_message;
 
 typedef struct l_service_access_point {
   l_smplnode node;

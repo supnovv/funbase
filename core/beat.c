@@ -221,13 +221,6 @@ typedef struct {
   l_mutex mast_rxlk;
 } l_worknode;
 
-typedef struct {
-  const char* optstring; /* "a" no argument, "a:" argument required, "a::" argument optional */
-  const char* longopt;
-  const char* argspec;
-  int appear_count;
-} l_option;
-
 typedef struct l_option_chain {
   int argidx;
   l_strn arg;
@@ -237,7 +230,7 @@ typedef struct l_option_chain {
   struct l_option_chain* next;
 } l_option_chain;
 
-typedef struct {
+typedef struct l_cmdline {
   int argc;
   char** argv;
   int chain_size;
