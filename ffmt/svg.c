@@ -18,34 +18,25 @@
 */
 
 typedef struct {
-  l_strn name;
-  l_int value;
-} l_iattr;
-
-typedef struct {
-  l_strn name;
-  double value;
-} l_fattr;
-
-typedef struct {
-  l_strn name;
-  l_strn value;
-} l_sattr;
-
-typedef struct {
-  l_int tag;
+  l_treenode node;
   l_string id;
-  l_string cl;
-} l_tag;
+  l_string class_list;
+} l_docnode;
 
 typedef struct {
-  l_tag head;
-  l_iattr w;
-  l_iattr h;
+  l_docnode head;
+  double w;
+  double h;
+  double view_minX;
+  double view_minY;
+  double view_width;
+  double view_height;
+  l_string title;
+  l_string desc;
 } l_svg;
 
 typedef struct {
-  l_tag head;
+  l_docnode head;
   l_string title;
   l_string desc;
 } l_group;

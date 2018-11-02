@@ -8,6 +8,7 @@ extern "C" {
 #include "core/lapi.h"
 #include "core/beat.h"
 #include "core/match.h"
+#include "core/tree.h"
 #include "osi/base.h"
 
 #ifdef __cplusplus
