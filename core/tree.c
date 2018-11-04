@@ -5,7 +5,7 @@ L_EXTERN void
 l_treenode_init(l_treenode* node, l_uint ud)
 {
   l_zero_n(node, sizeof(l_treenode));
-  node->node_ud = ud;
+  node->ud = ud;
 }
 
 L_EXTERN l_bool

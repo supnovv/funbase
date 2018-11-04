@@ -91,6 +91,7 @@ AUTOINCS = core/prefix.h
 
 COREOBJS = $(OUTDIR)/core/lapi$(OBJ) \
            $(OUTDIR)/core/beat$(OBJ) \
+           $(OUTDIR)/core/string$(OBJ) \
            $(OUTDIR)/core/match$(OBJ) \
            $(OUTDIR)/core/tree$(OBJ)
 
@@ -99,6 +100,7 @@ COREINCS = autoconf.h \
            core/base.h \
            core/lapi.h \
            core/beat.h \
+           core/string.h \
            core/match.h \
            core/tree.h
 

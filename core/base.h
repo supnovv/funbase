@@ -289,7 +289,10 @@ L_EXTERN l_int l_bit_pos_of_power_of_two(l_ulong x); /* x should > 0 and be 2^n,
 #define L_MALLOC_TYPE_N(E, type, n) (type*)l_malloc((E), sizeof(type) * (n))
 
 typedef void* (*l_allocfunc)(void* ud, void* p, l_ulong oldsz, l_ulong newsz);
+
 L_EXTERN l_allocfunc l_alloc_func; /* note the allocated memory is not initialized */
+L_EXTERN l_allocfunc l_get_allocfunc(l_int alloc_type);
+
 L_EXTERN l_bool l_zero_n(void* p, l_ulong size);
 L_EXTERN l_ulong l_copy_n(void* dest, const void* from, l_ulong size);
 
@@ -811,59 +814,6 @@ l_get_strmanip(void* buffer_start, l_int total_size, l_int cur_size)
 }
 
 L_EXTERN l_ostream l_strmanip_ostream(l_strmanip* b);
-
-typedef struct {
-  l_allocfunc alloc;
-  l_int implsz;
-  l_int impltt;
-  l_byte* lnstr;
-} l_string;
-
-L_EXTERN l_string l_string_init(l_allocfunc alloc, l_int size);
-L_EXTERN l_string l_string_init_from(l_allocfunc alloc, l_int size, l_strn from);
-L_EXTERN l_ostream l_string_ostream(l_string* s);
-L_EXTERN l_int l_string_capacity(l_string* s);
-L_EXTERN l_int l_string_write(l_string* s, l_strn from);
-L_EXTERN l_int l_string_reset(l_string* s, l_strn from);
-L_EXTERN void l_string_clear(l_string* s);
-
-L_INLINE l_byte*
-l_string_strc(l_string* s)
-{
-  if (s->implsz <= 0) {
-    return (l_byte*)&s->impltt;
-  } else {
-    return s->lnstr;
-  }
-}
-
-L_INLINE l_int
-l_string_size(l_string* s)
-{
-  if (s->implsz <= 0) {
-    return -s->implsz;
-  } else {
-    return s->implsz;
-  }
-}
-
-L_INLINE l_strn
-l_string_strn(l_string* s)
-{
-  return l_strn_l(l_string_strc(s), l_string_size(s));
-}
-
-L_INLINE l_bool
-l_string_is_empty(l_string* s)
-{
-  return s->implsz == 0;
-}
-
-L_INLINE l_bool
-l_string_nt_empty(l_string* s)
-{
-  return s->implsz != 0;
-}
 
 typedef struct {
   void* file;

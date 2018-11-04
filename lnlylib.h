@@ -3,16 +3,15 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
 #include "core/base.h"
 #include "core/lapi.h"
 #include "core/beat.h"
 #include "core/match.h"
 #include "core/tree.h"
 #include "osi/base.h"
-
 #ifdef __cplusplus
 }
 #endif
+#include "core/string.h"
 #endif /* L_LNLYLIB_H */
 

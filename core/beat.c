@@ -3858,6 +3858,23 @@ l_rawalloc_func(void* ud, void* p, l_ulong oldsz, l_ulong newsz)
 
 l_allocfunc l_alloc_func = l_rawalloc_func;
 
+#define L_MAX_ALLOC_METHODS (16)
+
+static l_allocfunc
+l_alloc_method_tower[L_MAX_ALLOC_METHODS] = {
+  l_rawalloc_func
+};
+
+L_EXTERN l_allocfunc
+l_get_allocfunc(l_int alloc_type)
+{
+  if (alloc_type >= 0 && alloc_type < L_MAX_ALLOC_METHODS) {
+    return l_alloc_method_tower[alloc_type];
+  } else {
+    return 0;
+  }
+}
+
 L_EXTERN l_bool
 l_zero_n(void* p, l_ulong size)
 {
@@ -5261,153 +5278,6 @@ l_sbuf8k_init_from(l_sbuf8k* b, l_strn s)
   l_strbuf* p = l_sbuf8k_init(b);
   l_strbuf_write(p, s);
   return p;
-}
-
-/** variable length string **/
-
-#define L_STRING_FIXLEN_CAP (2 * sizeof(void*) - 1)
-
-L_EXTERN l_int
-l_string_capacity(l_string* s)
-{
-  if (s->implsz <= 0) {
-    return L_STRING_FIXLEN_CAP;
-  } else {
-    return s->impltt;
-  }
-}
-
-L_EXTERN l_string
-l_string_init(l_allocfunc alloc, l_int size)
-{
-  l_string s = {l_rawalloc_func, 0, 0, 0};
-  if (alloc) {
-    s.alloc = alloc;
-  }
-  if (size > (l_int)L_STRING_FIXLEN_CAP) {
-    l_byte* newp = 0;
-    l_int capacity = (L_STRING_FIXLEN_CAP + 1) * 2 - 1;
-    if (size > capacity) {
-      capacity = size;
-    }
-    newp = s.alloc(0, 0, 0, capacity + 1);
-    newp[0] = 0;
-    s.implsz = 0;
-    s.impltt = capacity;
-    s.lnstr = newp;
-  }
-  return s;
-}
-
-static l_int
-l_impl_string_write(void* out, const void* p, l_int len)
-{
-  l_string* s = (l_string*)out;
-  if (p == 0 || len <= 0) {
-    return 0;
-  } else {
-    l_int size = s->implsz;
-    l_byte* oldp = l_string_strc(s);
-    if (size <= 0) {
-      size = -size;
-      if (size + len <= (l_int)L_STRING_FIXLEN_CAP) {
-        l_copy_n(oldp + size, p, len);
-        size += len;
-        oldp[size] = 0;
-        s->implsz = -size;
-      } else {
-        l_byte* newp = 0;
-        l_int capacity = (L_STRING_FIXLEN_CAP + 1) * 2 - 1;
-        if (size + len > capacity) {
-          capacity = size + len;
-        }
-        newp = s->alloc(0, 0, 0, capacity + 1);
-        l_copy_n(newp, oldp, size);
-        l_copy_n(newp + size, p, len);
-        size += len;
-        newp[size] = 0;
-        s->implsz = size;
-        s->impltt = capacity;
-        s->lnstr = newp;
-      }
-    } else {
-      if (size + len <= s->impltt) {
-        l_copy_n(oldp + size, p, len);
-        size += len;
-        oldp[size] = 0;
-        s->implsz = size;
-      } else {
-        l_byte* newp = 0;
-        l_int capacity = (s->impltt + 1) * 2 - 1;
-        if (size + len > capacity) {
-          capacity = size + len;
-        }
-        if (capacity <= s->impltt) {
-          l_loge_1(LNUL, "string is too long %d", ld(s->impltt));
-          return 0;
-        }
-        newp = s->alloc(0, oldp, 0, capacity + 1);
-        l_copy_n(newp + size, p, len);
-        size += len;
-        newp[size] = 0;
-        s->implsz = size;
-        s->impltt = capacity;
-        s->lnstr = newp;
-      }
-    }
-    return len;
-  }
-}
-
-static l_int
-l_ostream_string_write(void* out, const void* p, l_int len)
-{
-  if (l_ostream_should_flush(p, len)) {
-    return 0;
-  } else {
-    return l_impl_string_write(out, p, len);
-  }
-}
-
-L_EXTERN l_ostream
-l_string_ostream(l_string* s)
-{
-  return l_ostream_from(s, l_ostream_string_write);
-}
-
-L_EXTERN l_int
-l_string_write(l_string* s, l_strn from)
-{
-  return l_impl_string_write(s, from.p, from.n);
-}
-
-L_EXTERN l_string
-l_string_init_from(l_allocfunc alloc, l_int size, l_strn from)
-{
-  l_string s = l_string_init(alloc, size);
-  l_string_write(&s, from);
-  return s;
-}
-
-L_EXTERN void
-l_string_clear(l_string* s)
-{
-  if (s->implsz <= 0) {
-    *s = l_string_init(s->alloc, 0);
-  } else {
-    if (s->lnstr) {
-      s->alloc(0, s->lnstr, 0, 0);
-      s->lnstr = 0;
-    }
-    *s = l_string_init(s->alloc, 0);
-  }
-}
-
-L_EXTERN l_int
-l_string_reset(l_string* s, l_strn from)
-{
-  l_string_clear(s);
-  return l_string_write(s, from);
 }
 
 /** standard file stream **/
