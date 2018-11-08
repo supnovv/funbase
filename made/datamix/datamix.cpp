@@ -98,7 +98,7 @@ int main(int argc, char** argv) {
   l_datafrag fragment;
   l_file file;
   int i = 0;
-  
+
   char file_type[8] = {0};
   char file_name[L_MAX_FILENAME_LEN+1];
   char cmd[16] = {0};
