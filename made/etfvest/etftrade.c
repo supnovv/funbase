@@ -276,6 +276,10 @@ l_read_trade_entry(const l_byte* stream, l_trade_entry* entry)
     }
 
     printf(" .. total cost %lf\n", entry->total_cost);
+    if (entry->total_cost == 0) {
+      return false;
+    }
+
     printf(" .. cost price %lf\n", entry->cost_price);
     printf(" .. market value %lf\n", entry->market_value);
     printf(" .. dest value %lf\n", entry->dest_value);
@@ -294,6 +298,7 @@ l_display_trade_entries(l_trade_entry* entry_arr, l_int index_s, l_int index_e)
   l_trade_entry* curr = entry_arr + index_s;
   l_trade_entry* entry_e = entry_arr + index_e;
   l_etf_trade* trade = 0;
+  double earns = 0;
 
   /* date     price buy-sell shares fee-rate strategy cost     total-shares total-cost cost-price market-value dest-value
      20180119 0.999 B        30000  3        VR       29978.99 30000        29978.99   0.999      29970.00     31000 */
@@ -302,9 +307,10 @@ l_display_trade_entries(l_trade_entry* entry_arr, l_int index_s, l_int index_e)
 
   for (; curr < entry_e; curr += 1) {
     trade = &curr->trade;
-    printf("%8s %5.3lf %-8c %6d %8.1lf %-14s %10.2lf %12d %10.2lf %10.3lf %12.2lf %10.2lf\n",
+    earns = curr->market_value - curr->total_cost;
+    printf("%8s %5.3lf %-8c %6d %8.1lf %-14s %10.2lf %12d %10.2lf %10.3lf %12.2lf %10.2lf %+8.3lf%% %+.2lf\n",
       trade->date, trade->price, (trade->flags & L_TRADE_FLAG_BUY) ? 'B' : 'S', trade->shares, trade->fee_rate * 10000, trade->strategy,
-      curr->trade_cost, curr->total_shares, curr->total_cost, curr->cost_price, curr->market_value, curr->dest_value);
+      curr->trade_cost, curr->total_shares, curr->total_cost, curr->cost_price, curr->market_value, curr->dest_value, earns * 100 / curr->total_cost, earns);
   }
 }
 
@@ -314,13 +320,15 @@ l_commit_trade_entries(l_file* f, l_trade_entry* entry_arr, l_int index_s, l_int
   l_trade_entry* curr = entry_arr + index_s;
   l_trade_entry* entry_e = entry_arr + index_e;
   l_etf_trade* trade = 0;
+  double earns = 0;
   int n = 0;
 
   for (; curr < entry_e; curr += 1) {
     trade = &curr->trade;
-    n = fprintf((FILE*)f->file, "%8s %5.3lf %-8c %6d %8.1lf %-14s %10.2lf %12d %10.2lf %10.3lf %12.2lf %10.2lf\n",
+    earns = curr->market_value - curr->total_cost;
+    n = fprintf((FILE*)f->file, "%8s %5.3lf %-8c %6d %8.1lf %-14s %10.2lf %12d %10.2lf %10.3lf %12.2lf %10.2lf %+8.3lf%% %+.2lf\n",
       trade->date, trade->price, (trade->flags & L_TRADE_FLAG_BUY) ? 'B' : 'S', trade->shares, trade->fee_rate * 10000, trade->strategy,
-      curr->trade_cost, curr->total_shares, curr->total_cost, curr->cost_price, curr->market_value, curr->dest_value);
+      curr->trade_cost, curr->total_shares, curr->total_cost, curr->cost_price, curr->market_value, curr->dest_value, earns * 100 / curr->total_cost, earns);
     if (n <= 0) {
       return false;
     }
@@ -444,7 +452,7 @@ int main(int argc, char* argv[])
   l_trade_entry init_entry;
   l_file file;
 
-  lnlylib_setup();
+  lnlylib_setup(argc, argv);
 
   if (argc < 2) {
     printf("Usage: " L_PROGRAM " filename.etf\n");
