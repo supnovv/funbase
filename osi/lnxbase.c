@@ -793,7 +793,7 @@ l_thrhdl_cancel(l_thrhdl* thrhdl)
 L_EXTERN l_thrhdl
 l_thrhdl_self()
 {
-  l_thrhdl thrhdl;
+  l_thrhdl thrhdl = {0};
   *((pthread_t*)&thrhdl) = pthread_self();
   return thrhdl;
 }

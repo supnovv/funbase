@@ -102,8 +102,8 @@ int main(void)
   l_write_line(file, "#undef LNLYLIB_CLIB_DIR");
   l_write_line(file, "#undef LNLYLIB_LUALIB_DIR");
   l_write_cdir(file, "#define LNLYLIB_HOME_DIR \"%s\"");
-  l_write_line(file, "#define LNLYLIB_CLIB_DIR LNLYLIB_HOME_DIR \"/lib\"");
-  l_write_line(file, "#define LNLYLIB_LUALIB_DIR LNLYLIB_HOME_DIR \"/lib/lua\"%s", L_NEWLINE);
+  l_write_line(file, "#define LNLYLIB_LUACLIB_DIR LNLYLIB_HOME_DIR \"/lualib/c\"");
+  l_write_line(file, "#define LNLYLIB_LUALIB_DIR LNLYLIB_HOME_DIR \"/lualib\"%s", L_NEWLINE);
 
   l_write_line(file, "#undef L_MACH_32_BIT");
   l_write_line(file, "#undef L_MACH_64_BIT");

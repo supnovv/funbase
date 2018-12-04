@@ -14,7 +14,7 @@ L_THREAD_LOCAL
 L_BUILD_SHARED
 LNLYLIB_API_IMPL - shall be defined in lib src file
 LNLYLIB_HOME_DIR - the lnlylib root folder when make
-LNLYLIB_CLIB_DIR - c libraries folder
+LNLYLIB_LUACLIB_DIR - lua c share libraries folder
 LNLYLIB_LUALIB_DIR - lua libraries folder
 L_MACH_32_BIT or L_MACH_64_BIT
 L_LIT_ENDIAN or L_BIG_ENDIAN

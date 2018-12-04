@@ -2642,7 +2642,7 @@ l_master_load_service_module(const void* module)
   l_service_callback* cb = 0;
   l_dynhdl hdl = l_empty_dynlib();
 
-  hdl = l_dynhdl_open2(l_literal_strn(LNLYLIB_CLIB_DIR), module_name); /* TODO: 1. do module cache? 2. multiple service can exist in one module */
+  hdl = l_dynhdl_open2(l_literal_strn(LNLYLIB_LUACLIB_DIR), module_name); /* TODO: 1. do module cache? 2. multiple service can exist in one module */
   if (l_dynhdl_is_empty(&hdl)) {
     l_loge_1(LNUL, "open library %strn failed", lstrn(&module_name));
     return 0;
