@@ -5,37 +5,39 @@
 
 #define GAIN_TBL_SIZE 16
 static int8_t RF_RX_HWGAIN_TBL[GAIN_TBL_SIZE][3] = {
-    [0][0] =  (-21), [0][1] = (-27), [0][2] = (-19),
-    [1][0] =  (-18), [1][1] = (-24), [1][2] = (-13),
-    [2][0] =  (-15), [2][1] = (-21), [2][2] = (-10),
-    [3][0] =  (-12), [3][1] = (-18), [3][2] = (-10),
-    [4][0] =  (-9),  [4][1] = (-15), [4][2] = (-10),
-    [5][0] =  (-6),  [5][1] = (-12), [5][2] = (-10),
-    [6][0] =  (-3),  [6][1] = (-9),  [6][2] = (-10),
-    [7][0] =  0,     [7][1] = (-6),  [7][2] = 0,
+    [0][0] =  (-25), [0][1] = (-27), [0][2] = (-21),
+    [1][0] =  (-19), [1][1] = (-24), [1][2] = (-18),
+    [2][0] =  (-13), [2][1] = (-21), [2][2] = (-15),
+    [3][0] =  (-6), [3][1] = (-18), [3][2] = (-12),
+    [4][0] =  (0),  [4][1] = (-15), [4][2] = (-9),
+    [5][0] =  0x7f,  [5][1] = (-12), [5][2] = (-6),
+    [6][0] =  0x7f,  [6][1] = (-9),  [6][2] = (-3),
+    [7][0] =  0x7f,  [7][1] = (-6),  [7][2] = 0,
     [8][0] =  0x7f,  [8][1] = (-3),  [8][2] = 0x7f,
     [9][0] =  0x7f , [9][1] = 0 ,    [9][2] = 0x7f,
     [10][0] = 0x7f, [10][1] = 0x7f, [10][2] = 0x7f,
     [11][0] = 0x7f, [11][1] = 0x7f, [11][2] = 0x7f,
     [12][0] = 0x7f, [12][1] = 0x7f, [12][2] = 0x7f,
     [13][0] = 0x7f, [13][1] = 0x7f, [13][2] = 0x7f,
-    [14][0] = 0x7f, [14][1] = 0x7f, [14][2] = 0x7f
+    [14][0] = 0x7f, [14][1] = 0x7f, [14][2] = 0x7f,
+    [15][0] = 0x7f, [15][1] = 0x7f, [15][2] = 0x7f
 };
 
 static int8_t
 rf_rssi_convert(uint32_t rssi_reg)
 {
-    int8_t RssidBm = 0, GRx;
-    int16_t PowerModem;
-    PowerModem = (rssi_reg & 0xFC00) >> 10;
-    GRx = 72+RF_RX_HWGAIN_TBL[rssi_reg & 0x7][0]+RF_RX_HWGAIN_TBL[(rssi_reg>>3) & 0xf][1]+RF_RX_HWGAIN_TBL[(rssi_reg>> 7)& 0x7][2];
-    RssidBm=PowerModem-GRx;
-    return (RssidBm);
+    int8_t PowerModem = (rssi_reg & 0xFC00) >> 10;
+    int8_t GRx = 72 + RF_RX_HWGAIN_TBL[rssi_reg & 0x7][2] +
+	              RF_RX_HWGAIN_TBL[(rssi_reg>>3) & 0xf][1] +
+		      RF_RX_HWGAIN_TBL[(rssi_reg>> 7)& 0x7][0];
+    int8_t rssidbm = PowerModem - GRx;
+    rssidbm -= (rssidbm < 7 ? 46 : 47);
+    return rssidbm;
 }
 
 static uint32_t
 get_raw_rssi(uint32_t bt_rxchass, uint32_t bt_rxhwagc) {
-  return ((bt_rxchass & 0xFF) << 10) | bt_rxhwagc;
+  return ((bt_rxchass & 0xFF) << 10) | (bt_rxhwagc & 0x3FF);
 }
 
 static int8_t
