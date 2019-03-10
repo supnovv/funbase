@@ -121,7 +121,7 @@ l_trade_entry_build(l_trade_entry* curr, l_trade_entry* prev)
   if (trade->flags & L_TRADE_FLAG_DT) {
     curr->dest_value = prev->dest_value + curr->trade_cost;
   } else if (trade->flags & L_TRADE_FLAG_VR) {
-    curr->dest_value = l_double_round(curr->market_value * 1.03, 2);
+    curr->dest_value = l_double_round(curr->market_value * 1.0375, 2);
   } else if (trade->flags & L_TRADE_FLAG_VT) {
     curr->dest_value = (curr->market_value > prev->dest_value ? curr->market_value : prev->dest_value);
   } else if (trade->flags & L_TRADE_FLAG_CB) {
@@ -308,9 +308,10 @@ l_display_trade_entries(l_trade_entry* entry_arr, l_int index_s, l_int index_e)
   for (; curr < entry_e; curr += 1) {
     trade = &curr->trade;
     earns = curr->market_value - curr->total_cost;
-    printf("%8s %5.3lf %-8c %6d %8.1lf %-14s %10.2lf %12d %10.2lf %10.3lf %12.2lf %10.2lf %+8.3lf%% %+.2lf\n",
+    printf("%8s %5.3lf %-8c %6d %8.1lf %-14s %10.2lf %12d %10.2lf %10.3lf %12.2lf %10.2lf %+8.3lf%% %+10.2lf  %5.3lf->%5.3lf\n",
       trade->date, trade->price, (trade->flags & L_TRADE_FLAG_BUY) ? 'B' : 'S', trade->shares, trade->fee_rate * 10000, trade->strategy,
-      curr->trade_cost, curr->total_shares, curr->total_cost, curr->cost_price, curr->market_value, curr->dest_value, earns * 100 / curr->total_cost, earns);
+      curr->trade_cost, curr->total_shares, curr->total_cost, curr->cost_price, curr->market_value, curr->dest_value, earns * 100 / curr->total_cost,
+      earns, trade->price * (1.0375 - 0.15), trade->price * (1.0375 + 0.20));
   }
 }
 
@@ -326,9 +327,10 @@ l_commit_trade_entries(l_file* f, l_trade_entry* entry_arr, l_int index_s, l_int
   for (; curr < entry_e; curr += 1) {
     trade = &curr->trade;
     earns = curr->market_value - curr->total_cost;
-    n = fprintf((FILE*)f->file, "%8s %5.3lf %-8c %6d %8.1lf %-14s %10.2lf %12d %10.2lf %10.3lf %12.2lf %10.2lf %+8.3lf%% %+.2lf\n",
+    n = fprintf((FILE*)f->file, "%8s %5.3lf %-8c %6d %8.1lf %-14s %10.2lf %12d %10.2lf %10.3lf %12.2lf %10.2lf %+8.3lf%% %+10.2lf  %5.3lf->%5.3lf\n",
       trade->date, trade->price, (trade->flags & L_TRADE_FLAG_BUY) ? 'B' : 'S', trade->shares, trade->fee_rate * 10000, trade->strategy,
-      curr->trade_cost, curr->total_shares, curr->total_cost, curr->cost_price, curr->market_value, curr->dest_value, earns * 100 / curr->total_cost, earns);
+      curr->trade_cost, curr->total_shares, curr->total_cost, curr->cost_price, curr->market_value, curr->dest_value, earns * 100 / curr->total_cost,
+      earns, trade->price * (1.0375 - 0.15), trade->price * (1.0375 + 0.20));
     if (n <= 0) {
       return false;
     }
